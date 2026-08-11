@@ -20,7 +20,7 @@ const { ROLES, ORDER_STATUS } = require('./config/constants');
 const PASSWORD = 'password123';
 
 const USERS = [
-  { name: 'Amina Rashid', email: 'admin@simplecrm.test', role: ROLES.ADMIN },
+  { name: 'Ayyan', email: 'admin@simplecrm.test', role: ROLES.ADMIN },
   { name: 'Bilal Ahmed', email: 'manager@simplecrm.test', role: ROLES.MANAGER },
   { name: 'Sara Iqbal', email: 'sara@simplecrm.test', role: ROLES.SALES_REP },
   { name: 'Omar Farooq', email: 'omar@simplecrm.test', role: ROLES.SALES_REP },
