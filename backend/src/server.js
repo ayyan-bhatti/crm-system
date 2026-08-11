@@ -9,7 +9,17 @@ const env = require('./config/env');
 const { connectDB } = require('./config/db');
 
 async function start() {
-  await connectDB();
+  // connectDB throws rather than exiting, so that the serverless path can turn
+  // a database outage into a 503. Here — a long-running server that cannot
+  // reach its database is not useful — we fail fast and let the process
+  // manager restart us.
+  try {
+    await connectDB();
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error(`[db] MongoDB connection failed: ${err.message}`);
+    process.exit(1);
+  }
 
   const server = app.listen(env.port, () => {
     // eslint-disable-next-line no-console

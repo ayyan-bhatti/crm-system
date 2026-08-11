@@ -18,6 +18,7 @@ Mongoose · JWT auth with bcrypt · Jest + Supertest with an in-memory MongoDB.
 - [How AI search works](#how-ai-search-works)
 - [Order stock rules](#order-stock-rules)
 - [Design system](#design-system)
+- [Deploying to Vercel](#deploying-to-vercel)
 - [Testing](#testing)
 - [Design decisions](#design-decisions)
 - [Known limitations](#known-limitations)
@@ -471,6 +472,85 @@ Which form carries which job:
 lazy-loaded at the route boundary. Without that, every visitor downloads the charting
 library before they can type a password. The initial bundle is ~302 kB (99 kB gzipped);
 the 419 kB chart chunk arrives only when the dashboard does.
+
+## Deploying to Vercel
+
+Both halves deploy as a **single Vercel project** using [Vercel Services](https://vercel.com/docs/services),
+sharing one domain. `vercel.json` at the repo root defines them:
+
+```json
+{
+  "services": {
+    "frontend": { "root": "frontend/", "framework": "vite" },
+    "backend":  { "root": "backend/",  "framework": "express", "entrypoint": "src/app.js" }
+  },
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": { "service": "backend" } },
+    { "source": "/(.*)",     "destination": { "service": "frontend" } }
+  ]
+}
+```
+
+Two details make this work:
+
+- **Services are internal by default.** Neither receives public traffic until a top-level
+  rewrite targets it — the two rewrites are what expose them. Order matters: the `/api`
+  rule must come first, or the catch-all would swallow it.
+- **The service receives the original path.** `/api/customers` arrives at the backend as
+  `/api/customers`, not `/customers`, which is exactly how the Express routes are already
+  mounted. Nothing needs rewriting.
+
+Because the frontend and API share an origin, `VITE_API_URL` stays unset — the client's
+default relative `/api` is correct in production, and CORS never enters the picture.
+
+### Required environment variables
+
+Set these in **Project → Settings → Environment Variables**:
+
+| Variable | Value |
+| --- | --- |
+| `MONGO_URI` | A MongoDB Atlas connection string. Local MongoDB is unreachable from Vercel. |
+| `JWT_SECRET` | A long random string — `node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"` |
+| `NODE_ENV` | `production` |
+| `ANTHROPIC_API_KEY` | Optional. Without it, AI search falls back to keyword search. |
+
+In Atlas, allow Vercel's egress under **Network Access** (`0.0.0.0/0` for a quick start;
+tighten it for anything real).
+
+### What had to change for serverless
+
+A long-running server and a serverless function have different lifecycles, and two
+assumptions in the original code did not survive the move:
+
+- **Connection reuse.** `config/db.js` now caches the connection promise. A cold instance
+  opens one connection and reuses it across every request it serves; concurrent requests
+  during startup await the same promise instead of racing to open their own. Calling
+  `mongoose.connect()` per request would exhaust Atlas's connection limit in minutes.
+- **No `process.exit` on a failed connection.** `connectDB()` throws instead. A serverless
+  function that exits takes its whole instance down, turning a recoverable database blip
+  into an outage; `server.js` still exits on failure, because a local server that cannot
+  reach its database is useless.
+
+`middleware/ensureDb.js` bridges the two: on a long-running server it is a no-op (the
+connection already exists), and on serverless it opens the connection on the first request
+into a cold instance. `/api/health` is registered *before* it deliberately, so it answers
+even when the database is down and reports `"database": "connected" | "disconnected"` —
+a health check that fails for the same reason as everything else tells you nothing.
+
+`.vercelignore` keeps `backend/tests` out of the bundle, since they pull in
+`mongodb-memory-server`, which downloads a real MongoDB binary.
+
+### Deploy
+
+```bash
+npm i -g vercel
+vercel          # preview
+vercel --prod   # production
+```
+
+Or connect the Git repository at [vercel.com/new](https://vercel.com/new) — the root
+`vercel.json` is picked up automatically. Verify with `/api/health` before anything else:
+it confirms the backend service is routed and whether it reached the database.
 
 ## Testing
 

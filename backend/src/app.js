@@ -1,9 +1,11 @@
 const express = require('express');
 const cors = require('cors');
 const morgan = require('morgan');
+const mongoose = require('mongoose');
 
 const env = require('./config/env');
 const { notFound, errorHandler } = require('./middleware/errorHandler');
+const ensureDb = require('./middleware/ensureDb');
 
 const authRoutes = require('./routes/authRoutes');
 const userRoutes = require('./routes/userRoutes');
@@ -16,9 +18,17 @@ const aiSearchRoutes = require('./routes/aiSearchRoutes');
 /**
  * The Express application.
  *
- * This module builds and exports the app but never listens on a port and never
- * connects to a database. src/server.js does both for real runs; the test suite
- * imports this file and points it at an in-memory MongoDB instead.
+ * This module builds and exports the app but never listens on a port. That one
+ * decision lets the same file serve three runtimes:
+ *
+ *   src/server.js   imports it, connects, and listens        (local / any host)
+ *   tests/          import it and point it at in-memory Mongo (Jest)
+ *   Vercel          imports it directly as the service entrypoint, and wraps
+ *                   the exported app in a Function — see vercel.json
+ *
+ * Because Vercel treats the default export as the whole application, this file
+ * is the deployment entrypoint; anything a request needs must be wired up here
+ * rather than in server.js, which Vercel never runs.
  */
 const app = express();
 
@@ -39,10 +49,29 @@ if (!env.isTest) {
 
 // --- Routes ----------------------------------------------------------------
 
-/** Liveness probe — handy for deployment checks. */
+/**
+ * Liveness probe — handy for deployment checks.
+ *
+ * Deliberately declared BEFORE the database middleware, so it answers even when
+ * the database is unreachable. A health check that fails for the same reason as
+ * everything else tells you nothing about where the problem is.
+ */
 app.get('/api/health', (req, res) => {
-  res.json({ success: true, status: 'ok', environment: env.nodeEnv, timestamp: new Date() });
+  res.json({
+    success: true,
+    status: 'ok',
+    environment: env.nodeEnv,
+    database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
+    timestamp: new Date(),
+  });
 });
+
+/**
+ * Everything below needs the database. On a long-running server this passes
+ * straight through (server.js already connected); on serverless it opens the
+ * connection on the first request into a cold instance. See middleware/ensureDb.
+ */
+app.use(ensureDb);
 
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);

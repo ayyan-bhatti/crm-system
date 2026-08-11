@@ -1,0 +1,16 @@
+# Files that never need to reach a Vercel build.
+#
+# Tests in particular: they pull in mongodb-memory-server, which downloads a
+# real MongoDB binary on first use. That has no place in a deployment bundle.
+
+backend/tests
+**/*.test.js
+
+node_modules
+.env
+.env.*
+!.env.example
+
+coverage
+dist
+*.log
