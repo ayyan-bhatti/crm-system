@@ -9,6 +9,16 @@ const env = require('./config/env');
 const { connectDB } = require('./config/db');
 
 async function start() {
+  // env.js records configuration problems instead of exiting, because exiting
+  // during module load on a serverless platform produces an unreadable crash.
+  // A long-running server has no such constraint, so it fails fast here — the
+  // errors were already printed in detail by config/env.js.
+  if (!env.isConfigValid) {
+    // eslint-disable-next-line no-console
+    console.error('[server] Refusing to start with an invalid configuration (see above).');
+    process.exit(1);
+  }
+
   // connectDB throws rather than exiting, so that the serverless path can turn
   // a database outage into a 503. Here — a long-running server that cannot
   // reach its database is not useful — we fail fast and let the process
