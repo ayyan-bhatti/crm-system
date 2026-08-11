@@ -1,0 +1,24 @@
+# Dependencies
+node_modules/
+
+# Environment files — never commit real secrets. .env.example IS committed.
+.env
+.env.local
+.env.*.local
+
+# Build output
+dist/
+build/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Test / coverage output
+coverage/
+
+# Editor / OS noise
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

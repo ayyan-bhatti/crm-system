@@ -1,0 +1,169 @@
+import { card, btnSecondary, input, label as labelClass, STATUS_STYLES, humanize } from '../ui';
+
+/**
+ * The small presentational pieces used across every screen.
+ *
+ * They share a file because each is only a few lines — splitting them into
+ * eight files would add navigation cost without adding clarity.
+ */
+
+/** Loading indicator. `full` centres it in the page for first loads. */
+export function Spinner({ full = false }) {
+  const dot = (
+    <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-rule border-t-brand" />
+  );
+
+  if (!full) return dot;
+
+  return (
+    <div className="flex min-h-64 items-center justify-center" role="status" aria-label="Loading">
+      {dot}
+    </div>
+  );
+}
+
+/**
+ * A placeholder shaped like the content it replaces, so the layout does not
+ * jump when data lands.
+ */
+export function Skeleton({ className = '' }) {
+  return <div className={`animate-pulse rounded-md bg-neutral-wash ${className}`} />;
+}
+
+/** Red banner for a failed request. Renders nothing when there is no message. */
+export function ErrorBanner({ message, onDismiss }) {
+  if (!message) return null;
+
+  return (
+    <div className="mb-4 flex items-start justify-between gap-3 rounded-lg border border-critical/25 bg-critical-wash px-4 py-3 text-sm text-critical-ink">
+      <span className="flex items-start gap-2">
+        {/* Icon + text, so the meaning never rests on the colour alone. */}
+        <svg viewBox="0 0 20 20" className="mt-0.5 h-4 w-4 shrink-0 fill-current" aria-hidden="true">
+          <path d="M10 2a8 8 0 100 16 8 8 0 000-16zm0 4a1 1 0 011 1v4a1 1 0 11-2 0V7a1 1 0 011-1zm0 9a1.1 1.1 0 110-2.2 1.1 1.1 0 010 2.2z" />
+        </svg>
+        {message}
+      </span>
+      {onDismiss && (
+        <button type="button" onClick={onDismiss} className="font-medium hover:underline">
+          Dismiss
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** Green banner for a successful action. */
+export function SuccessBanner({ message }) {
+  if (!message) return null;
+
+  return (
+    <div className="mb-4 flex items-center gap-2 rounded-lg border border-good/25 bg-good-wash px-4 py-3 text-sm text-good-ink">
+      <svg viewBox="0 0 20 20" className="h-4 w-4 shrink-0 fill-current" aria-hidden="true">
+        <path d="M10 2a8 8 0 100 16 8 8 0 000-16zm4 6.2l-4.7 4.7a1 1 0 01-1.42 0L6 11.02l1.42-1.42 1.17 1.18 4-4L14 8.2z" />
+      </svg>
+      {message}
+    </div>
+  );
+}
+
+/** Shown in place of a table when a query returns nothing. */
+export function EmptyState({ title = 'Nothing here yet', hint, action }) {
+  return (
+    <div className="px-4 py-14 text-center">
+      <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-neutral-wash">
+        <svg viewBox="0 0 20 20" className="h-5 w-5 fill-muted" aria-hidden="true">
+          <path d="M9 2a7 7 0 105.2 11.66l3.07 3.07a1 1 0 001.42-1.42l-3.07-3.07A7 7 0 009 2zm0 2a5 5 0 110 10A5 5 0 019 4z" />
+        </svg>
+      </div>
+      <p className="text-sm font-semibold text-ink">{title}</p>
+      {hint && <p className="mt-1 text-sm text-ink-2">{hint}</p>}
+      {action && <div className="mt-4">{action}</div>}
+    </div>
+  );
+}
+
+/** Coloured pill for an enum value (customer status, order status, user role). */
+export function StatusBadge({ value }) {
+  if (!value) return <span className="text-muted">—</span>;
+
+  const style = STATUS_STYLES[value] || 'bg-neutral-wash text-neutral-ink';
+
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${style}`}
+    >
+      {/* A dot plus the word: identity is never colour-only. */}
+      <span className="h-1.5 w-1.5 rounded-full bg-current opacity-70" />
+      {humanize(value)}
+    </span>
+  );
+}
+
+/** Page heading with an optional action on the right. */
+export function PageHeader({ title, subtitle, action }) {
+  return (
+    <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight text-ink">{title}</h1>
+        {subtitle && <p className="mt-1 text-sm text-ink-2">{subtitle}</p>}
+      </div>
+      {action}
+    </div>
+  );
+}
+
+/** A labelled form control. `children` lets a caller swap in a select or textarea. */
+export function Field({ label, error, children, hint, ...inputProps }) {
+  return (
+    <div>
+      <label className={labelClass}>{label}</label>
+      {children || <input className={input} {...inputProps} />}
+      {hint && !error && <p className="mt-1.5 text-xs text-muted">{hint}</p>}
+      {error && <p className="mt-1.5 text-xs text-critical-ink">{error}</p>}
+    </div>
+  );
+}
+
+/** Card wrapper used by every list and detail panel. */
+export function Card({ children, className = '' }) {
+  return <div className={`${card} ${className}`}>{children}</div>;
+}
+
+/**
+ * Pagination footer.
+ *
+ * Deliberately just prev/next plus a position readout: page-number buttons look
+ * nice but add real complexity (ellipsis logic, window sizing) for a CRM list
+ * people mostly filter rather than page through.
+ */
+export function Pagination({ page, pages, total, onChange }) {
+  if (!total) return null;
+
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 border-t border-hairline px-4 py-3">
+      <p className="text-sm text-muted">
+        Page <span className="font-medium text-ink-2">{page}</span> of {pages} ·{' '}
+        <span className="font-medium text-ink-2">{total}</span>{' '}
+        {total === 1 ? 'result' : 'results'}
+      </p>
+      <div className="flex gap-2">
+        <button
+          type="button"
+          className={btnSecondary}
+          disabled={page <= 1}
+          onClick={() => onChange(page - 1)}
+        >
+          Previous
+        </button>
+        <button
+          type="button"
+          className={btnSecondary}
+          disabled={page >= pages}
+          onClick={() => onChange(page + 1)}
+        >
+          Next
+        </button>
+      </div>
+    </div>
+  );
+}

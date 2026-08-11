@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f9f9f7" />
+
+    <!--
+      IBM Plex Sans is the UI face: a workhorse sans drawn for dense, data-heavy
+      interfaces, with genuinely good tabular figures — which a CRM full of
+      tables, prices and axis ticks leans on constantly.
+
+      preconnect shaves a round trip off the font fetch; `display=swap` means
+      text paints immediately in the fallback stack rather than sitting invisible
+      while the webfont loads.
+    -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+
+    <title>SimpleCRM</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

@@ -1,0 +1,139 @@
+@import 'tailwindcss';
+
+/* ===========================================================================
+ * Design tokens
+ *
+ * One palette for the whole app — UI chrome and charts drawn from the same set,
+ * so a status pill and a donut segment can never disagree about what "pending"
+ * looks like.
+ *
+ * The categorical slots are a validated set: every adjacent pair clears the
+ * colour-vision-deficiency separation threshold (ΔE ≥ 8 in OKLab ×100) and the
+ * normal-vision floor (≥ 15) against this surface. The slot ORDER is the safety
+ * mechanism, not decoration — reordering them breaks the guarantee, so add new
+ * series at the end rather than inserting.
+ *
+ * Three slots (aqua, yellow, magenta) sit below 3:1 contrast on this light
+ * surface. That is allowed only because every chart using them ships visible
+ * labels and a table view, so colour never carries meaning alone.
+ * ======================================================================== */
+
+@theme {
+  /* --- Surfaces & ink ---------------------------------------------------- */
+  --color-plane: #f9f9f7; /* page background */
+  --color-surface: #fcfcfb; /* cards, chart surface */
+  --color-raised: #ffffff; /* inputs, popovers */
+
+  --color-ink: #0b0b0b; /* primary text */
+  --color-ink-2: #52514e; /* secondary text */
+  --color-muted: #898781; /* axis labels, captions */
+
+  --color-hairline: #e1e0d9; /* gridlines, card borders */
+  --color-rule: #c3c2b7; /* axis baselines, dividers */
+
+  /* --- Brand ------------------------------------------------------------- */
+  /* Categorical slot 1 doubles as the action colour, so the interface and the
+     charts share one accent instead of competing. */
+  --color-brand: #2a78d6;
+  --color-brand-strong: #1c5cab;
+  --color-brand-ink: #104281;
+  --color-brand-soft: #cde2fb;
+  --color-brand-wash: #eaf3fe;
+
+  /* --- Status (reserved: never reused as a series colour) ---------------- */
+  --color-good: #0ca30c;
+  --color-warning: #fab219;
+  --color-serious: #ec835a;
+  --color-critical: #d03b3b;
+
+  /* Tinted backgrounds + readable text for status pills. The text steps are
+     darkened until they clear 4.5:1 on their own wash. */
+  --color-good-wash: #e6f6e6;
+  --color-good-ink: #056105;
+  --color-warning-wash: #fdf1d5;
+  --color-warning-ink: #7a5300;
+  --color-critical-wash: #fbe7e7;
+  --color-critical-ink: #96201f;
+  --color-neutral-wash: #f0efec;
+  --color-neutral-ink: #52514e;
+
+  /* --- Categorical series (fixed order — see note above) ----------------- */
+  --color-series-1: #2a78d6; /* blue */
+  --color-series-2: #eb6834; /* orange */
+  --color-series-3: #1baf7a; /* aqua */
+  --color-series-4: #eda100; /* yellow */
+  --color-series-5: #e87ba4; /* magenta */
+  --color-series-6: #008300; /* green */
+  --color-series-7: #4a3aa7; /* violet */
+  --color-series-8: #e34948; /* red */
+
+  /* --- Type -------------------------------------------------------------- */
+  --font-sans: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+
+  /* --- Elevation --------------------------------------------------------- */
+  /* Deliberately shallow. Depth comes from the hairline border; the shadow is
+     only there to lift a card off the plane. */
+  --shadow-card: 0 1px 2px rgba(11, 11, 11, 0.04), 0 1px 3px rgba(11, 11, 11, 0.03);
+  --shadow-lift: 0 2px 4px rgba(11, 11, 11, 0.05), 0 4px 12px rgba(11, 11, 11, 0.05);
+  --shadow-pop: 0 4px 12px rgba(11, 11, 11, 0.08), 0 12px 28px rgba(11, 11, 11, 0.08);
+}
+
+/* ===========================================================================
+ * Base
+ * ======================================================================== */
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background-color: var(--color-plane);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Slightly tighter tracking on headings — IBM Plex Sans is a touch wide at
+   display sizes, and this keeps titles from drifting apart. */
+h1,
+h2,
+h3 {
+  letter-spacing: -0.015em;
+}
+
+/*
+ * Tabular figures for columns of numbers that must align vertically: table
+ * cells and chart axis ticks. Deliberately NOT applied to stat-tile values —
+ * equal-width digits make a large "121" look gappy, so big standalone numbers
+ * keep the font's proportional figures.
+ */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Recharts renders axis ticks as SVG text; this is the only way to reach them. */
+.recharts-cartesian-axis-tick-value {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Recharts draws a focus ring around the whole SVG on click — noise, since the
+   tooltip already tracks the pointer. Keyboard focus on the card is preserved. */
+.recharts-wrapper:focus,
+.recharts-surface:focus {
+  outline: none;
+}
+
+/* Respect a user's reduced-motion preference: chart entry animations and the
+   page's transitions are decorative. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

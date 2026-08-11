@@ -1,0 +1,118 @@
+const Product = require('../models/Product');
+const ApiError = require('../utils/ApiError');
+const asyncHandler = require('../utils/asyncHandler');
+const {
+  containsRegex,
+  getPagination,
+  getSort,
+  paginatedResponse,
+} = require('../utils/queryHelpers');
+
+const SORTABLE_FIELDS = ['name', 'sku', 'price', 'stockQty', 'category', 'createdAt'];
+
+/**
+ * Products have no per-record ownership: every authenticated user can read them
+ * and only managers/admins can write. That split is enforced entirely by route
+ * middleware, which is why there are no permission checks in this file.
+ */
+
+/**
+ * GET /api/products
+ * Filters: ?category= ?lowStock=true ?search= (name / sku)
+ * Paging:  ?page= ?limit= ?sort=
+ */
+const listProducts = asyncHandler(async (req, res) => {
+  const { category, lowStock, search } = req.query;
+  const { page, limit, skip } = getPagination(req.query);
+
+  const filter = {};
+
+  if (category) filter.category = containsRegex(category);
+
+  if (search) {
+    const rx = containsRegex(search);
+    filter.$or = [{ name: rx }, { sku: rx }];
+  }
+
+  // "Low stock" compares two fields on the same document, which a plain
+  // comparison cannot express — $expr is what allows field-to-field comparison.
+  // It honours each product's own lowStockThreshold rather than one global number.
+  if (lowStock === 'true') {
+    filter.$expr = { $lte: ['$stockQty', '$lowStockThreshold'] };
+  }
+
+  const [data, total] = await Promise.all([
+    Product.find(filter).sort(getSort(req.query, SORTABLE_FIELDS)).skip(skip).limit(limit),
+    Product.countDocuments(filter),
+  ]);
+
+  res.json(paginatedResponse({ data, total, page, limit }));
+});
+
+/**
+ * GET /api/products/categories
+ * The distinct category list, for populating the filter dropdown in the UI.
+ * Declared before `/:id` in the router so "categories" isn't read as an id.
+ */
+const listCategories = asyncHandler(async (req, res) => {
+  const categories = await Product.distinct('category');
+  res.json({ success: true, count: categories.length, data: categories.sort() });
+});
+
+/** GET /api/products/:id */
+const getProduct = asyncHandler(async (req, res) => {
+  const product = await Product.findById(req.params.id);
+  if (!product) throw ApiError.notFound('Product not found');
+
+  res.json({ success: true, data: product });
+});
+
+/** POST /api/products — managers and admins only. */
+const createProduct = asyncHandler(async (req, res) => {
+  const { name, sku, price, stockQty, category, lowStockThreshold } = req.body;
+
+  const product = await Product.create({
+    name,
+    sku,
+    price,
+    stockQty,
+    category,
+    lowStockThreshold,
+  });
+
+  res.status(201).json({ success: true, data: product });
+});
+
+/** PATCH /api/products/:id — managers and admins only. */
+const updateProduct = asyncHandler(async (req, res) => {
+  const product = await Product.findById(req.params.id);
+  if (!product) throw ApiError.notFound('Product not found');
+
+  const editable = ['name', 'sku', 'price', 'stockQty', 'category', 'lowStockThreshold'];
+  editable.forEach((field) => {
+    if (req.body[field] !== undefined) product[field] = req.body[field];
+  });
+
+  // save() rather than findByIdAndUpdate() so schema validators (min: 0 on
+  // price and stock) run against the new values.
+  await product.save();
+
+  res.json({ success: true, data: product });
+});
+
+/** DELETE /api/products/:id — managers and admins only. */
+const deleteProduct = asyncHandler(async (req, res) => {
+  const product = await Product.findByIdAndDelete(req.params.id);
+  if (!product) throw ApiError.notFound('Product not found');
+
+  res.json({ success: true, message: 'Product deleted', data: { id: req.params.id } });
+});
+
+module.exports = {
+  listProducts,
+  listCategories,
+  getProduct,
+  createProduct,
+  updateProduct,
+  deleteProduct,
+};
