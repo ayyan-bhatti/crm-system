@@ -4,6 +4,7 @@ const morgan = require('morgan');
 const mongoose = require('mongoose');
 
 const env = require('./config/env');
+const { connectDB } = require('./config/db');
 const { notFound, errorHandler } = require('./middleware/errorHandler');
 const ensureDb = require('./middleware/ensureDb');
 
@@ -92,20 +93,46 @@ if (!env.isTest) {
  * the database is unreachable. A health check that fails for the same reason as
  * everything else tells you nothing about where the problem is.
  */
-app.get('/api/health', (req, res) => {
+app.get('/api/health', async (req, res) => {
   const dbStates = ['disconnected', 'connected', 'connecting', 'disconnecting'];
 
-  // A misconfigured deployment is still "up" enough to answer this, which is
-  // the whole point: hit /api/health first and it names the problem.
-  res.status(env.isConfigValid ? 200 : 500).json({
-    success: env.isConfigValid,
-    status: env.isConfigValid ? 'ok' : 'misconfigured',
+  let database = dbStates[mongoose.connection.readyState] || 'unknown';
+  let databaseError = null;
+
+  /*
+   * Actively probe the database rather than just reporting the current state.
+   *
+   * This endpoint sits before the ensureDb middleware so that it still answers
+   * when the database is unreachable. The side effect is that on a cold
+   * serverless instance nothing has opened a connection yet, so a passive read
+   * of readyState reports "disconnected" even when everything is perfectly
+   * healthy — exactly the wrong answer for the one endpoint people check after
+   * a deploy. Probing here makes the report mean what it says.
+   */
+  if (env.isConfigValid && mongoose.connection.readyState !== 1) {
+    try {
+      await connectDB();
+      database = 'connected';
+    } catch (err) {
+      database = 'error';
+      databaseError = err.message;
+    }
+  }
+
+  const healthy = env.isConfigValid && database === 'connected';
+  // 500 = cannot start (config), 503 = configured but a dependency is down.
+  const statusCode = env.isConfigValid ? (healthy ? 200 : 503) : 500;
+
+  res.status(statusCode).json({
+    success: healthy,
+    status: healthy ? 'ok' : env.isConfigValid ? 'degraded' : 'misconfigured',
     environment: env.nodeEnv,
     serverless: env.isServerless,
-    database: dbStates[mongoose.connection.readyState] || 'unknown',
+    database,
     // Names of missing variables only — never their values. Env var names are
     // not secrets, and having them here turns a blind 500 into a fix.
     configErrors: env.configErrors,
+    ...(databaseError ? { databaseError } : {}),
     timestamp: new Date(),
   });
 });
