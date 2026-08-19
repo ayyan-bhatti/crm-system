@@ -28,6 +28,68 @@ const TREND_LABELS = {
   no_orders: { text: 'No orders', className: 'bg-neutral-wash text-neutral-ink' },
 };
 
+/**
+ * The health score.
+ *
+ * Shown WITH its breakdown, not as a bare number. A score nobody can explain is
+ * a score people learn to ignore — and unlike the narrative below it, this
+ * figure is computed by a formula, so the "why" is available and should be on
+ * screen rather than buried in a tooltip.
+ *
+ * A meter rather than a chart: it is one number on a fixed 0-100 scale, and the
+ * bar communicates that immediately in a way "72" alone does not.
+ */
+const HEALTH_STYLES = {
+  healthy: { label: 'Healthy', bar: 'bg-good', text: 'text-good-ink' },
+  stable: { label: 'Stable', bar: 'bg-brand', text: 'text-brand-ink' },
+  at_risk: { label: 'At risk', bar: 'bg-warning', text: 'text-warning-ink' },
+  dormant: { label: 'Dormant', bar: 'bg-critical', text: 'text-critical-ink' },
+};
+
+function HealthScore({ health }) {
+  const style = HEALTH_STYLES[health.band] || HEALTH_STYLES.dormant;
+
+  return (
+    <div className="mb-5 rounded-lg border border-hairline p-4">
+      <div className="mb-2 flex items-baseline justify-between gap-3">
+        <p className="text-xs font-medium uppercase tracking-wide text-muted">Health score</p>
+        <p className={`text-sm font-semibold ${style.text}`}>{style.label}</p>
+      </div>
+
+      <div className="flex items-center gap-3">
+        <span className="text-2xl font-semibold tabular-nums text-ink">{health.score}</span>
+        <div
+          className="h-2 flex-1 overflow-hidden rounded-full bg-neutral-wash"
+          role="meter"
+          aria-valuenow={health.score}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-label="Customer health score"
+        >
+          <div
+            className={`h-full rounded-full ${style.bar}`}
+            style={{ width: `${health.score}%` }}
+          />
+        </div>
+      </div>
+
+      {/* The explanation. Recency, frequency and value, each with the actual
+          figure that drove it — so "why 41?" is answerable on the page. */}
+      <dl className="mt-3 grid gap-1.5 text-xs sm:grid-cols-3">
+        {health.components.map((component) => (
+          <div key={component.key}>
+            <dt className="font-medium text-ink-2">
+              {component.label}{' '}
+              <span className="text-muted">({Math.round(component.weight * 100)}%)</span>
+            </dt>
+            <dd className="text-muted">{component.detail}</dd>
+          </div>
+        ))}
+      </dl>
+    </div>
+  );
+}
+
 function Metric({ label, value }) {
   return (
     <div>
@@ -62,7 +124,7 @@ export default function CustomerSummaryCard({ customerId }) {
   if (error) return <ErrorBanner message={`Could not load the account summary: ${error}`} />;
   if (!data) return null;
 
-  const { metrics, summary, mode } = data;
+  const { metrics, health, summary, mode } = data;
   const trend = TREND_LABELS[metrics.trend] || TREND_LABELS.no_orders;
 
   return (
@@ -73,6 +135,8 @@ export default function CustomerSummaryCard({ customerId }) {
           {trend.text}
         </span>
       </div>
+
+      {health && <HealthScore health={health} />}
 
       {/* Computed from the database — exact. */}
       <div className="mb-5 grid grid-cols-2 gap-4 sm:grid-cols-4">

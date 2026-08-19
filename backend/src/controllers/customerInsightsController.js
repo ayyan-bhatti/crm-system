@@ -3,6 +3,7 @@ const ApiError = require('../utils/ApiError');
 const asyncHandler = require('../utils/asyncHandler');
 const { canAccessCustomer } = require('../middleware/roles');
 const { computeCustomerMetrics } = require('../services/customerMetrics');
+const { calculateLeadScore } = require('../services/leadScore');
 const customerSummaryService = require('../services/customerSummaryService');
 const { buildFallbackSummary } = require('../services/summaryFallback');
 
@@ -38,9 +39,17 @@ const getCustomerSummary = asyncHandler(async (req, res) => {
 
   const metrics = await computeCustomerMetrics(customer._id);
 
+  /*
+   * Computed here, not by the model, and computed BEFORE the AI call — so the
+   * score is available whichever path the narrative takes. See the reasoning at
+   * the top of services/leadScore.js: a health score that changes when you
+   * refresh the page is not a metric.
+   */
+  const health = calculateLeadScore(metrics);
+
   // Called through the module object rather than a destructured reference so
   // the test suite can stub it, exactly as the AI search tests do.
-  const generated = await customerSummaryService.generateSummary(customer, metrics);
+  const generated = await customerSummaryService.generateSummary(customer, metrics, health);
 
   const summary =
     generated.mode === 'ai'
@@ -57,6 +66,7 @@ const getCustomerSummary = asyncHandler(async (req, res) => {
     data: {
       customer: { _id: customer._id, name: customer.name, company: customer.company },
       metrics,
+      health,
       summary,
       mode: generated.mode,
       // Only on the fallback path, and only useful to a developer — but a

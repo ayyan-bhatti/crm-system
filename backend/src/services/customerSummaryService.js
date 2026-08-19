@@ -53,8 +53,9 @@ const TREND_MEANINGS = {
 function buildSystemPrompt() {
   return `You write short account summaries for a CRM used by sales representatives.
 
-You will be given a customer's details and a set of figures that have ALREADY been
-calculated from the database. Those figures are correct and authoritative.
+You will be given a customer's details, a set of figures that have ALREADY been
+calculated from the database, and a health score that has ALREADY been calculated
+from those figures. All of it is correct and authoritative.
 
 CRITICAL RULES
 - Never calculate, estimate, or invent a number. Do not add up, average, or compare
@@ -63,6 +64,9 @@ CRITICAL RULES
   stopped buying, only that they did.
 - Write for someone deciding what to do next, not for a report. Be concrete and brief.
 - If the data is thin (one order, or none), say so plainly instead of padding.
+- Your wording must AGREE with the health score you are given. Do not describe an
+  account as strong if the score is low, or vice versa — the reader can see both.
+  Explain the score; do not second-guess it.
 
 Trend values mean:
 ${Object.entries(TREND_MEANINGS)
@@ -84,7 +88,7 @@ not about how sure you are of your wording.`;
 }
 
 /** The facts handed to the model. Nothing here is raw order data. */
-function buildUserMessage(customer, metrics) {
+function buildUserMessage(customer, metrics, health = null) {
   return JSON.stringify(
     {
       customer: {
@@ -106,6 +110,22 @@ function buildUserMessage(customer, metrics) {
         daysSinceLastOrder: metrics.daysSinceLastOrder,
         trend: metrics.trend,
       },
+      /*
+       * The health score, already calculated. Given to the model so its wording
+       * agrees with the number the user is looking at — a paragraph saying "a
+       * strong account" next to a score of 31 is worse than no paragraph.
+       *
+       * It is in "calculatedFigures" territory, so the same rule applies: quote
+       * it, never recompute it. And as with every other number, the response
+       * schema has no field for it, so the model cannot return one.
+       */
+      healthScore: health
+        ? {
+            score: health.score,
+            band: health.band,
+            drivers: health.components.map((c) => `${c.label}: ${c.detail}`),
+          }
+        : null,
     },
     null,
     2
@@ -149,7 +169,7 @@ function validateSummary(raw) {
   };
 }
 
-async function callModel(customer, metrics) {
+async function callModel(customer, metrics, health) {
   const response = await anthropic.messages.create({
     model: env.anthropicModel,
     // Small: the reply is a handful of sentences. A generous cap here would
@@ -157,7 +177,7 @@ async function callModel(customer, metrics) {
     max_tokens: 600,
     output_config: { effort: 'low' },
     system: buildSystemPrompt(),
-    messages: [{ role: 'user', content: buildUserMessage(customer, metrics) }],
+    messages: [{ role: 'user', content: buildUserMessage(customer, metrics, health) }],
   });
 
   return response.content
@@ -174,14 +194,14 @@ async function callModel(customer, metrics) {
  * to render, because the figures are correct either way and a summary screen
  * that errors out is worse than one with plain wording.
  */
-async function generateSummary(customer, metrics) {
+async function generateSummary(customer, metrics, health = null) {
   if (!anthropic) {
     return { mode: 'fallback', reason: 'ANTHROPIC_API_KEY is not configured' };
   }
 
   let text;
   try {
-    text = await callModel(customer, metrics);
+    text = await callModel(customer, metrics, health);
   } catch (err) {
     if (!env.isTest) {
       // eslint-disable-next-line no-console

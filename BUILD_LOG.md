@@ -717,3 +717,73 @@ that with one that also counts per user.
 
 25 new tests, all with the model stubbed — no API key needed and no credits spent.
 **314 backend tests passing.**
+
+## Phase 2.2 — Customer health score (RFM)
+
+### Why this is arithmetic and not an AI call
+
+Asking the model for a score would be easy and would look more impressive on a feature
+list. It would also be wrong, for three reasons worth being able to say out loud:
+
+1. **Reproducibility.** The same customer, unchanged, must score the same today and
+   tomorrow. A model asked twice returns two answers, and a health score that drifts on
+   refresh is not a metric — it is a mood.
+2. **Testability.** *"Is 82 the right score for this customer?"* has an answer here.
+   The same question about a model's output has none. `tests/leadScore.test.js` only exists
+   because the score is computed.
+3. **Explainability.** A rep asking *"why is this account at 41?"* deserves *"because the
+   last order was 140 days ago"*, not a paraphrase of a hidden judgement.
+
+The AI still has a job — it writes the narrative about the score. **Numbers from code,
+words from the model**, the same division as 2.1 for the same reason.
+
+### Why RFM, and the weights
+
+Recency / Frequency / Monetary is the standard CRM segmentation model. That matters
+practically: it is a known method with a literature behind it, so the weights are a
+documented judgement rather than three numbers invented on a Tuesday.
+
+| component | weight | reasoning |
+|---|---|---|
+| Recency | **40%** | The strongest single predictor of whether someone buys again. Bought last week = a live relationship; bought once two years ago mostly is not, whatever they spent. |
+| Frequency | **35%** | Repeat buying is habit, and habit is what a rep can build on. Close to recency because a regular small customer usually deserves more attention than a one-off large one. |
+| Monetary | **25%** | Deliberately the smallest. Revenue is the most visible number and the most misleading one alone. |
+
+**There is a test that justifies the weights:** a steady small customer (6 orders, $3k, 25
+days ago) must outrank a lapsed big spender (1 order, $30k, 300 days ago). They score 82 and
+42. If someone later "fixes" the weights so revenue dominates, that test fails and says why.
+
+### Monetary is scored against a fixed ladder, not a percentile
+
+A percentile would be more statistically respectable and much worse in practice: it needs
+the whole customer base loaded to score one customer, and — the real problem — **a
+customer's score would change because someone else placed an order.** A score that moves
+without the customer doing anything is impossible to explain to the person looking at it.
+
+`calculateLeadScore` takes exactly one argument and touches no database, so that guarantee
+is structural rather than merely tested.
+
+### The breakdown is the feature
+
+The endpoint returns the score *and* the three components with the actual figure behind
+each, and the UI shows them under the meter. A score with no explanation is a number people
+learn to ignore. There is a test that the components add back up to the reported score, so
+the explanation can never drift from the thing it explains.
+
+### It feeds the prompt, and the prompt cannot override it
+
+The computed score is passed to the model with an instruction that its wording must **agree**
+with the number — a paragraph calling an account "strong" next to a score of 31 is worse
+than no paragraph. And as with every other figure, the response schema has no field for a
+score, so the model cannot return one of its own.
+
+The score is computed **before** the AI call, so an AI outage costs the wording and never
+the number.
+
+### Bands
+
+`healthy` (75+) · `stable` (50-74) · `at_risk` (25-49) · `dormant` (<25) — used for the
+label and colour. Shown as a meter rather than a bare number: it is one value on a fixed
+0-100 scale, and the bar communicates that instantly in a way "72" does not.
+
+18 new tests. **332 backend tests passing.**
