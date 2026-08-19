@@ -83,6 +83,18 @@ env.isTest = env.nodeEnv === 'test';
 env.isProduction = env.nodeEnv === 'production';
 /** Cookies are only marked Secure where HTTPS actually exists. */
 env.cookieSecure = env.isProduction;
+
+/**
+ * Whether the per-IP rate limiters are active.
+ *
+ * Off in the test suite by default — the existing tests hammer login and
+ * register from a single address, which is precisely the traffic the limiters
+ * exist to reject, so leaving them on would fail unrelated tests for unrelated
+ * reasons. The rate-limit tests set this to true for themselves.
+ *
+ * RATE_LIMIT_DISABLED=true is an escape hatch for local load testing.
+ */
+env.rateLimitEnabled = !env.isTest && process.env.RATE_LIMIT_DISABLED !== 'true';
 /** True on Vercel (and most FaaS platforms), which set this automatically. */
 env.isServerless = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
 

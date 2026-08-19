@@ -7,12 +7,17 @@ const {
   getMe,
 } = require('../controllers/authController');
 const { protect } = require('../middleware/auth');
+const { loginLimiter, registerLimiter } = require('../middleware/rateLimit');
 
 const router = express.Router();
 
-// Public
-router.post('/register', register);
-router.post('/login', login);
+/*
+ * Public — and therefore the endpoints worth attacking. Both are rate limited
+ * per IP; login is additionally protected by the per-account lockout in the
+ * controller. See middleware/rateLimit.js for the chosen thresholds and why.
+ */
+router.post('/register', registerLimiter, register);
+router.post('/login', loginLimiter, login);
 
 /**
  * Refresh and logout are public in the `protect` sense on purpose.

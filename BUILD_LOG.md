@@ -142,3 +142,75 @@ browser flow is exercised: cookie flags (httpOnly, SameSite, Path), short access
 lifetime, refresh token absent from response bodies and stored only as a hash, cookie-only
 authentication, rotation, replay rejection, family revocation on reuse, and logout
 revoking a previously captured token. **188 backend tests passing** (was 167).
+
+## Phase 1.2 — Rate limiting and account lockout
+
+### Two defences, because one is not enough
+
+**Per-IP rate limiting** (`middleware/rateLimit.js`, express-rate-limit) caps how many
+requests one address can make in a window. That stops sign-up spam, casual brute force
+and runaway scripts. It does *not* stop a distributed attack: someone with a botnet has
+thousands of addresses, each staying comfortably under the limit while the account under
+attack absorbs thousands of guesses.
+
+**Per-account lockout** (on the `User` model) counts consecutive failures against the
+*account*, so it follows the thing being attacked no matter where the traffic comes from.
+
+Neither alone is sufficient. Together they cover both shapes of attack.
+
+### The thresholds and why
+
+| endpoint | limit | reasoning |
+|---|---|---|
+| login | 10 / 15 min | A person mistypes twice or three times. Ten leaves room for a shared office NAT without being useful to an attacker who needs thousands of guesses. Tighter starts locking out real offices — the failure nobody notices until a customer calls. |
+| register | 5 / hour | The only endpoint that creates unbounded state from an anonymous caller, so the tightest limit. Nobody makes a sixth account in an hour. |
+| password change | 5 / hour | Verifies the current password, so it is a second place to guess one — and it sits behind a valid session, which makes it easy to forget. Wired up in 1.4. |
+| AI search | 20 / 5 min | About money, not security: every call is a paid Anthropic request. Far more than anyone types by hand, far less than a stuck retry loop burns through. |
+
+`protect` runs *before* the AI limiter, so an unauthenticated flood is rejected by the
+cheaper check and never eats a signed-in user's quota.
+
+### Exponential backoff, and why not a flat lock
+
+From the fifth consecutive failure, each further one doubles the wait: 1, 2, 4, 8 minutes,
+capped at 15.
+
+A flat "15 minutes after 5 tries" punishes the user who genuinely forgot their password
+exactly as hard as an attacker. Backoff barely inconveniences someone on their fifth try
+but makes sustained guessing arithmetically hopeless — about four attempts an hour once
+capped.
+
+**The cap is a deliberate safety valve, not a rounding-off.** An uncapped backoff is a
+denial-of-service weapon: anyone can fail logins against a known email address and lock
+that person out of their own CRM permanently. Every lockout scheme carries that risk; the
+cap bounds it.
+
+The counter is advanced with an atomic `$inc`, not read-modify-write. A burst of parallel
+guesses would otherwise all read `4` and all write `5`, recording a hundred attempts as
+one — precisely the traffic this exists to catch.
+
+### Two trade-offs I am accepting on purpose
+
+**1. Locking leaks which emails have accounts.** A locked account answers 429 where an
+unknown address answers 401. That is real. The alternatives are worse: not locking removes
+the protection, and faking a lock for non-existent addresses needs per-email state for
+accounts that do not exist, which is itself a way to fill the database. The per-IP limiter
+is what covers bulk enumeration.
+
+**2. The IP limiter's counters are in-process.** On Vercel each function instance has its
+own memory, so the effective limit is roughly (limit x warm instances) and counters reset
+when an instance recycles. The proper fix is a shared store (Redis, or Mongo-backed). Not
+done here because it adds an external dependency to a project that otherwise needs only
+MongoDB — and crucially, the defence that actually protects an account, the lockout, *is*
+in MongoDB and therefore shared across every instance. The IP limiter is the cheap outer
+layer; the durable one sits behind it.
+
+The limiters are skipped when `NODE_ENV=test` (the other suites log in dozens of times
+from one address, which is the exact traffic these reject). `tests/rateLimit.test.js`
+turns them on for itself and resets the counters between tests.
+
+**No API contract change** — only a new 429 response with a `Retry-After` header and a
+`retryAfterSeconds` field, in the same `{ success, message }` envelope every other error
+uses, so the existing frontend error handling already displays it.
+
+13 new tests. **201 backend tests passing.**

@@ -71,6 +71,10 @@ const register = asyncHandler(async (req, res) => {
  *
  * Both "no such email" and "wrong password" return the same 401 message, so the
  * endpoint can't be used to enumerate which email addresses have accounts.
+ *
+ * Guarded twice: a per-IP rate limit on the route (volume from one address) and
+ * a per-account lockout here (guesses against one account, from anywhere). See
+ * middleware/rateLimit.js and the lockout section of models/User.
  */
 const login = asyncHandler(async (req, res) => {
   const { email, password } = req.body;
@@ -79,16 +83,56 @@ const login = asyncHandler(async (req, res) => {
     throw ApiError.badRequest('Email and password are required');
   }
 
-  // `password` has select:false on the schema, so ask for it explicitly.
-  const user = await User.findOne({ email: email.toLowerCase().trim() }).select('+password');
+  // `password` has select:false on the schema, so ask for it explicitly — as do
+  // the lockout counters.
+  const user = await User.findOne({ email: email.toLowerCase().trim() }).select(
+    '+password +failedLoginAttempts +lockUntil'
+  );
+
+  /*
+   * A locked account is refused before the password is even checked.
+   *
+   * Checking first also means a locked account costs no bcrypt comparison,
+   * which matters: bcrypt is deliberately slow, so an attacker who could force
+   * one per request has a cheap way to exhaust the server's CPU.
+   *
+   * ENUMERATION TRADE-OFF, stated plainly: a 429 here reveals that the address
+   * has an account, where an unknown address gets a 401. That is a real leak,
+   * and it is the accepted price of the defence — the alternative (locking
+   * nothing, or faking a lock for addresses with no account) either removes the
+   * protection or needs per-email state for accounts that do not exist, which
+   * is itself a way to fill the database. The per-IP limiter is what covers
+   * bulk enumeration.
+   */
+  if (user && user.isLocked()) {
+    const seconds = user.lockRemainingSeconds();
+    res.set('Retry-After', String(seconds));
+    return res.status(429).json({
+      success: false,
+      message: `Too many failed sign-in attempts. Try again in ${formatWait(seconds)}.`,
+      retryAfterSeconds: seconds,
+    });
+  }
 
   if (!user || !(await user.comparePassword(password))) {
+    // Only a real account has a counter to advance. An unknown address is
+    // handled by the per-IP limiter instead.
+    if (user) await user.registerFailedLogin();
     throw ApiError.unauthorized('Invalid email or password');
   }
 
+  await user.clearFailedLogins();
+
   const session = await issueSession(user, req);
-  sendSession(res, { user, ...session });
+  return sendSession(res, { user, ...session });
 });
+
+/** "90 seconds" reads better than "in 90 seconds" for a two-minute wait. */
+function formatWait(seconds) {
+  if (seconds < 60) return `${seconds} second${seconds === 1 ? '' : 's'}`;
+  const minutes = Math.ceil(seconds / 60);
+  return `${minutes} minute${minutes === 1 ? '' : 's'}`;
+}
 
 /**
  * POST /api/auth/refresh
