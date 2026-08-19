@@ -14,6 +14,7 @@ const {
   getDateRange,
 } = require('../utils/queryHelpers');
 const { withTransaction } = require('../utils/transaction');
+const { recordAudit } = require('../services/auditService');
 
 const SORTABLE_FIELDS = ['total', 'status', 'createdAt'];
 
@@ -313,6 +314,23 @@ const createOrder = asyncHandler(async (req, res) => {
     return created;
   });
 
+  /*
+   * Audited AFTER the transaction commits, not inside it.
+   *
+   * Inside, a rollback would erase the audit entry along with the order — which
+   * is the correct outcome for a failed write (nothing happened, so nothing
+   * should be logged) but means the audit write can also cause a write conflict
+   * and retry the whole order. Outside, the trail records what actually
+   * happened, which is what it is for.
+   */
+  await recordAudit(req, {
+    action: 'create',
+    entity: 'order',
+    entityId: order._id,
+    label: `Order ${order._id}`,
+    after: order,
+  });
+
   await order.populate([
     { path: 'customer', select: 'name email company city status' },
     { path: 'items.product', select: 'name sku price' },
@@ -347,7 +365,7 @@ const updateOrder = asyncHandler(async (req, res) => {
    * snapshot. Loading it outside would reintroduce exactly the read-then-write
    * gap the transaction is here to close.
    */
-  const order = await withTransaction(async (session) => {
+  const { order, before: auditBefore } = await withTransaction(async (session) => {
     // The customer is populated because the ownership check may need to read
     // its `assignedTo` — a sales rep can edit an order they did not create if
     // it belongs to a customer assigned to them.
@@ -357,6 +375,10 @@ const updateOrder = asyncHandler(async (req, res) => {
     if (!canAccessOrderDocument(req.user, found)) {
       throw ApiError.forbidden('You do not have access to this order');
     }
+
+    // Snapshotted before the status transition, so the trail shows what the
+    // order moved FROM — the part a reviewer actually needs.
+    const before = found.toObject({ depopulate: true });
 
     // --- Item edits: only while the order is still pending -------------------
     if (rawItems !== undefined) {
@@ -401,7 +423,16 @@ const updateOrder = asyncHandler(async (req, res) => {
     }
 
     await found.save({ session });
-    return found;
+    return { order: found, before };
+  });
+
+  await recordAudit(req, {
+    action: 'update',
+    entity: 'order',
+    entityId: order._id,
+    label: `Order ${order._id}`,
+    before: auditBefore,
+    after: order,
   });
 
   await order.populate([
@@ -424,7 +455,7 @@ const deleteOrder = asyncHandler(async (req, res) => {
    * for an order that still exists and can be cancelled again — inventing units
    * out of nothing.
    */
-  await withTransaction(async (session) => {
+  const deleted = await withTransaction(async (session) => {
     // Populated for the same reason as in updateOrder — see the note there.
     const order = await Order.findById(req.params.id).populate('customer').session(session);
     if (!order) throw ApiError.notFound('Order not found');
@@ -435,7 +466,17 @@ const deleteOrder = asyncHandler(async (req, res) => {
 
     if (order.completedAt) await restoreStock(order.items, session);
 
+    const before = order.toObject({ depopulate: true });
     await order.deleteOne({ session });
+    return before;
+  });
+
+  await recordAudit(req, {
+    action: 'delete',
+    entity: 'order',
+    entityId: deleted._id,
+    label: `Order ${deleted._id}`,
+    before: deleted,
   });
 
   res.json({ success: true, message: 'Order deleted', data: { id: req.params.id } });

@@ -535,3 +535,99 @@ better failure than executing the order twice.
 a different body, or still in progress.
 
 16 new tests. **266 backend tests passing.**
+
+## Phase 1.7 — Audit logging
+
+### Why the data itself cannot answer these questions
+
+Ordinary documents hold only their *current* state. The moment a field is overwritten,
+what was there before is gone — and with it any way to tell an honest correction from a
+mistake, or from someone covering their tracks. Three questions need a separate record:
+
+- **"Who deleted this customer?"** — accountability
+- **"What did this record look like before someone changed it?"** — recovery
+- **"Did anyone touch these orders last Tuesday?"** — investigation
+
+A stock adjustment is the clearest case: a manual correction and a mistake look completely
+identical in the product document.
+
+### Explicit calls, not a Mongoose hook
+
+A `post('save')` hook would catch every write automatically and could never be forgotten,
+which sounds strictly better. It is not:
+
+1. **A model hook has no idea who made the request.** Mongoose middleware sees the
+   document, not the HTTP request, so the actor would have to be smuggled in through
+   `AsyncLocalStorage` or stapled onto the document. Both work; both mean the most
+   security-sensitive code in the app runs through indirection that is hard to follow and
+   easy to break silently.
+2. **Hooks fire on writes that are not user actions** — seeding, migrations, the
+   failed-login counter — and filtering those back out is guesswork.
+
+`grep recordAudit` lists every audited action. The cost is that a new write handler could
+forget one, which is why there is a test asserting each write endpoint logs.
+
+### Three decisions inside the record
+
+**The actor is denormalised.** `actor` stores the user's id *and* a snapshot of their name,
+email and role at the time. This looks like duplication and is deliberate: an audit trail
+whose contents change when someone is renamed, demoted or deleted is not an audit trail.
+"Ayesha (manager) deleted this" must still read that way a year later, after Ayesha has
+left and her account is gone. There is a test for exactly that.
+
+**`entityLabel` is captured too.** Without it, the entry for a deleted customer reads
+"customer 652f8a…" — which is the case where the name matters *most*, because the record is
+gone and nothing can look it up.
+
+**`changes` is precomputed.** Strictly redundant given before/after, but a reviewer wants
+"status: lead → active", not two whole documents to diff by eye. Computing it once at write
+time also keeps the list endpoint from doing it for every row on every request.
+
+### Redaction
+
+The audit trail is kept indefinitely, read by administrators, and never overwritten — which
+makes it exactly the wrong place to accumulate credentials. `password`, `tokenHash` and the
+lockout counters are stripped before anything is stored, with a test asserting no bcrypt
+hash ever reaches it. An audit trail that quietly collects secrets is a liability rather
+than a control.
+
+### **No TTL index — a deliberate omission**
+
+Every other new collection in this project expires its rows automatically. This one does
+not, and that is the point: audit logs that quietly delete themselves are exactly as useful
+as no audit logs on the day you need them. The collection *will* grow, and pruning it is a
+retention decision for whoever runs the system — a conscious policy, not a default.
+
+### Admin only, and why that is not just caution
+
+The trail holds a copy of **every field of every record**. That makes it a way around every
+other permission rule in the app: a sales rep who could read it would see customers they
+have no access to, and a manager reading it would be reading their own audit. Enforced with
+`router.use` on the whole router rather than per route, so a handler added later is
+protected by default.
+
+**There are no write routes at all.** An audit trail that can be edited or deleted through
+the API is not evidence of anything.
+
+### Ordering: audited after the transaction commits
+
+Order writes are logged *outside* the transaction. Inside, a rollback would erase the audit
+entry along with the order — which is the right outcome for a failed write (nothing
+happened, so nothing should be logged, and there is a test for that) but also means the
+audit write can cause a write conflict and retry the whole order. Outside, the trail
+records what actually happened, which is what it is for.
+
+Snapshots are always taken **before** any field is touched. Taking them afterwards would
+record the new values as the old ones and make the trail actively misleading.
+
+### New endpoints and screen
+
+- `GET /api/audit-logs` — admin only. Filters: `entity`, `action`, `actor`, `entityId`,
+  `from`, `to`. Paginated and sorted, newest first. Each filter is backed by an index.
+- `GET /api/audit-logs/:id` — one entry with full before/after. Separate from the list
+  because shipping two complete documents for every row of a 25-row page would make the
+  list heavy for data almost nobody expands.
+- **`/audit`** in the frontend, admin only in the router *and* on the API, with the
+  field-level diff expandable per row.
+
+23 new tests. **289 backend tests passing.** Phase 1 complete.

@@ -22,6 +22,8 @@ const icons = {
     'M4 4h3l.9 4M7.9 8H20l-1.6 8H9.5L7.9 8zm2.1 12a1.5 1.5 0 100 3 1.5 1.5 0 000-3zm8 0a1.5 1.5 0 100 3 1.5 1.5 0 000-3z',
   users:
     'M9 11a3.5 3.5 0 100-7 3.5 3.5 0 000 7zm7.5 0a3 3 0 100-6 3 3 0 000 6zM9 13c-3.9 0-7 1.9-7 4.3V19h14v-1.7C16 14.9 12.9 13 9 13zm7.8.2c1.9.6 3.2 1.9 3.2 3.4V19h2v-2.4c0-1.7-2.2-3-5.2-3.4z',
+  audit:
+    'M6 2h9l5 5v15H6V2zm8 1.5V8h4.5L14 3.5zM8 12h8v1.5H8V12zm0 4h8v1.5H8V16z',
 };
 
 const NAV_ITEMS = [
@@ -30,6 +32,7 @@ const NAV_ITEMS = [
   { to: '/products', label: 'Products', icon: 'products' },
   { to: '/orders', label: 'Orders', icon: 'orders' },
   { to: '/users', label: 'Users', icon: 'users', roles: [ROLES.ADMIN] },
+  { to: '/audit', label: 'Audit log', icon: 'audit', roles: [ROLES.ADMIN] },
 ];
 
 function NavIcon({ name }) {

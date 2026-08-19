@@ -99,6 +99,12 @@ export const dashboardApi = {
   summary: () => client.get('/dashboard/summary').then((r) => r.data.data),
 };
 
+// --- audit log (admin only) -------------------------------------------------
+export const auditApi = {
+  list: (params) => client.get('/audit-logs', { params }).then((r) => r.data),
+  get: (id) => client.get(`/audit-logs/${id}`).then((r) => r.data.data),
+};
+
 export const aiSearchApi = {
   search: (query, entity) => client.post('/ai-search', { query, entity }).then((r) => r.data),
 };

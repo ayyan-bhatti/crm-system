@@ -1,6 +1,7 @@
 const Product = require('../models/Product');
 const ApiError = require('../utils/ApiError');
 const asyncHandler = require('../utils/asyncHandler');
+const { recordAudit } = require('../services/auditService');
 const {
   containsRegex,
   getPagination,
@@ -80,6 +81,13 @@ const createProduct = asyncHandler(async (req, res) => {
     lowStockThreshold,
   });
 
+  await recordAudit(req, {
+    action: 'create',
+    entity: 'product',
+    entityId: product._id,
+    after: product,
+  });
+
   res.status(201).json({ success: true, data: product });
 });
 
@@ -87,6 +95,9 @@ const createProduct = asyncHandler(async (req, res) => {
 const updateProduct = asyncHandler(async (req, res) => {
   const product = await Product.findById(req.params.id);
   if (!product) throw ApiError.notFound('Product not found');
+
+  // Snapshotted before any field is touched — see the note in customerController.
+  const before = product.toObject();
 
   const editable = ['name', 'sku', 'price', 'stockQty', 'category', 'lowStockThreshold'];
   editable.forEach((field) => {
@@ -97,6 +108,16 @@ const updateProduct = asyncHandler(async (req, res) => {
   // price and stock) run against the new values.
   await product.save();
 
+  // Stock edits are the ones worth being able to trace later: a manual
+  // correction and a mistake look identical in the product document itself.
+  await recordAudit(req, {
+    action: 'update',
+    entity: 'product',
+    entityId: product._id,
+    before,
+    after: product,
+  });
+
   res.json({ success: true, data: product });
 });
 
@@ -104,6 +125,14 @@ const updateProduct = asyncHandler(async (req, res) => {
 const deleteProduct = asyncHandler(async (req, res) => {
   const product = await Product.findByIdAndDelete(req.params.id);
   if (!product) throw ApiError.notFound('Product not found');
+
+  await recordAudit(req, {
+    action: 'delete',
+    entity: 'product',
+    entityId: product._id,
+    label: product.name,
+    before: product,
+  });
 
   res.json({ success: true, message: 'Product deleted', data: { id: req.params.id } });
 });

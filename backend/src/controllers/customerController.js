@@ -2,6 +2,7 @@ const Customer = require('../models/Customer');
 const ApiError = require('../utils/ApiError');
 const asyncHandler = require('../utils/asyncHandler');
 const { hasFullRecordAccess, canAccessCustomer } = require('../middleware/roles');
+const { recordAudit } = require('../services/auditService');
 const {
   containsRegex,
   getPagination,
@@ -107,6 +108,13 @@ const createCustomer = asyncHandler(async (req, res) => {
 
   await customer.populate('assignedTo', 'name email role');
 
+  await recordAudit(req, {
+    action: 'create',
+    entity: 'customer',
+    entityId: customer._id,
+    after: customer,
+  });
+
   res.status(201).json({ success: true, data: customer });
 });
 
@@ -124,6 +132,10 @@ const updateCustomer = asyncHandler(async (req, res) => {
     throw ApiError.forbidden('You do not have access to this customer');
   }
 
+  // Snapshotted BEFORE any field is touched. Taking it afterwards would record
+  // the new values as the old ones and make the trail actively misleading.
+  const before = customer.toObject();
+
   // Whitelisted fields only: `createdBy` must never be reassigned by a client,
   // and reassigning `assignedTo` is a manager/admin decision.
   const editable = ['name', 'email', 'phone', 'company', 'city', 'status', 'notes'];
@@ -139,6 +151,15 @@ const updateCustomer = asyncHandler(async (req, res) => {
   }
 
   await customer.save();
+
+  await recordAudit(req, {
+    action: 'update',
+    entity: 'customer',
+    entityId: customer._id,
+    before,
+    after: customer,
+  });
+
   await customer.populate('assignedTo', 'name email role');
 
   res.json({ success: true, data: customer });
@@ -153,7 +174,18 @@ const deleteCustomer = asyncHandler(async (req, res) => {
     throw ApiError.forbidden('You do not have access to this customer');
   }
 
+  const before = customer.toObject();
   await customer.deleteOne();
+
+  // The label matters most here: once the record is gone, nothing can look up
+  // what "customer 652f8a…" used to be called.
+  await recordAudit(req, {
+    action: 'delete',
+    entity: 'customer',
+    entityId: customer._id,
+    label: before.name,
+    before,
+  });
 
   res.json({ success: true, message: 'Customer deleted', data: { id: req.params.id } });
 });

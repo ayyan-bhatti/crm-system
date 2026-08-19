@@ -1,6 +1,7 @@
 const User = require('../models/User');
 const ApiError = require('../utils/ApiError');
 const asyncHandler = require('../utils/asyncHandler');
+const { recordAudit } = require('../services/auditService');
 const { ROLE_VALUES } = require('../config/constants');
 
 /**
@@ -62,6 +63,12 @@ const createUser = asyncHandler(async (req, res) => {
   }
 
   const user = await User.create({ name, email, password, role });
+
+  // The password hash is stripped by the audit service's redaction list — an
+  // audit trail is read by administrators and never overwritten, which makes it
+  // exactly the wrong place to accumulate credentials.
+  await recordAudit(req, { action: 'create', entity: 'user', entityId: user._id, after: user });
+
   res.status(201).json({ success: true, data: user });
 });
 
@@ -79,6 +86,10 @@ const updateUser = asyncHandler(async (req, res) => {
     throw ApiError.badRequest(`Role must be one of: ${ROLE_VALUES.join(', ')}`);
   }
 
+  // Role changes are the single most security-relevant write in the app —
+  // "who made this person an admin, and when" is the question this answers.
+  const before = user.toObject();
+
   if (name !== undefined) user.name = name;
   if (email !== undefined) user.email = email;
   if (role !== undefined) user.role = role;
@@ -87,6 +98,15 @@ const updateUser = asyncHandler(async (req, res) => {
   if (password !== undefined) user.password = password;
 
   await user.save();
+
+  await recordAudit(req, {
+    action: 'update',
+    entity: 'user',
+    entityId: user._id,
+    before,
+    after: user,
+  });
+
   res.json({ success: true, data: user });
 });
 
@@ -102,6 +122,14 @@ const deleteUser = asyncHandler(async (req, res) => {
 
   const user = await User.findByIdAndDelete(req.params.id);
   if (!user) throw ApiError.notFound('User not found');
+
+  await recordAudit(req, {
+    action: 'delete',
+    entity: 'user',
+    entityId: user._id,
+    label: user.name,
+    before: user,
+  });
 
   res.json({ success: true, message: 'User deleted', data: { id: req.params.id } });
 });

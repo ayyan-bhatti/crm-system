@@ -44,6 +44,7 @@ const OrderDetail = lazy(() => import('./pages/orders/OrderDetail'));
 const OrderForm = lazy(() => import('./pages/orders/OrderForm'));
 
 const UserList = lazy(() => import('./pages/users/UserList'));
+const AuditLog = lazy(() => import('./pages/AuditLog'));
 
 export default function App() {
   return (
@@ -106,6 +107,18 @@ export default function App() {
                 element={
                   <ProtectedRoute roles={[ROLES.ADMIN]}>
                     <UserList />
+                  </ProtectedRoute>
+                }
+              />
+
+              {/* Admin only in the router AND on the API. The audit trail holds
+                  a copy of every field of every record, so it would otherwise
+                  be a way around every other permission rule in the app. */}
+              <Route
+                path="audit"
+                element={
+                  <ProtectedRoute roles={[ROLES.ADMIN]}>
+                    <AuditLog />
                   </ProtectedRoute>
                 }
               />

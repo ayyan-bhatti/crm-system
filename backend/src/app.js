@@ -18,6 +18,7 @@ const productRoutes = require('./routes/productRoutes');
 const orderRoutes = require('./routes/orderRoutes');
 const dashboardRoutes = require('./routes/dashboardRoutes');
 const aiSearchRoutes = require('./routes/aiSearchRoutes');
+const auditRoutes = require('./routes/auditRoutes');
 
 /**
  * The Express application.
@@ -278,6 +279,7 @@ app.use('/api/products', productRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/ai-search', aiSearchRoutes);
+app.use('/api/audit-logs', auditRoutes);
 
 // --- Error handling --------------------------------------------------------
 // Registered last so they see errors from every route above.
