@@ -11,6 +11,7 @@ import {
   Spinner,
   StatusBadge,
 } from '../../components/common';
+import CustomerSummaryCard from '../../components/CustomerSummaryCard';
 import { btnDanger, btnPrimary, btnSecondary, formatDate, link, money, td, th } from '../../ui';
 
 /** A single customer, their details, and every order placed for them. */
@@ -68,6 +69,10 @@ export default function CustomerDetail() {
       />
 
       <ErrorBanner message={actionError} onDismiss={() => setActionError('')} />
+
+      {/* Loads independently of the details below, so a slow AI call never
+          delays the record the user actually navigated to. */}
+      <CustomerSummaryCard customerId={customer._id} />
 
       <div className="grid gap-6 lg:grid-cols-3">
         <Card className="p-5 lg:col-span-1">

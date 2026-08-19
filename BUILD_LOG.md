@@ -631,3 +631,89 @@ record the new values as the old ones and make the trail actively misleading.
   field-level diff expandable per row.
 
 23 new tests. **289 backend tests passing.** Phase 1 complete.
+
+---
+
+# Phase 2 — AI features
+
+## Phase 2.1 — AI customer summary
+
+### The one decision the whole feature rests on
+
+The tempting shape is: hand the model the customer's order history and ask it to summarise.
+That is exactly the shape that produces a CRM which confidently reports the wrong revenue.
+**Language models are not arithmetic engines** — they will add fourteen order totals and be
+plausibly, invisibly wrong, and the person reading the summary has no way to tell.
+
+So the split is absolute:
+
+| | responsibility |
+|---|---|
+| `services/customerMetrics.js` | computes **every** figure, with MongoDB doing the arithmetic |
+| the model | receives those figures and writes prose about them |
+
+The model never sees a raw order and is never asked to count anything.
+
+**Enforced twice, not once.** The prompt tells it the figures are authoritative and must
+not be recalculated — but a prompt instruction is a *request*. The guarantee is the
+response schema: it has **no numeric fields at all**, so a figure the model invented has
+nowhere to land. There is a test that passes `totalRevenue: 999999` through the validator
+and asserts it is dropped.
+
+### Figures, and the definitions behind them
+
+One aggregation pipeline, not several queries — one round trip, and every figure computed
+from the same view of the data, so the order count and the revenue can never disagree
+because an order arrived between two reads.
+
+- **Revenue counts completed orders only.** Pending money is not revenue — it can still be
+  cancelled — and counting it would make the summary optimistic exactly where accuracy
+  matters. Written down in one place because the dashboard and the summary must agree; two
+  definitions of "revenue" in one product is a support ticket waiting to happen.
+- **Order count includes everything, cancellations included.** "They placed 12 orders" is
+  true, and hiding the cancellations would misrepresent the relationship.
+- **Average order value divides by completed orders,** to stay consistent with revenue.
+  Dividing revenue by every order would produce a number that is not the average of
+  anything.
+
+### Trend: five words, not a percentage
+
+`rising / steady / declining / new / dormant / no_orders`, from comparing revenue in the
+last 90 days against the 90 before.
+
+Deliberately coarse. A percentage change between two windows *sounds* precise and is mostly
+noise for a customer with three orders; a word is honest about how much the data actually
+supports. The 20% threshold is a judgement, chosen so ordinary variation in one order's
+size does not read as a trend.
+
+### It degrades to a template, never to an error
+
+Every figure comes from the database, so when the AI call fails nothing about the *data* is
+unavailable — only the wording. A 503 would hide correct information behind a failure in
+the optional part of the feature. `services/summaryFallback.js` writes the same summary by
+rule.
+
+The fallback's wording is deliberately plainer and **never claims higher than "medium"
+confidence** — a template cannot judge how well data supports a conclusion, and claiming
+otherwise would be a lie told by a string concatenation.
+
+**`mode` is in the response** (`'ai'` or `'fallback'`) and the UI says which. A generated
+sentence and a templated one look identical on screen; letting a reader assume the first
+when it is the second is the small dishonesty that costs trust in the whole feature.
+
+### The UI keeps provenance visible
+
+The card separates the **figures** (computed, exact) from the **narrative** (generated, an
+interpretation) into distinct visual blocks. Laying them out as one paragraph would invite
+a reader to trust both equally. The card also loads independently of the rest of the page,
+so a slow AI call never delays the record the user actually navigated to.
+
+### New endpoint
+
+`GET /api/customers/:id/summary` — returns `{ metrics, summary, mode }`. Same access rule
+as reading the customer: a summary is a view of the record, so it cannot be a way around
+the record's permissions (tested). Rate limited with the AI limiter — Phase 2.4 replaces
+that with one that also counts per user.
+
+25 new tests, all with the model stubbed — no API key needed and no credits spent.
+**314 backend tests passing.**

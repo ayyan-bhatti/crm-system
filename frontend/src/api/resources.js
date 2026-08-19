@@ -30,6 +30,9 @@ export const customersApi = {
   create: (payload) => client.post('/customers', payload).then((r) => r.data.data),
   update: (id, payload) => client.patch(`/customers/${id}`, payload).then((r) => r.data.data),
   remove: (id) => client.delete(`/customers/${id}`).then((r) => r.data),
+  // Figures computed server-side plus an AI narrative about them. Always
+  // returns both; `mode` says whether the narrative came from the model.
+  summary: (id) => client.get(`/customers/${id}/summary`).then((r) => r.data.data),
 };
 
 // --- products ---------------------------------------------------------------
