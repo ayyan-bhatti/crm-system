@@ -43,10 +43,42 @@ export const productsApi = {
 };
 
 // --- orders -----------------------------------------------------------------
+
+/**
+ * A fresh idempotency key for one order submission.
+ *
+ * `crypto.randomUUID` is available in every browser this app targets; the
+ * fallback covers a non-secure context (plain http on a LAN address), where it
+ * is undefined. Two clients colliding would need the same random value AND the
+ * same user account, so the fallback's weaker randomness is not a real risk.
+ */
+function idempotencyKey() {
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}-${Math.random()
+    .toString(36)
+    .slice(2)}`;
+}
+
 export const ordersApi = {
   list: (params) => client.get('/orders', { params }).then((r) => r.data),
   get: (id) => client.get(`/orders/${id}`).then((r) => r.data.data),
-  create: (payload) => client.post('/orders', payload).then((r) => r.data.data),
+
+  /**
+   * Create an order.
+   *
+   * The key is generated HERE rather than inside the axios interceptor on
+   * purpose: a retry has to reuse the key of the attempt it is retrying, and an
+   * interceptor firing per HTTP request would mint a new one for the retry —
+   * defeating the whole mechanism. Generating it once per logical submission is
+   * what makes the axios 401-refresh replay (see api/client.js) safe.
+   *
+   * Callers may pass their own key to retry a submission whose response was
+   * lost.
+   */
+  create: (payload, key = idempotencyKey()) =>
+    client
+      .post('/orders', payload, { headers: { 'Idempotency-Key': key } })
+      .then((r) => r.data.data),
   update: (id, payload) => client.patch(`/orders/${id}`, payload).then((r) => r.data.data),
   remove: (id) => client.delete(`/orders/${id}`).then((r) => r.data),
 };

@@ -51,6 +51,29 @@ const SORTABLE_FIELDS = ['total', 'status', 'createdAt'];
  * items, snapshotting each product's current price.
  *
  * The client's own `total` is never trusted — it is always recomputed here.
+ *
+ * WHAT THE STOCK CHECK IN HERE IS AND IS NOT
+ *
+ * It reads `stockQty` and compares. That is a read-then-write check, and on its
+ * own it is unsafe: between this read and the decrement, another request can
+ * take the stock, and both callers would believe they had it.
+ *
+ * It is kept anyway, because it is the only place that can produce a *useful*
+ * error — it knows the product's name, SKU, how many were asked for and how
+ * many exist ("Insufficient stock for Blue Widget (SKU-12): requested 5,
+ * available 2"). The atomic decrement can only report that it matched nothing.
+ *
+ * So the division of labour is deliberate:
+ *
+ *   this check          fast, friendly, advisory. Catches the overwhelmingly
+ *                       common case — a genuinely impossible order — and
+ *                       explains it well.
+ *   decrementStock      the actual guarantee. A conditional update that cannot
+ *                       be raced. Correctness lives there and only there.
+ *
+ * For a *pending* order this check is the only stock validation that runs at
+ * all, and that is correct: a pending order reserves nothing, so its check is
+ * inherently advisory — the stock is verified again, atomically, on completion.
  */
 async function buildOrderItems(rawItems, session = null) {
   if (!Array.isArray(rawItems) || rawItems.length === 0) {
@@ -89,6 +112,7 @@ async function buildOrderItems(rawItems, session = null) {
   for (const product of products) {
     const quantity = merged.get(String(product._id));
 
+    // Advisory — see the note above. decrementStock is what actually enforces it.
     if (quantity > product.stockQty) {
       throw ApiError.badRequest(
         `Insufficient stock for "${product.name}" (${product.sku}): ` +

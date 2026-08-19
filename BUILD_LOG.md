@@ -446,3 +446,92 @@ a place no undo exists for. Nothing in the application puts those back. Only the
 can, and only if the work really was in a transaction.
 
 14 new tests. **250 backend tests passing.** No API contract change.
+
+## Phase 1.6 — Concurrency-safe stock and idempotent order creation
+
+### Two failure modes that survive a green test suite
+
+Both of these only appear under real traffic, and both show up months later as *"the
+numbers don't add up"*:
+
+- **Overselling** — two requests each read the stock, each see enough, each decrement.
+- **Duplicate orders** — one logical submission becomes two, because the response was lost
+  and the client retried.
+
+Neither can be found by testing one request at a time, which is why the new tests fire
+requests in parallel and replay them.
+
+### Atomic conditional updates: what is authoritative and what is not
+
+`decrementStock` uses `updateOne({ _id, stockQty: { $gte: quantity } }, { $inc: … })`.
+MongoDB matches and decrements as **one operation**, so two requests for the last unit
+cannot both succeed — the loser matches no document and reports zero modified. A
+read-then-write check lets both through and lands at stock `-1`.
+
+The read-then-write check in `buildOrderItems` is deliberately **kept**, and its role is
+now written down in the code:
+
+| | role |
+|---|---|
+| `buildOrderItems` check | **Advisory.** The only place that can produce a useful message — it knows the product name, SKU, amount requested and amount available. Catches the overwhelmingly common case (a genuinely impossible order) and explains it. |
+| `decrementStock` | **Authoritative.** A conditional update that cannot be raced. Correctness lives here and only here. |
+
+For a *pending* order the advisory check is the only stock validation that runs, and that
+is correct — a pending order reserves nothing, so its check is inherently advisory and the
+stock is verified again, atomically, on completion.
+
+### Idempotency keys
+
+`POST /api/orders` accepts an optional `Idempotency-Key` header. The client generates one
+per logical submission and reuses it on every retry.
+
+**Why the submit button is not the answer.** Disabling it handles the double-click and
+does nothing at all for the case that actually costs money: the response is lost, the user
+refreshes, and the retry comes from a *new page load* where no button state exists. The
+client cannot know whether the order was created — retrying risks a duplicate, not
+retrying risks losing the sale. An idempotency key removes the dilemma.
+
+**Why the stored response, not just the key.** Recording "this key was used" and rejecting
+the retry leaves the client exactly where it started — it still does not know the order id.
+Replaying the original response answers the real question.
+
+**Why the reservation is an insert into a unique index, not a check-then-insert.** Two
+retries can arrive in the same millisecond, on different serverless instances. Both would
+read "no key yet" and both would proceed. Inserting into a unique index pushes the decision
+to the database, the only place that can arbitrate: one insert wins, the other gets a
+duplicate-key error. That *is* the mechanism.
+
+**A fingerprint (SHA-256 of method + path + body) is stored too.** A retry sends the same
+body; the same key with a *different* body is a client bug, and replaying the stored
+response would hand back an unrelated order. Refused with 409.
+
+**Key generation lives in `ordersApi.create`, not in the axios interceptor.** An
+interceptor fires per HTTP request, so it would mint a *new* key for a retry — defeating
+the mechanism entirely. Generating once per logical submission is also what makes the
+401-refresh-and-replay in `api/client.js` safe.
+
+### Three trade-offs
+
+1. **The key is optional.** Requiring it would be stricter and would break every existing
+   client and curl command the day it shipped. Optional keeps the API backwards compatible
+   while the frontend sends one on every order, so the path users actually take is
+   protected. Cost: a client that forgets the header gets no protection and nothing tells
+   it so.
+2. **Keys expire after 24 hours.** Long enough for any realistic retry, short enough that
+   the collection does not grow forever. A longer window prevents more duplicates and
+   stores more data — a judgement, not a fact.
+3. **A failed request releases its key.** The request created nothing, so there is nothing
+   to protect from a repeat, and holding the key would force a client to invent a new one
+   just to correct a typo.
+
+If recording the outcome fails, the reservation is left `in_progress` and a retry gets a
+409 telling it to try shortly, until the record expires. Losing a response is a strictly
+better failure than executing the order twice.
+
+### API contract change (additive, non-breaking)
+
+`POST /api/orders` accepts `Idempotency-Key`. Responses to a replay carry
+`Idempotent-Replay: true`. New status codes on that endpoint: **409** for a key reused with
+a different body, or still in progress.
+
+16 new tests. **266 backend tests passing.**
