@@ -37,9 +37,43 @@ const env = {
   mongoUri: process.env.MONGO_URI || '',
 
   jwtSecret: process.env.JWT_SECRET || '',
-  jwtExpiresIn: process.env.JWT_EXPIRES_IN || '7d',
+
+  /*
+   * Token lifetimes.
+   *
+   * The access token is deliberately short. It is a bearer credential: anyone
+   * holding it is the user until it expires, and there is no way to revoke a
+   * signed JWT without keeping a denylist. Fifteen minutes keeps the blast
+   * radius of a leaked token small while still being long enough that the
+   * refresh endpoint is not hit on every other request.
+   *
+   * The refresh token is long-lived (7 days = "stay signed in for a week") but
+   * it IS revocable, because it is stored server-side — see models/RefreshToken.
+   *
+   * JWT_EXPIRES_IN is the old single-token setting. It is read only as a
+   * fallback for existing deployments and is no longer the access-token TTL;
+   * see ACCESS_TOKEN_TTL below.
+   */
+  accessTokenTtl: process.env.ACCESS_TOKEN_TTL || '15m',
+  refreshTokenTtl: process.env.REFRESH_TOKEN_TTL || '7d',
 
   clientOrigin: process.env.CLIENT_ORIGIN || 'http://localhost:5173',
+
+  /*
+   * Cookie behaviour.
+   *
+   * `secure` must be on in production (cookies then only travel over HTTPS) but
+   * must be OFF for local http://localhost development, or the browser silently
+   * drops them and every request looks unauthenticated for no visible reason.
+   *
+   * `sameSite: 'lax'` is the right default here because the frontend and API
+   * share an origin behind the Vercel rewrites, so no cross-site cookie is ever
+   * needed. 'lax' also blocks the cross-site POST that CSRF depends on, which
+   * is a second layer under the explicit CSRF token added later.
+   * Deployments that genuinely split the two origins can set COOKIE_SAME_SITE=none,
+   * which then requires secure cookies.
+   */
+  cookieSameSite: process.env.COOKIE_SAME_SITE || 'lax',
 
   anthropicApiKey: process.env.ANTHROPIC_API_KEY || '',
   anthropicModel: process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-6',
@@ -47,6 +81,8 @@ const env = {
 
 env.isTest = env.nodeEnv === 'test';
 env.isProduction = env.nodeEnv === 'production';
+/** Cookies are only marked Secure where HTTPS actually exists. */
+env.cookieSecure = env.isProduction;
 /** True on Vercel (and most FaaS platforms), which set this automatically. */
 env.isServerless = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
 

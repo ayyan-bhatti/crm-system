@@ -2,32 +2,57 @@ const User = require('../models/User');
 const ApiError = require('../utils/ApiError');
 const asyncHandler = require('../utils/asyncHandler');
 const { verifyToken } = require('../utils/token');
+const { ACCESS_COOKIE } = require('../utils/cookies');
 
 /**
  * Authentication middleware.
  *
- * Reads the `Authorization: Bearer <token>` header, verifies the JWT, loads the
- * matching user from the database and attaches it to `req.user`.
+ * Finds the access token, verifies it, loads the matching user and attaches it
+ * to `req.user`.
  *
- * The user is re-loaded on every request rather than trusted from the token
- * payload, so a deleted account or a role change takes effect immediately
- * instead of when the old token happens to expire.
+ * TWO ACCEPTED TRANSPORTS, IN THIS ORDER
+ *
+ *   1. `Authorization: Bearer <token>` — explicit, used by scripts, the test
+ *      suite and any non-browser client.
+ *   2. the httpOnly `simplecrm_access` cookie — used by the React app, which
+ *      never handles a token itself.
+ *
+ * The header is checked first so that a caller who sends one deliberately is
+ * never overridden by a stale cookie the browser happened to still have.
+ *
+ * `req.authVia` records which transport was used, because it changes what else
+ * is required: cookie-authenticated requests are attached automatically by the
+ * browser and therefore need CSRF protection, while a bearer header cannot be
+ * set by an attacker's cross-origin page and does not.
+ *
+ * The user is re-loaded from the database on every request rather than trusted
+ * from the token payload, so a deleted account or a role change takes effect
+ * immediately instead of whenever the old token happens to expire.
  */
 const protect = asyncHandler(async (req, res, next) => {
   const header = req.headers.authorization || '';
 
-  if (!header.startsWith('Bearer ')) {
-    throw ApiError.unauthorized('Not authenticated: missing bearer token');
+  let token = null;
+  let authVia = null;
+
+  if (header.startsWith('Bearer ')) {
+    token = header.slice('Bearer '.length).trim();
+    authVia = 'bearer';
+  } else if (req.cookies?.[ACCESS_COOKIE]) {
+    token = req.cookies[ACCESS_COOKIE];
+    authVia = 'cookie';
   }
 
-  const token = header.slice('Bearer '.length).trim();
+  if (!token) {
+    throw ApiError.unauthorized('Not authenticated: no session');
+  }
 
   let payload;
   try {
     payload = verifyToken(token);
   } catch (err) {
-    // Covers expired, malformed and tampered tokens alike — the client only
-    // needs to know it must log in again.
+    // Covers expired, malformed and tampered tokens alike. The client's only
+    // useful reaction is the same in every case: refresh, or log in again.
     throw ApiError.unauthorized('Not authenticated: invalid or expired token');
   }
 
@@ -37,6 +62,7 @@ const protect = asyncHandler(async (req, res, next) => {
   }
 
   req.user = user;
+  req.authVia = authVia;
   return next();
 });
 

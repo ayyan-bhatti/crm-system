@@ -44,8 +44,10 @@ export default function DashboardLayout() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
 
-  function handleLogout() {
-    logout();
+  // Awaited so the navigation happens after the server has revoked the refresh
+  // token — otherwise a fast click-through could race the request.
+  async function handleLogout() {
+    await logout();
     navigate('/login', { replace: true });
   }
 

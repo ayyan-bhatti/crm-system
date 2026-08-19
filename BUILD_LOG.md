@@ -35,3 +35,110 @@ I set up a MongoDB Atlas cluster, created a database user, opened network access
 ## What I'd do differently
 
 If I started over I'd set up the hosted database and Vercel environment variables before writing any code, instead of leaving deployment for the end. It would have caught this issue much earlier and saved time at the end of the project.
+
+---
+
+# Improvements round 2
+
+After the first review I got detailed feedback on security, AI depth, scalability and
+test coverage. This section logs each change and why I made it, in the order I made it.
+
+## Phase 1.1 — Auth tokens: localStorage to httpOnly cookies with refresh rotation
+
+### The problem
+
+The old flow signed one JWT valid for 7 days, returned it in the login response body
+and the React app kept it in `localStorage`. Two things are wrong with that:
+
+1. **`localStorage` is readable by any JavaScript on the page.** One XSS — an injected
+   script, a compromised npm package, a third-party widget — and the attacker copies out
+   a credential and uses it from their own machine.
+2. **A signed JWT cannot be revoked.** Logging out only deleted the local copy. Anyone
+   who had already captured the token stayed logged in for the rest of the week, and
+   there was no server-side action that could stop them.
+
+### What it is now
+
+Two tokens, both delivered as httpOnly cookies the frontend cannot read:
+
+| | access token | refresh token |
+|---|---|---|
+| what it is | signed JWT | 32 random bytes, no claims |
+| lifetime | 15 minutes | 7 days |
+| stored server-side? | no | yes, SHA-256 hashed |
+| revocable? | no | yes |
+| cookie path | `/` | `/api/auth` |
+
+The split is the point. The access token is stateless so that verifying it costs one
+signature check and no database round trip — affordable only because it expires in
+minutes. The refresh token is the long-lived half, so it is the one that has to be
+revocable, which means storing it.
+
+**Why hashed, and why SHA-256 rather than bcrypt.** A refresh token is
+password-equivalent: holding one mints access tokens for a week. Storing plaintext would
+mean a database leak hands over every live session. It is 32 bytes of CSPRNG output, not
+a human-chosen password, so there is no dictionary to attack — bcrypt's slowness would
+buy nothing and cost latency on every refresh.
+
+**Rotation and reuse detection.** Every call to `/api/auth/refresh` consumes the
+presented token and issues a new one. All tokens descended from one login share a
+`family` id. If an already-consumed token is presented again, either the user's copy or a
+thief's copy is being replayed and there is no way to tell which — so the entire family
+is revoked and both are forced to log in again. That caps the value of a stolen refresh
+token at "until the real user next refreshes".
+
+**Cookie flags,** all set in one place (`utils/cookies.js`) so they cannot drift apart:
+`httpOnly` (the whole point), `secure` in production only (localhost has no HTTPS and the
+browser would silently drop a Secure cookie), `sameSite=lax` (the browser will not attach
+these to a cross-site POST, which removes the main CSRF vector before the CSRF token in
+1.3 is even consulted), and the refresh cookie scoped to `/api/auth` so the long-lived
+credential is not attached to every ordinary API call.
+
+### Trade-off I accepted
+
+Cookies are attached automatically, and that is exactly what makes CSRF possible. This
+change is only a net win together with CSRF protection (Phase 1.3); `SameSite=Lax` is the
+interim cover. `Authorization: Bearer` is still accepted by the auth middleware for
+scripts, the test suite and any future mobile client — an attacker's page cannot set a
+header on a cross-site request, so bearer requests are inherently CSRF-immune, and
+`req.authVia` records which transport was used so the CSRF check can require a token only
+where it is needed.
+
+### Frontend changes
+
+- `api/client.js`: no request interceptor and no token; `withCredentials: true` instead.
+  A 401 triggers **one** transparent refresh and a replay of the original request.
+- Concurrent 401s share a single in-flight refresh promise. Without that, a dashboard
+  firing five requests at once would call refresh five times, and because refresh
+  *rotates*, calls 2–5 would present an already-consumed token — the server would read
+  that as reuse and kill the session. This was the subtle bug worth designing out.
+- A dead session now notifies React (`onSessionExpired`) instead of calling
+  `window.location.assign('/login')`, so the redirect happens in the router without a
+  full page reload throwing away form state.
+
+### API contract changes (breaking)
+
+- `POST /api/auth/login` and `/register` now **set cookies**. They still return
+  `data.token` for non-browser clients; the refresh token is never in a response body.
+- **New:** `POST /api/auth/refresh` — rotates the session. No auth header needed; the
+  refresh cookie is the credential.
+- **New:** `POST /api/auth/logout` — clears cookies *and* revokes the refresh token
+  server-side. Always 200, because logging out should be idempotent.
+- Any client must now send credentials (`withCredentials` / `credentials: 'include'`).
+
+### New environment variables
+
+`ACCESS_TOKEN_TTL` (default `15m`), `REFRESH_TOKEN_TTL` (default `7d`),
+`COOKIE_SAME_SITE` (default `lax`). `JWT_EXPIRES_IN` is no longer read.
+
+Also set `trust proxy = 1` on the app: behind Vercel's edge, Express otherwise reports
+the proxy's address as `req.ip`, which would make the per-IP rate limiting in Phase 1.2
+treat every visitor as one client.
+
+### Tests
+
+21 new tests in `tests/session.test.js`, using supertest's cookie-jar agent so the real
+browser flow is exercised: cookie flags (httpOnly, SameSite, Path), short access-token
+lifetime, refresh token absent from response bodies and stored only as a hash, cookie-only
+authentication, rotation, replay rejection, family revocation on reuse, and logout
+revoking a previously captured token. **188 backend tests passing** (was 167).

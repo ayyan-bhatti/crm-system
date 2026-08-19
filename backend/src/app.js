@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const morgan = require('morgan');
+const cookieParser = require('cookie-parser');
 const mongoose = require('mongoose');
 
 const env = require('./config/env');
@@ -32,6 +33,20 @@ const aiSearchRoutes = require('./routes/aiSearchRoutes');
  * rather than in server.js, which Vercel never runs.
  */
 const app = express();
+
+/**
+ * Trust the platform's proxy.
+ *
+ * Vercel (like any hosted platform) terminates TLS at its edge and forwards the
+ * request over HTTP, setting X-Forwarded-For and X-Forwarded-Proto. Without
+ * this setting Express reports the proxy's address as `req.ip` — which would
+ * make per-IP rate limiting count every visitor as the same client — and treats
+ * the connection as insecure, which suppresses Secure cookies.
+ *
+ * `1` rather than `true`: trusting only the single closest proxy means a client
+ * cannot spoof its own address by sending its own X-Forwarded-For header.
+ */
+app.set('trust proxy', 1);
 
 // --- Global middleware -----------------------------------------------------
 
@@ -78,6 +93,15 @@ app.use(
 // Parse JSON request bodies (with a sane size cap).
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true }));
+
+/**
+ * Parse cookies into `req.cookies`.
+ *
+ * The session lives in two httpOnly cookies (see utils/cookies.js), so nothing
+ * below this line can authenticate a browser request without it. Registered
+ * before the routes for that reason.
+ */
+app.use(cookieParser());
 
 // Request logging — noise-free during tests.
 if (!env.isTest) {
