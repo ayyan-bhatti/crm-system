@@ -6,7 +6,7 @@ describe('Authentication', () => {
     it('creates an account and returns a token', async () => {
       const res = await api()
         .post('/api/auth/register')
-        .send({ name: 'Ayesha Khan', email: 'ayesha@example.com', password: 'password123' });
+        .send({ name: 'Ayesha Khan', email: 'ayesha@example.com', password: 'Karachi-Ledger-72' });
 
       expect(res.status).toBe(201);
       expect(res.body.success).toBe(true);
@@ -17,7 +17,7 @@ describe('Authentication', () => {
     it('never returns the password hash', async () => {
       const res = await api()
         .post('/api/auth/register')
-        .send({ name: 'Ayesha', email: 'a@example.com', password: 'password123' });
+        .send({ name: 'Ayesha', email: 'a@example.com', password: 'Karachi-Ledger-72' });
 
       expect(res.body.data.user.password).toBeUndefined();
     });
@@ -25,21 +25,21 @@ describe('Authentication', () => {
     it('stores the password hashed, not in plain text', async () => {
       await api()
         .post('/api/auth/register')
-        .send({ name: 'Ayesha', email: 'a@example.com', password: 'password123' });
+        .send({ name: 'Ayesha', email: 'a@example.com', password: 'Karachi-Ledger-72' });
 
       const user = await User.findOne({ email: 'a@example.com' }).select('+password');
-      expect(user.password).not.toBe('password123');
+      expect(user.password).not.toBe('Karachi-Ledger-72');
       expect(user.password).toMatch(/^\$2[aby]\$/); // bcrypt hash prefix
     });
 
     it('makes the first account an admin and later ones sales reps', async () => {
       const first = await api()
         .post('/api/auth/register')
-        .send({ name: 'First', email: 'first@example.com', password: 'password123' });
+        .send({ name: 'First', email: 'first@example.com', password: 'Karachi-Ledger-72' });
 
       const second = await api()
         .post('/api/auth/register')
-        .send({ name: 'Second', email: 'second@example.com', password: 'password123' });
+        .send({ name: 'Second', email: 'second@example.com', password: 'Karachi-Ledger-72' });
 
       expect(first.body.data.user.role).toBe('admin');
       expect(second.body.data.user.role).toBe('sales_rep');
@@ -48,7 +48,7 @@ describe('Authentication', () => {
     it('ignores a role supplied in the request body', async () => {
       await api()
         .post('/api/auth/register')
-        .send({ name: 'First', email: 'first@example.com', password: 'password123' });
+        .send({ name: 'First', email: 'first@example.com', password: 'Karachi-Ledger-72' });
 
       // Someone trying to grant themselves admin on sign-up.
       const res = await api()
@@ -56,7 +56,7 @@ describe('Authentication', () => {
         .send({
           name: 'Sneaky',
           email: 'sneaky@example.com',
-          password: 'password123',
+          password: 'Karachi-Ledger-72',
           role: 'admin',
         });
 
@@ -64,7 +64,7 @@ describe('Authentication', () => {
     });
 
     it('rejects a duplicate email with 409', async () => {
-      const payload = { name: 'A', email: 'dup@example.com', password: 'password123' };
+      const payload = { name: 'A', email: 'dup@example.com', password: 'Karachi-Ledger-72' };
       await api().post('/api/auth/register').send(payload);
 
       const res = await api().post('/api/auth/register').send(payload);
@@ -92,7 +92,7 @@ describe('Authentication', () => {
     it('rejects a malformed email with 400', async () => {
       const res = await api()
         .post('/api/auth/register')
-        .send({ name: 'A', email: 'not-an-email', password: 'password123' });
+        .send({ name: 'A', email: 'not-an-email', password: 'Karachi-Ledger-72' });
 
       expect(res.status).toBe(400);
     });
@@ -102,13 +102,13 @@ describe('Authentication', () => {
     beforeEach(async () => {
       await api()
         .post('/api/auth/register')
-        .send({ name: 'Ayesha', email: 'ayesha@example.com', password: 'password123' });
+        .send({ name: 'Ayesha', email: 'ayesha@example.com', password: 'Karachi-Ledger-72' });
     });
 
     it('returns a token for valid credentials', async () => {
       const res = await api()
         .post('/api/auth/login')
-        .send({ email: 'ayesha@example.com', password: 'password123' });
+        .send({ email: 'ayesha@example.com', password: 'Karachi-Ledger-72' });
 
       expect(res.status).toBe(200);
       expect(res.body.data.token).toEqual(expect.any(String));
@@ -117,7 +117,7 @@ describe('Authentication', () => {
     it('accepts the email in a different case', async () => {
       const res = await api()
         .post('/api/auth/login')
-        .send({ email: 'AYESHA@example.com', password: 'password123' });
+        .send({ email: 'AYESHA@example.com', password: 'Karachi-Ledger-72' });
 
       expect(res.status).toBe(200);
     });
@@ -133,7 +133,7 @@ describe('Authentication', () => {
     it('rejects an unknown email with 401', async () => {
       const res = await api()
         .post('/api/auth/login')
-        .send({ email: 'nobody@example.com', password: 'password123' });
+        .send({ email: 'nobody@example.com', password: 'Karachi-Ledger-72' });
 
       expect(res.status).toBe(401);
     });
@@ -149,7 +149,7 @@ describe('Authentication', () => {
 
       const unknownEmail = await api()
         .post('/api/auth/login')
-        .send({ email: 'nobody@example.com', password: 'password123' });
+        .send({ email: 'nobody@example.com', password: 'Karachi-Ledger-72' });
 
       expect(wrongPassword.body.message).toBe(unknownEmail.body.message);
     });

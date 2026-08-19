@@ -117,7 +117,7 @@ describe('Role-based access control', () => {
       const res = await api()
         .post('/api/users')
         .set(manager.headers)
-        .send({ name: 'X', email: 'x@test.com', password: 'password123', role: 'admin' });
+        .send({ name: 'X', email: 'x@test.com', password: 'Karachi-Ledger-72', role: 'admin' });
 
       expect(res.status).toBe(403);
     });

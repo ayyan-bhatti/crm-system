@@ -17,7 +17,9 @@ const Product = require('./models/Product');
 const Order = require('./models/Order');
 const { ROLES, ORDER_STATUS } = require('./config/constants');
 
-const PASSWORD = 'password123';
+// Satisfies the password policy in utils/passwordPolicy.js — a seed that
+// could not pass the app's own rules would be a confusing thing to hand someone.
+const PASSWORD = 'Karachi-Ledger-72';
 
 const USERS = [
   { name: 'Ayyan', email: 'admin@simplecrm.test', role: ROLES.ADMIN },

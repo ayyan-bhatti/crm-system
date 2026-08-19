@@ -17,6 +17,10 @@ export const authApi = {
   // that the app needs to keep.
   logout: () => client.post('/auth/logout').then((r) => r.data),
   me: () => client.get('/auth/me').then((r) => r.data.data.user),
+  // Requires the current password, and signs out every OTHER device — see the
+  // controller for why both of those matter.
+  changePassword: (payload) =>
+    client.post('/auth/change-password', payload).then((r) => r.data.data),
 };
 
 // --- customers --------------------------------------------------------------

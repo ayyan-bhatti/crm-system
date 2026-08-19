@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const morgan = require('morgan');
 const cookieParser = require('cookie-parser');
+const helmet = require('helmet');
 const mongoose = require('mongoose');
 
 const env = require('./config/env');
@@ -50,6 +51,67 @@ const app = express();
 app.set('trust proxy', 1);
 
 // --- Global middleware -----------------------------------------------------
+
+/**
+ * Security headers.
+ *
+ * Registered first, so that even a response produced by an error further down
+ * still carries them.
+ *
+ * WHAT THIS CSP DOES AND DOES NOT COVER — the important caveat.
+ *
+ * This app is deployed as two Vercel services: the API (this Express app) and
+ * the static frontend. A header set here applies only to API responses, which
+ * are JSON. It does NOT reach the HTML the browser actually renders — that is
+ * served by the frontend service, so the CSP protecting the *app* is declared
+ * in vercel.json instead. Setting a strict CSP here and assuming the SPA is
+ * covered is an easy and completely silent mistake, so both halves exist and
+ * both are commented.
+ *
+ * What this policy is for, then, is the API's own responses: a JSON endpoint
+ * has no legitimate reason to load a script, embed a frame, or be framed by
+ * anyone, so everything is denied. If an endpoint were ever tricked into
+ * reflecting HTML, the browser would refuse to execute it.
+ */
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        // A JSON API needs no resources at all. Deny by default, allow nothing.
+        defaultSrc: ["'none'"],
+        // Blocks clickjacking: no page may put an API response in a frame.
+        frameAncestors: ["'none'"],
+        baseUri: ["'none'"],
+        formAction: ["'none'"],
+        // Only meaningful in production, where HTTPS actually exists.
+        ...(env.isProduction ? {} : { upgradeInsecureRequests: null }),
+      },
+    },
+
+    /*
+     * HSTS: tell the browser to use HTTPS for this domain for a year, so a
+     * later plain-http request is upgraded before it leaves the machine and
+     * cannot be intercepted. Off outside production, where there is no HTTPS
+     * and pinning localhost to it would make the app unreachable — a genuinely
+     * unpleasant mistake, because the browser remembers it for a year.
+     */
+    hsts: env.isProduction ? { maxAge: 31536000, includeSubDomains: true } : false,
+
+    /*
+     * Send the origin but not the path on cross-origin navigations. Record ids
+     * live in our URLs (/customers/652f...), and a full Referer would leak them
+     * to any third-party site a user clicks through to.
+     */
+    referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
+
+    /*
+     * The frontend and API share an origin in production and are proxied
+     * together in development, so nothing legitimate loads API responses as a
+     * subresource from elsewhere.
+     */
+    crossOriginResourcePolicy: { policy: 'same-site' },
+  })
+);
 
 /**
  * CORS.

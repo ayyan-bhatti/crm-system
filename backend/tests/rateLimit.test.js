@@ -16,7 +16,7 @@ const { loginLimiter, registerLimiter } = require('../src/middleware/rateLimit')
 const CREDENTIALS = {
   name: 'Ayesha Khan',
   email: 'ayesha@example.com',
-  password: 'password123',
+  password: 'Karachi-Ledger-72',
 };
 
 /**
@@ -103,7 +103,7 @@ describe('Per-IP rate limiting', () => {
       for (let i = 0; i < 6; i += 1) {
         last = await api()
           .post('/api/auth/register')
-          .send({ name: `User ${i}`, email: `user${i}@example.com`, password: 'password123' });
+          .send({ name: `User ${i}`, email: `user${i}@example.com`, password: 'Karachi-Ledger-72' });
       }
 
       expect(last.status).toBe(429);

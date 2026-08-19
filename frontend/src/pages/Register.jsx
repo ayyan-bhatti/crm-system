@@ -62,8 +62,12 @@ export default function Register() {
               type="password"
               autoComplete="new-password"
               required
-              minLength={8}
-              hint="At least 8 characters."
+              minLength={10}
+              // Stating the rule up front is worth more than a good error
+              // message: nobody enjoys discovering a policy one rejection at a
+              // time. The server is still the enforcement — see
+              // backend/src/utils/passwordPolicy.js — this is just the hint.
+              hint="At least 10 characters, mixing letters, numbers and symbols — or a phrase of 14+ characters."
               value={form.password}
               onChange={(e) => setForm({ ...form, password: e.target.value })}
             />

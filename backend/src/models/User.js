@@ -22,7 +22,12 @@ const userSchema = new mongoose.Schema({
   password: {
     type: String,
     required: [true, 'Password is required'],
-    minlength: [8, 'Password must be at least 8 characters'],
+    // Backstop for documents created directly through the model (the seed
+    // script, test factories). The real policy — length, blocklist, and not
+    // being derived from the account — is enforced at the API boundary in
+    // utils/passwordPolicy.js, because only there do we know the user's name
+    // and email to check the password against.
+    minlength: [10, 'Password must be at least 10 characters'],
     // Never ship the hash to a client by accident: it must be asked for
     // explicitly with .select('+password'), which only the login flow does.
     select: false,

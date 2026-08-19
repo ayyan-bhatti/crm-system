@@ -6,8 +6,10 @@ const {
   issueSession,
   rotateSession,
   revokeToken,
+  revokeAllForUser,
 } = require('../services/sessionService');
 const { setAuthCookies, clearAuthCookies, REFRESH_COOKIE } = require('../utils/cookies');
+const { assertStrongPassword } = require('../utils/passwordPolicy');
 
 /**
  * Send a freshly issued session to the client.
@@ -47,6 +49,11 @@ const register = asyncHandler(async (req, res) => {
   if (!name || !email || !password) {
     throw ApiError.badRequest('Name, email and password are required');
   }
+
+  // Checked before the duplicate-email lookup so a weak password is reported
+  // even when the address is already taken — otherwise someone fixes the email,
+  // resubmits, and only then learns about the password.
+  assertStrongPassword(password, { name, email });
 
   const existing = await User.findOne({ email: email.toLowerCase().trim() });
   if (existing) {
@@ -185,9 +192,59 @@ const logout = asyncHandler(async (req, res) => {
   res.json({ success: true, message: 'Signed out' });
 });
 
+/**
+ * POST /api/auth/change-password
+ *
+ * The password-reset surface this app actually has. A full "forgot password"
+ * flow needs an email provider to deliver a one-time link, and there is none
+ * configured — inventing one would be a fake feature, so this is the honest
+ * version: an authenticated user changing their own password.
+ *
+ * Three things it does that are easy to leave out:
+ *
+ *   1. Requires the CURRENT password. Without it, anyone who walks up to an
+ *      unlocked laptop — or holds a stolen access token — can lock the real
+ *      owner out of their own account.
+ *   2. Applies the same strength policy as registration. A policy enforced on
+ *      one of the two paths that set a password is not a policy.
+ *   3. Revokes every other session. A password change is what someone does
+ *      when they think their account is compromised; if the attacker's session
+ *      survives it, the change achieved nothing. A fresh session is issued for
+ *      this browser so the user is not logged out by their own action.
+ */
+const changePassword = asyncHandler(async (req, res) => {
+  const { currentPassword, newPassword } = req.body;
+
+  if (!currentPassword || !newPassword) {
+    throw ApiError.badRequest('Current password and new password are required');
+  }
+
+  const user = await User.findById(req.user._id).select('+password');
+
+  if (!(await user.comparePassword(currentPassword))) {
+    throw ApiError.unauthorized('Current password is incorrect');
+  }
+
+  assertStrongPassword(newPassword, { name: user.name, email: user.email });
+
+  if (await user.comparePassword(newPassword)) {
+    throw ApiError.badRequest('New password must be different from the current one');
+  }
+
+  user.password = newPassword; // The pre-save hook hashes it.
+  await user.save();
+
+  await revokeAllForUser(user._id, 'password changed');
+
+  // Issue a new session so the user stays signed in on the device they just
+  // used, while every other device is signed out.
+  const session = await issueSession(user, req);
+  sendSession(res, { user, ...session });
+});
+
 /** GET /api/auth/me — the currently authenticated user, for session restore. */
 const getMe = asyncHandler(async (req, res) => {
   res.json({ success: true, data: { user: req.user } });
 });
 
-module.exports = { register, login, refresh, logout, getMe };
+module.exports = { register, login, refresh, logout, changePassword, getMe };

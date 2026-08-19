@@ -4,10 +4,15 @@ const {
   login,
   refresh,
   logout,
+  changePassword,
   getMe,
 } = require('../controllers/authController');
 const { protect } = require('../middleware/auth');
-const { loginLimiter, registerLimiter } = require('../middleware/rateLimit');
+const {
+  loginLimiter,
+  registerLimiter,
+  passwordResetLimiter,
+} = require('../middleware/rateLimit');
 
 const router = express.Router();
 
@@ -33,5 +38,12 @@ router.post('/logout', logout);
 
 // Authenticated
 router.get('/me', protect, getMe);
+
+/*
+ * Rate limited as well as authenticated: the endpoint verifies the current
+ * password, which makes it a second place an attacker with a hijacked session
+ * can guess one. Endpoints behind a login are the easy ones to forget.
+ */
+router.post('/change-password', protect, passwordResetLimiter, changePassword);
 
 module.exports = router;

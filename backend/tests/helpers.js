@@ -27,7 +27,7 @@ async function createUser(role = ROLES.SALES_REP, overrides = {}) {
   const user = await User.create({
     name: overrides.name || `Test ${role} ${sequence}`,
     email: overrides.email || `${role}${sequence}@test.com`,
-    password: overrides.password || 'password123',
+    password: overrides.password || 'Karachi-Ledger-72',
     role,
     ...overrides,
   });

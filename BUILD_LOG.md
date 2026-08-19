@@ -274,3 +274,91 @@ then 403. Bearer-authenticated clients are unaffected.
 
 10 new tests, including the attack reproduced directly: a request carrying the session
 cookie but no header must fail. **211 backend tests passing.**
+
+## Phase 1.4 — Security headers and password policy
+
+### Security headers: the split that is easy to get silently wrong
+
+The app is two Vercel services — the Express API and the static frontend. **A header set
+by Express only ever lands on a JSON response.** It never reaches the HTML document the
+browser is actually executing scripts in. So configuring a strict CSP in helmet and
+assuming the SPA is protected is a complete no-op, and nothing warns you.
+
+Both halves therefore exist, and each points at the other:
+
+- **helmet, in `app.js`** — for API responses. A JSON endpoint has no legitimate reason to
+  load a script, embed a frame or be framed, so `default-src 'none'`, `frame-ancestors
+  'none'`, `base-uri 'none'`, `form-action 'none'`. If an endpoint were ever tricked into
+  reflecting HTML, the browser would refuse to run it. Plus HSTS (production only —
+  pinning `localhost` to HTTPS is remembered by the browser for a year and is genuinely
+  unpleasant to undo), `strict-origin-when-cross-origin` referrer policy (record ids live
+  in our URLs, and a full `Referer` would leak them to any site a user clicks through
+  to), and `Cross-Origin-Resource-Policy: same-site`.
+- **`vercel.json` `headers`** — for the frontend. The real app CSP, with each directive
+  commented in the file itself.
+
+### One deliberate CSP weakening, stated plainly
+
+`style-src` includes `'unsafe-inline'`. Recharts (the dashboard charts) sets style
+attributes at runtime and CSP counts those as inline styles. Removing it would require
+nonces on every generated element, which a third-party chart library does not offer.
+Inline **style** is a far smaller risk than inline **script** — the worst case is
+defacement, not code execution — and `script-src 'self'` stays strict. `connect-src 'self'`
+means even a script that somehow ran could not exfiltrate data to an attacker's server.
+
+`style-src`/`font-src` also allow Google Fonts, because the app loads IBM Plex Sans there.
+
+### Password policy: why it is not "8 chars, one capital, one number"
+
+That is the policy NIST SP 800-63B specifically advises against, and it is worth being
+able to say why. Composition rules do not produce unpredictable passwords — they produce
+`Password1!`, because people satisfy them in the same few ways. What resists guessing is
+**length** and **not already being in a breach corpus**.
+
+| rule | reasoning |
+|---|---|
+| ≥ 10 characters | The floor. |
+| ≥ 14 → no variety required | `correct horse battery staple` is far stronger than `Xy7!qZ` and should not be rejected for lacking a digit. |
+| 10–13 → 3 of 4 character classes | A short password has to buy its entropy from variety instead. |
+| not on the common list | Credential stuffing tries those first, so blocking them removes the cheapest attack outright. |
+| nothing derived from the name or email | `ayesha@…` / `ayesha2024` is guessed first by exactly the person attacking the account. |
+| ≤ 72 bytes | **Not a style rule — a real bug.** bcrypt silently truncates at 72 bytes. Without a limit, a 100-character password is accepted, quietly shortened, and any other password sharing the first 72 bytes opens the account. Accepting input we then discard is worse than saying no. |
+
+Two honest limits: the blocklist is a small in-repo list, where production should query a
+real corpus (Have I Been Pwned's k-anonymity API); and it is checked against several
+normalised forms of the input, because people bolt digits on (`password123`) and
+substitute characters (`P@ssw0rd`). **The ordering there was a bug I hit and fixed:**
+undoing substitutions *before* stripping the trailing digits turns `P@ssw0rd123` into
+`passwordi2e`, which matches nothing. The suffix has to come off first.
+
+All problems are reported at once. Telling someone their password is too short, watching
+them fix it, then telling them it also contains their name is a small cruelty.
+
+### `POST /api/auth/change-password` (new)
+
+A full "forgot password" flow needs an email provider to deliver a one-time link, and
+none is configured — inventing one would be a fake feature. **This is the password-reset
+surface the app actually has**, and it does three things that are easy to leave out:
+
+1. **Requires the current password.** Otherwise anyone at an unlocked laptop, or holding a
+   stolen access token, locks the real owner out of their own account.
+2. **Applies the same strength policy as registration.** A policy enforced on one of the
+   two paths that set a password is not a policy.
+3. **Revokes every other session,** then issues a fresh one for this device. Changing a
+   password is what you do when you think you are compromised; if the attacker's session
+   survives it, the change achieved nothing.
+
+It is rate limited as well as authenticated — it verifies a password, so it is a second
+place to guess one, and endpoints behind a login are the easy ones to forget.
+
+**No UI for it yet** — the API binding exists in `resources.js`; the form belongs with the
+frontend work in Phase 4.
+
+### Fixture change worth noting
+
+Every test and the seed script used `password123`, which is now (correctly) rejected as a
+common password. They use a compliant password instead. The model's `minlength` went 8 →
+10 as a backstop; the real policy is enforced at the API boundary, because only there do
+we know the user's name and email to check the password against.
+
+25 new tests. **236 backend tests passing.**

@@ -16,7 +16,7 @@ const { CSRF_COOKIE, CSRF_HEADER } = require('../src/middleware/csrf');
 const CREDENTIALS = {
   name: 'Ayesha Khan',
   email: 'ayesha@example.com',
-  password: 'password123',
+  password: 'Karachi-Ledger-72',
 };
 
 function cookieValue(res, name) {
