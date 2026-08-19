@@ -1,5 +1,5 @@
-const Anthropic = require('@anthropic-ai/sdk');
 const env = require('../config/env');
+const aiClient = require('./aiClient');
 const { extractJson, parseAndValidate } = require('./aiJson');
 const {
   ENTITIES,
@@ -21,12 +21,12 @@ const {
  * database until it has been matched against the allow-lists in filterSchema.js.
  */
 
-// The SDK client is created once and reused. A short timeout and a single retry
-// keep a slow or wedged API call from holding an HTTP request open for minutes —
-// the endpoint would rather fall back to keyword search than hang.
-const anthropic = env.anthropicApiKey
-  ? new Anthropic({ apiKey: env.anthropicApiKey, timeout: 20000, maxRetries: 1 })
-  : null;
+/*
+ * The Anthropic client used to be constructed here, with its own timeout and
+ * retry settings. It moved to services/aiClient.js so the timeout, the backoff
+ * policy and the usage logging are defined once for every AI feature — two
+ * copies of a reliability policy is two places for it to quietly differ.
+ */
 
 /**
  * The system prompt. The schema portion is generated from filterSchema.js so it
@@ -212,28 +212,21 @@ function validateFilter(raw) {
 /**
  * Ask Claude to translate the query.
  *
- * Notes on the request shape:
- *  - `max_tokens` is small because the answer is one short JSON object.
- *  - `effort: "low"` because this is a translation task, not deep reasoning;
- *    it cuts latency and cost noticeably.
- *  - No assistant-message prefill: it is rejected on this model family, and the
- *    JSON is coaxed out with the system prompt plus defensive parsing instead.
+ * Timeouts, retries with backoff and usage logging all live in aiClient — this
+ * function's only job is the prompt.
+ *
+ * No assistant-message prefill: it is rejected on this model family, so the JSON
+ * is coaxed out with the system prompt plus defensive parsing instead.
  */
-async function callModel(query) {
-  const response = await anthropic.messages.create({
-    model: env.anthropicModel,
-    max_tokens: 1024,
-    output_config: { effort: 'low' },
+function callModel(query) {
+  return aiClient.complete({
+    feature: 'ai-search',
     system: buildSystemPrompt(),
-    messages: [{ role: 'user', content: query }],
+    user: query,
+    // Small: the answer is one short JSON filter object. A generous cap would
+    // only ever pay for output nobody reads.
+    maxTokens: 1024,
   });
-
-  // `content` is a list of blocks; join every text block rather than assuming
-  // the first one is text.
-  return response.content
-    .filter((block) => block.type === 'text')
-    .map((block) => block.text)
-    .join('\n');
 }
 
 /**
@@ -248,7 +241,7 @@ async function callModel(query) {
  * fails validation — collapses into the same graceful fallback signal.
  */
 async function translateQuery(query) {
-  if (!anthropic) {
+  if (!aiClient.isConfigured()) {
     return { mode: 'fallback', filter: null, reason: 'ANTHROPIC_API_KEY is not configured' };
   }
 

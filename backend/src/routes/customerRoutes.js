@@ -9,7 +9,7 @@ const {
 const { protect } = require('../middleware/auth');
 
 const { getCustomerSummary } = require('../controllers/customerInsightsController');
-const { aiSearchLimiter } = require('../middleware/rateLimit');
+const { aiSearchLimiter, aiPerUserLimiter } = require('../middleware/rateLimit');
 
 const router = express.Router();
 
@@ -24,11 +24,14 @@ router.route('/:id').get(getCustomer).patch(updateCustomer).delete(deleteCustome
 /*
  * The AI-backed account summary.
  *
- * Rate limited with the same limiter as AI search, because it is the same
- * concern: each call is a paid Anthropic request, and an unthrottled one is a
- * way for any signed-in user to spend the project's budget. Phase 2.4 replaces
- * this with a limiter that also counts per user rather than only per IP.
+ * Rate limited exactly like AI search, and for the same reason: each call is a
+ * paid Anthropic request, so an unthrottled endpoint is a way for any signed-in
+ * user to spend the project's budget — a stuck retry loop does it by accident.
+ * Limited per IP and per user; see middleware/rateLimit.js for why both.
+ *
+ * `router.use(protect)` above has already run, so `req.user` is available for
+ * the per-user limiter to key on.
  */
-router.get('/:id/summary', aiSearchLimiter, getCustomerSummary);
+router.get('/:id/summary', aiSearchLimiter, aiPerUserLimiter, getCustomerSummary);
 
 module.exports = router;

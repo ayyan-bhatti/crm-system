@@ -1,7 +1,7 @@
 const express = require('express');
 const { aiSearch } = require('../controllers/aiSearchController');
 const { protect } = require('../middleware/auth');
-const { aiSearchLimiter } = require('../middleware/rateLimit');
+const { aiSearchLimiter, aiPerUserLimiter } = require('../middleware/rateLimit');
 
 const router = express.Router();
 
@@ -13,9 +13,15 @@ const router = express.Router();
  * Anthropic call, so an unthrottled endpoint lets any signed-in user spend the
  * project's budget — a stuck retry loop does it by accident.
  *
- * Ordering matters. `protect` runs first so that an unauthenticated flood is
- * rejected by the cheaper check and never consumes a signed-in user's quota.
+ * Two limits, because they catch different things: per IP (one machine or
+ * script hammering the endpoint) and per user (an office behind one NAT address
+ * would otherwise share a single quota, and a user on a hotspot could dodge the
+ * IP limit entirely). See middleware/rateLimit.js.
+ *
+ * Ordering matters. `protect` runs first so an unauthenticated flood is rejected
+ * by the cheaper check and never consumes a signed-in user's quota — and it is
+ * also what puts `req.user` there for the per-user limiter to key on.
  */
-router.post('/', protect, aiSearchLimiter, aiSearch);
+router.post('/', protect, aiSearchLimiter, aiPerUserLimiter, aiSearch);
 
 module.exports = router;

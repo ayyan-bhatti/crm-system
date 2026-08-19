@@ -1,5 +1,5 @@
-const Anthropic = require('@anthropic-ai/sdk');
 const env = require('../config/env');
+const aiClient = require('./aiClient');
 const { parseAndValidate, string, enumValue } = require('./aiJson');
 const { TREND_WINDOW_DAYS } = require('./customerMetrics');
 
@@ -25,9 +25,7 @@ const { TREND_WINDOW_DAYS } = require('./customerMetrics');
  * A prompt instruction alone would be a request. The schema is the guarantee.
  */
 
-const anthropic = env.anthropicApiKey
-  ? new Anthropic({ apiKey: env.anthropicApiKey, timeout: 20000, maxRetries: 1 })
-  : null;
+/* Timeouts, retries and usage logging live in services/aiClient.js. */
 
 /** Caps on the generated text, so one odd response cannot flood the UI. */
 const MAX_HEADLINE = 90;
@@ -170,21 +168,15 @@ function validateSummary(raw) {
   };
 }
 
-async function callModel(customer, metrics, health) {
-  const response = await anthropic.messages.create({
-    model: env.anthropicModel,
+function callModel(customer, metrics, health) {
+  return aiClient.complete({
+    feature: 'customer-summary',
+    system: buildSystemPrompt(),
+    user: buildUserMessage(customer, metrics, health),
     // Small: the reply is a handful of sentences. A generous cap here would
     // only ever pay for output nobody reads.
-    max_tokens: 600,
-    output_config: { effort: 'low' },
-    system: buildSystemPrompt(),
-    messages: [{ role: 'user', content: buildUserMessage(customer, metrics, health) }],
+    maxTokens: 600,
   });
-
-  return response.content
-    .filter((block) => block.type === 'text')
-    .map((block) => block.text)
-    .join('\n');
 }
 
 /**
@@ -196,7 +188,7 @@ async function callModel(customer, metrics, health) {
  * that errors out is worse than one with plain wording.
  */
 async function generateSummary(customer, metrics, health = null) {
-  if (!anthropic) {
+  if (!aiClient.isConfigured()) {
     return { mode: 'fallback', reason: 'ANTHROPIC_API_KEY is not configured' };
   }
 

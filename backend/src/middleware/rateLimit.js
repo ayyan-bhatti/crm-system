@@ -1,4 +1,5 @@
 const rateLimit = require('express-rate-limit');
+const { ipKeyGenerator } = require('express-rate-limit');
 const env = require('../config/env');
 
 /**
@@ -38,10 +39,12 @@ const env = require('../config/env');
  * so a throttled client parses the response exactly like any other failure
  * instead of hitting express-rate-limit's plain-text default.
  */
-function createLimiter({ windowMs, max, message }) {
+function createLimiter({ windowMs, max, message, keyGenerator }) {
   return rateLimit({
     windowMs,
     max,
+    // Defaults to the client IP when no key generator is given.
+    ...(keyGenerator ? { keyGenerator } : {}),
     // Return rate-limit state in the standard RateLimit-* headers so a client
     // can back off politely instead of guessing.
     standardHeaders: true,
@@ -131,10 +134,49 @@ const aiSearchLimiter = createLimiter({
   message: 'Too many AI searches. Please wait a moment before searching again.',
 });
 
+/**
+ * The same budget again, but counted PER USER.
+ *
+ * Both limits are applied to the AI endpoints, and they catch different things:
+ *
+ *   per IP    one machine, or one script, hammering the endpoint.
+ *   per user  the case the IP limiter gets wrong in both directions. An office
+ *             behind one NAT address shares a single IP, so five colleagues
+ *             using the feature normally would exhaust one quota between them —
+ *             a limit that punishes ordinary use. And a determined user with a
+ *             phone hotspot changes IP freely, so the IP limit alone is not a
+ *             cap on any individual's spending.
+ *
+ * The signed-in user id is a much better identity for a cost control than a
+ * network address, because it is exactly the thing being budgeted.
+ *
+ * Slightly more generous than the IP limit: one person legitimately runs more
+ * searches in five minutes than an unauthenticated address should ever get.
+ */
+const aiPerUserLimiter = createLimiter({
+  windowMs: 5 * 60 * 1000,
+  max: 30,
+  message:
+    'You have made a lot of AI requests in a short time. Please wait a moment before trying again.',
+  /*
+   * Must run after `protect`, which is what puts `req.user` there. Falls back
+   * to the IP so the limiter can never throw on an unauthenticated request that
+   * slipped past — the per-IP limiter is still in front of it either way.
+   *
+   * The fallback goes through `ipKeyGenerator` rather than using `req.ip`
+   * directly, and that is not ceremony: a single IPv6 customer is normally
+   * handed a whole /64, so keying on the raw address would let one person
+   * present billions of distinct "clients" and walk straight past the limit.
+   * The helper normalises an IPv6 address to its subnet prefix.
+   */
+  keyGenerator: (req) => (req.user ? `user:${req.user._id}` : `ip:${ipKeyGenerator(req.ip)}`),
+});
+
 module.exports = {
   createLimiter,
   loginLimiter,
   registerLimiter,
   passwordResetLimiter,
   aiSearchLimiter,
+  aiPerUserLimiter,
 };

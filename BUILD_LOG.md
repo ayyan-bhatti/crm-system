@@ -848,3 +848,73 @@ asserts none of them throw.
 
 28 new tests. **360 backend tests passing.** No API contract change; this is a refactor
 plus the tests that pin the behaviour.
+
+## Phase 2.4 — AI reliability and cost controls
+
+### One client, because two reliability policies is two places to get it wrong
+
+Both AI features previously constructed their own `new Anthropic(...)` with their own
+timeout and retry settings. A timeout that is 20 seconds in one feature and unset in
+another is not a configuration, it is an accident waiting to be found in production.
+`services/aiClient.js` is now the only place that talks to Anthropic.
+
+### The settings, and the reasoning
+
+| setting | value | why |
+|---|---|---|
+| timeout | **10s per attempt** | Chosen against the user's patience, not the model's speed. These are short prompts with small replies; past ten seconds something is wrong, and waiting longer only delays the fallback that will be shown anyway. |
+| attempts | **3** (one try + two retries) | Deliberately low. Every retry is a real delay in front of someone waiting, and both features degrade gracefully — so giving up costs a plainer answer, not a broken page. Retrying five times to avoid a template is the wrong trade. |
+| backoff | **250ms, doubling, jittered** | See below. |
+| SDK `maxRetries` | **0** | Critical. Leaving the SDK's own retries on inside a loop that also retries would multiply them — up to nine calls at nine times the cost for one request, with the logs showing one attempt. Retry logic belongs in exactly one layer. |
+
+**The jitter is not decoration.** If several requests are rate limited at the same moment
+and all back off by exactly 250ms, they retry in lockstep and hit the limit together again —
+a thundering herd that turns one bad second into several. There is a test asserting twenty
+calls to `backoffDelay` do not all return the same number.
+
+### Retrying only what is worth retrying
+
+The distinction matters in **both** directions:
+
+- Retrying a **400** wastes time and money on a request that will fail identically every
+  time. The prompt is wrong; patience does not fix it. Same for 401/403 — a bad API key
+  stays bad.
+- **Not** retrying a **429 or 503** throws away a request that would very likely have
+  succeeded a moment later.
+- **No status at all** (timeout, DNS failure, dropped connection) means the request never
+  got an answer, so trying again is reasonable.
+
+### Cost controls
+
+**Usage logging** — one line per call: feature, model, input/output tokens, duration,
+attempt count, outcome. Deliberately a **log line, not a collection**. Token usage is
+operational data, read while investigating a bill or a latency spike, not queried by the
+application — and a log is where the platform's tooling can already aggregate and alert on
+it. A MongoDB write on every AI request in exchange for a query nobody in this app makes
+would be the wrong trade.
+
+**Per-user rate limiting, on top of per-IP.** The two catch different things, and the IP
+limiter gets it wrong in *both* directions on its own:
+
+- An office behind one NAT address shares a single IP, so five colleagues using the feature
+  normally would exhaust one quota between them — a limit that punishes ordinary use.
+- A determined user with a phone hotspot changes IP freely, so the IP limit alone is not a
+  cap on any individual's spending.
+
+The signed-in user id is a far better identity for a **cost** control, because it is exactly
+the thing being budgeted. 30 per 5 minutes per user, alongside 20 per 5 minutes per IP.
+
+**A real bug express-rate-limit caught for me:** my first per-user key generator fell back
+to raw `req.ip`. A single IPv6 customer is normally handed a whole /64, so keying on the raw
+address would let one person present billions of distinct "clients" and walk straight past
+the limit. The fallback now goes through the library's `ipKeyGenerator`, which normalises to
+the subnet prefix.
+
+### What the client deliberately does not do
+
+It does not decide what happens when a call fails. Each feature has its own sensible
+degraded behaviour — keyword search, a templated summary — and burying a fallback in the
+client would make those decisions invisible at the place they matter. `complete()` throws;
+the caller chooses.
+
+13 new tests. **373 backend tests passing.** Phase 2 complete.
