@@ -5,6 +5,7 @@ const { api } = require('./helpers');
 const RefreshToken = require('../src/models/RefreshToken');
 const env = require('../src/config/env');
 const { ACCESS_COOKIE, REFRESH_COOKIE } = require('../src/utils/cookies');
+const { CSRF_COOKIE, CSRF_HEADER } = require('../src/middleware/csrf');
 
 /**
  * Cookie-based sessions: issuing, refreshing, rotation and logout.
@@ -36,7 +37,16 @@ function cookieValue(res, name) {
 async function registerAgent() {
   const agent = request.agent(app);
   const res = await agent.post('/api/auth/register').send(CREDENTIALS);
-  return { agent, res };
+
+  /*
+   * Refresh and logout are cookie-authenticated POSTs, so they are subject to
+   * the CSRF check — exactly as they are from the browser. `csrf` echoes the
+   * token back the way the frontend's request interceptor does, so these tests
+   * exercise the real flow rather than a privileged shortcut.
+   */
+  const csrf = cookieValue(res, CSRF_COOKIE);
+
+  return { agent, res, csrf, post: (url) => agent.post(url).set(CSRF_HEADER, csrf) };
 }
 
 describe('Cookie sessions', () => {
@@ -151,10 +161,10 @@ describe('Cookie sessions', () => {
 
   describe('POST /api/auth/refresh', () => {
     it('issues a new pair of cookies', async () => {
-      const { agent, res: registered } = await registerAgent();
+      const { post, res: registered } = await registerAgent();
       const firstRefresh = cookieValue(registered, REFRESH_COOKIE);
 
-      const res = await agent.post('/api/auth/refresh');
+      const res = await post('/api/auth/refresh');
 
       expect(res.status).toBe(200);
       expect(cookieHeader(res, ACCESS_COOKIE)).toBeDefined();
@@ -162,9 +172,9 @@ describe('Cookie sessions', () => {
     });
 
     it('leaves the session usable afterwards', async () => {
-      const { agent } = await registerAgent();
+      const { agent, post } = await registerAgent();
 
-      await agent.post('/api/auth/refresh');
+      await post('/api/auth/refresh');
       const res = await agent.get('/api/auth/me');
 
       expect(res.status).toBe(200);
@@ -185,10 +195,10 @@ describe('Cookie sessions', () => {
 
     /** Rotation: the consumed token must be dead the moment it is exchanged. */
     it('revokes the old refresh token when it rotates', async () => {
-      const { agent, res: registered } = await registerAgent();
+      const { post, res: registered } = await registerAgent();
       const oldToken = cookieValue(registered, REFRESH_COOKIE);
 
-      await agent.post('/api/auth/refresh');
+      await post('/api/auth/refresh');
 
       const replay = await api()
         .post('/api/auth/refresh')
@@ -202,17 +212,17 @@ describe('Cookie sessions', () => {
      * is an attacker, and we cannot tell which — so the whole session dies.
      */
     it('kills the whole session family when a used token is replayed', async () => {
-      const { agent, res: registered } = await registerAgent();
+      const { post, res: registered } = await registerAgent();
       const stolen = cookieValue(registered, REFRESH_COOKIE);
 
       // The real user refreshes normally.
-      await agent.post('/api/auth/refresh');
+      await post('/api/auth/refresh');
 
       // The attacker replays the token they captured earlier.
       await api().post('/api/auth/refresh').set('Cookie', `${REFRESH_COOKIE}=${stolen}`);
 
       // The real user's current token must now be dead too.
-      const afterBreach = await agent.post('/api/auth/refresh');
+      const afterBreach = await post('/api/auth/refresh');
 
       expect(afterBreach.status).toBe(401);
 
@@ -223,9 +233,9 @@ describe('Cookie sessions', () => {
 
   describe('POST /api/auth/logout', () => {
     it('clears both cookies', async () => {
-      const { agent } = await registerAgent();
+      const { post } = await registerAgent();
 
-      const res = await agent.post('/api/auth/logout');
+      const res = await post('/api/auth/logout');
 
       expect(res.status).toBe(200);
       // An expired cookie with an empty value is how a browser is told to drop it.
@@ -238,10 +248,10 @@ describe('Cookie sessions', () => {
      * captured before logout must not work after it.
      */
     it('revokes the refresh token server-side', async () => {
-      const { agent, res: registered } = await registerAgent();
+      const { post, res: registered } = await registerAgent();
       const captured = cookieValue(registered, REFRESH_COOKIE);
 
-      await agent.post('/api/auth/logout');
+      await post('/api/auth/logout');
 
       const res = await api()
         .post('/api/auth/refresh')
@@ -251,9 +261,9 @@ describe('Cookie sessions', () => {
     });
 
     it('ends the session for the browser that logged out', async () => {
-      const { agent } = await registerAgent();
+      const { agent, post } = await registerAgent();
 
-      await agent.post('/api/auth/logout');
+      await post('/api/auth/logout');
       const res = await agent.get('/api/auth/me');
 
       expect(res.status).toBe(401);

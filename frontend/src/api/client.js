@@ -25,6 +25,42 @@ const client = axios.create({
 });
 
 /**
+ * CSRF: read the token the server planted and echo it back in a header.
+ *
+ * This is the client half of the double-submit check in
+ * backend/src/middleware/csrf.js. The cookie is deliberately readable from
+ * JavaScript (unlike the session cookies) because this code has to read it —
+ * and that is safe, because on its own the value grants nothing. It only proves
+ * the request was made by code running on our own origin, which an attacker's
+ * page cannot do: it can make the browser *send* our cookies but the same-origin
+ * policy stops it *reading* them.
+ */
+const CSRF_COOKIE = 'simplecrm_csrf';
+const CSRF_HEADER = 'X-CSRF-Token';
+
+function readCookie(name) {
+  const match = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+/**
+ * Attach the token to every state-changing request.
+ *
+ * Read fresh on each request rather than cached at startup: the server rotates
+ * the token if it goes missing mid-session, and a cached copy would then be
+ * stale and every write would 403.
+ */
+function attachCsrfToken(config) {
+  const method = (config.method || 'get').toUpperCase();
+  if (['GET', 'HEAD', 'OPTIONS'].includes(method)) return config;
+
+  const token = readCookie(CSRF_COOKIE);
+  if (token) config.headers[CSRF_HEADER] = token;
+
+  return config;
+}
+
+/**
  * A bare axios call for the refresh endpoint.
  *
  * Deliberately NOT `client`: the interceptor below would catch a failing
@@ -36,6 +72,10 @@ const refreshClient = axios.create({
   headers: { 'Content-Type': 'application/json' },
   withCredentials: true,
 });
+
+// Both instances need the CSRF header — /auth/refresh is a POST like any other.
+client.interceptors.request.use(attachCsrfToken);
+refreshClient.interceptors.request.use(attachCsrfToken);
 
 /**
  * One in-flight refresh, shared.

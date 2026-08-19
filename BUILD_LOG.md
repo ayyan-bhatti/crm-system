@@ -214,3 +214,63 @@ turns them on for itself and resets the counters between tests.
 uses, so the existing frontend error handling already displays it.
 
 13 new tests. **201 backend tests passing.**
+
+## Phase 1.3 — CSRF protection
+
+### Why this is part of the cookie change, not an extra
+
+It was not needed before. When the token lived in `localStorage`, the app had to attach it
+deliberately on every request, and an attacker's page could not do that. Cookies are
+attached by the browser *automatically*, to any request aimed at this origin — including
+one triggered by a hidden form on evil.com. Moving to cookies is what created this
+problem, so this middleware is the second half of Phase 1.1 rather than an unrelated
+addition.
+
+### The mechanism: double-submit cookie
+
+1. The server plants a random value in a **non-httpOnly** cookie.
+2. The frontend reads it and echoes it back in an `X-CSRF-Token` header.
+3. The server requires the two to match, compared in constant time.
+
+An attacker's page can make the browser *send* our cookies, but the same-origin policy
+stops it from ever *reading* them — so it cannot produce the matching header. That
+asymmetry is the whole trick.
+
+**Why this one cookie is deliberately not httpOnly.** It looks wrong next to the session
+cookies, so being explicit: the frontend has to read it, or it could not send the header.
+That is safe because the value is not a credential — on its own it grants nothing. It only
+proves the request came from code running on our own origin.
+
+**Why not the `csurf` package.** Deprecated and unmaintained since 2022. This is about
+forty lines of well-understood logic; vendoring it means no dependency that quietly stops
+receiving security fixes.
+
+### What is exempt, and why each exemption is sound
+
+| exempt | reason |
+|---|---|
+| GET / HEAD / OPTIONS | CSRF is about forged *writes*. An attacker can force a GET but cannot read the response — the same-origin policy already covers that — and requiring a token on GET would break ordinary navigation. |
+| `Authorization: Bearer` requests | **The important one.** A header has to be set deliberately by the caller; an attacker's cross-origin page cannot set headers on a browser request. Bearer calls are inherently CSRF-immune, so demanding a token from a script would be ceremony with no security value. |
+| requests with no session cookie | e.g. login itself. There is no session to ride, so nothing to forge. |
+
+The bearer test is `req.cookies[access]` presence, checked in the middleware rather than
+via `req.authVia`, because this runs *before* `protect` — a forged request must be
+rejected before it reaches anything that acts on it.
+
+### Defence in depth
+
+`SameSite=Lax` on the session cookies (Phase 1.1) already blocks the cross-site POST in
+every browser that honours it. This is the second layer, for what SameSite does not cover:
+an older browser, a compromised same-site subdomain, or a future deployment forced onto
+`SameSite=None` because the API and frontend end up on genuinely different sites.
+
+### API contract change (breaking)
+
+Every cookie-authenticated **write** (POST/PATCH/PUT/DELETE) must now send
+`X-CSRF-Token`, read from the `simplecrm_csrf` cookie. The frontend does this
+automatically in an axios request interceptor, reading the cookie fresh on each request —
+caching it at startup would go stale when the server reissues one, and every write would
+then 403. Bearer-authenticated clients are unaffected.
+
+10 new tests, including the attack reproduced directly: a request carrying the session
+cookie but no header must fail. **211 backend tests passing.**

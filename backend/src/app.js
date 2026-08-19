@@ -8,6 +8,7 @@ const env = require('./config/env');
 const { connectDB } = require('./config/db');
 const { notFound, errorHandler } = require('./middleware/errorHandler');
 const ensureDb = require('./middleware/ensureDb');
+const { issueCsrfToken, verifyCsrf } = require('./middleware/csrf');
 
 const authRoutes = require('./routes/authRoutes');
 const userRoutes = require('./routes/userRoutes');
@@ -102,6 +103,20 @@ app.use(express.urlencoded({ extended: true }));
  * before the routes for that reason.
  */
 app.use(cookieParser());
+
+/**
+ * CSRF protection.
+ *
+ * Registered immediately after the cookie parser and before every route, so a
+ * forged request is rejected before it can reach anything that acts on it.
+ *
+ * `issueCsrfToken` hands the browser a token; `verifyCsrf` requires it back in
+ * a header on every state-changing, cookie-authenticated request. See
+ * middleware/csrf.js for why this became necessary the moment the session moved
+ * into cookies, and why requests using an Authorization header are exempt.
+ */
+app.use(issueCsrfToken);
+app.use(verifyCsrf);
 
 // Request logging — noise-free during tests.
 if (!env.isTest) {
