@@ -5,6 +5,8 @@ const {
   getSort,
   paginatedResponse,
   getDateRange,
+  applyCursor,
+  cursorResponse,
 } = require('../utils/queryHelpers');
 
 const SORTABLE_FIELDS = ['createdAt', 'action', 'entity'];
@@ -47,15 +49,33 @@ const listAuditLogs = asyncHandler(async (req, res) => {
   const createdAt = getDateRange(from, to);
   if (createdAt) filter.createdAt = createdAt;
 
+  const sort = getSort(req.query, SORTABLE_FIELDS);
+
+  /*
+   * The endpoint cursor paging exists FOR.
+   *
+   * The audit collection is append-only and grows without bound, which is the
+   * exact shape offset paging handles worst: `skip` gets linearly slower the
+   * further back you look, and because rows are constantly being appended at
+   * the top, drift is not a theoretical concern here — page 2 genuinely shifts
+   * under an administrator while they read page 1.
+   *
+   * Offset is still the default so the screen keeps its page numbers and total.
+   */
+  if (req.query.cursor !== undefined) {
+    const data = await AuditLog.find(applyCursor(filter, req.query.cursor, sort))
+      .sort(sort)
+      .limit(limit + 1);
+
+    return res.json(cursorResponse({ data, limit, sort }));
+  }
+
   const [data, total] = await Promise.all([
-    AuditLog.find(filter)
-      .sort(getSort(req.query, SORTABLE_FIELDS))
-      .skip(skip)
-      .limit(limit),
+    AuditLog.find(filter).sort(sort).skip(skip).limit(limit),
     AuditLog.countDocuments(filter),
   ]);
 
-  res.json(paginatedResponse({ data, total, page, limit }));
+  return res.json(paginatedResponse({ data, total, page, limit }));
 });
 
 /**

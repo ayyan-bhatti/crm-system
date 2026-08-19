@@ -8,6 +8,8 @@ const {
   getPagination,
   getSort,
   paginatedResponse,
+  applyCursor,
+  cursorResponse,
 } = require('../utils/queryHelpers');
 
 const SORTABLE_FIELDS = ['name', 'email', 'company', 'status', 'createdAt'];
@@ -58,16 +60,36 @@ const listCustomers = asyncHandler(async (req, res) => {
     }
   }
 
+  const sort = getSort(req.query, SORTABLE_FIELDS);
+
+  /*
+   * Two paging modes on one endpoint, chosen by whether `?cursor=` is present.
+   *
+   * Offset is the default because the UI wants page numbers and a total.
+   * Cursor is there for deep traversal and for callers that cannot tolerate
+   * drift — see the long note in utils/queryHelpers.js for the trade-off.
+   */
+  if (req.query.cursor !== undefined) {
+    // limit + 1 so the response can say whether another page exists without a
+    // second count query.
+    const data = await Customer.find(applyCursor(filter, req.query.cursor, sort))
+      .populate('assignedTo', 'name email role')
+      .sort(sort)
+      .limit(limit + 1);
+
+    return res.json(cursorResponse({ data, limit, sort }));
+  }
+
   const [data, total] = await Promise.all([
     Customer.find(filter)
       .populate('assignedTo', 'name email role')
-      .sort(getSort(req.query, SORTABLE_FIELDS))
+      .sort(sort)
       .skip(skip)
       .limit(limit),
     Customer.countDocuments(filter),
   ]);
 
-  res.json(paginatedResponse({ data, total, page, limit }));
+  return res.json(paginatedResponse({ data, total, page, limit }));
 });
 
 /**

@@ -12,6 +12,8 @@ const {
   getSort,
   paginatedResponse,
   getDateRange,
+  applyCursor,
+  cursorResponse,
 } = require('../utils/queryHelpers');
 const { withTransaction } = require('../utils/transaction');
 const { recordAudit } = require('../services/auditService');
@@ -221,18 +223,34 @@ const listOrders = asyncHandler(async (req, res) => {
   const createdAt = getDateRange(from, to);
   if (createdAt) filter.createdAt = createdAt;
 
-  const [data, total] = await Promise.all([
-    Order.find(filter)
+  const sort = getSort(req.query, SORTABLE_FIELDS);
+
+  const withRelations = (query) =>
+    query
       .populate('customer', 'name email company city status')
       .populate('createdBy', 'name email role')
-      .populate('items.product', 'name sku price')
-      .sort(getSort(req.query, SORTABLE_FIELDS))
-      .skip(skip)
-      .limit(limit),
+      .populate('items.product', 'name sku price');
+
+  /*
+   * Two paging modes on one endpoint, chosen by whether `?cursor=` is present.
+   * See the trade-off note in utils/queryHelpers.js.
+   */
+  if (req.query.cursor !== undefined) {
+    const data = await withRelations(
+      Order.find(applyCursor(filter, req.query.cursor, sort))
+    )
+      .sort(sort)
+      .limit(limit + 1);
+
+    return res.json(cursorResponse({ data, limit, sort }));
+  }
+
+  const [data, total] = await Promise.all([
+    withRelations(Order.find(filter)).sort(sort).skip(skip).limit(limit),
     Order.countDocuments(filter),
   ]);
 
-  res.json(paginatedResponse({ data, total, page, limit }));
+  return res.json(paginatedResponse({ data, total, page, limit }));
 });
 
 /** GET /api/orders/:id */

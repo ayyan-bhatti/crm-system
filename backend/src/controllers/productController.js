@@ -7,6 +7,8 @@ const {
   getPagination,
   getSort,
   paginatedResponse,
+  applyCursor,
+  cursorResponse,
 } = require('../utils/queryHelpers');
 
 const SORTABLE_FIELDS = ['name', 'sku', 'price', 'stockQty', 'category', 'createdAt'];
@@ -42,12 +44,29 @@ const listProducts = asyncHandler(async (req, res) => {
     filter.$expr = { $lte: ['$stockQty', '$lowStockThreshold'] };
   }
 
+  const sort = getSort(req.query, SORTABLE_FIELDS);
+
+  /*
+   * Two paging modes on one endpoint, chosen by whether `?cursor=` is present.
+   *
+   * Offset is the default because the UI wants page numbers and a total.
+   * Cursor is there for deep traversal and for callers that cannot tolerate
+   * drift — see the long note in utils/queryHelpers.js for the trade-off.
+   */
+  if (req.query.cursor !== undefined) {
+    const data = await Product.find(applyCursor(filter, req.query.cursor, sort))
+      .sort(sort)
+      .limit(limit + 1);
+
+    return res.json(cursorResponse({ data, limit, sort }));
+  }
+
   const [data, total] = await Promise.all([
-    Product.find(filter).sort(getSort(req.query, SORTABLE_FIELDS)).skip(skip).limit(limit),
+    Product.find(filter).sort(sort).skip(skip).limit(limit),
     Product.countDocuments(filter),
   ]);
 
-  res.json(paginatedResponse({ data, total, page, limit }));
+  return res.json(paginatedResponse({ data, total, page, limit }));
 });
 
 /**

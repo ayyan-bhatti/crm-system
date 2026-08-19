@@ -991,3 +991,92 @@ now fetches that one record so the picker shows who is selected, instead of an e
 that is nonetheless valid — confusing in exactly the flow meant to be the convenient one.
 
 19 new tests. **392 backend tests passing.** Additive API change; no existing contract moved.
+
+## Phase 3.2 — Pagination: both styles, and the bug that was already there
+
+### First, a real bug in the existing offset paging
+
+`getSort` returned `{ createdAt: -1 }` and nothing else. **Sorting by a non-unique field
+gives MongoDB no defined order among documents that tie**, and it is free to return them
+differently between two queries.
+
+Ties are not rare here — the seed script creates records in a loop, and any bulk import
+stamps dozens of rows with the same `createdAt` to the millisecond.
+
+The consequence is silent: page 1 ends mid-tie, page 2 starts mid-tie in a different order,
+**a record appears on both pages while another never appears at all.** Nothing errors and
+the total still reads correctly.
+
+The fix is one line — append `_id`, which is unique by construction, so the ordering is
+*total* and the sequence is identical every time. There is an end-to-end test that creates
+12 customers sharing one timestamp, pages through them, and asserts all 12 appear exactly
+once.
+
+Cursor paging depends on this absolutely: *"everything after this record"* is meaningless
+without a deterministic definition of "after".
+
+### Then: both paging styles, chosen by the caller
+
+`?cursor=` present → cursor paging. Absent → offset. That is not indecision; the two answer
+different questions and each is bad at the other's job.
+
+| | offset (`?page=3`) | cursor (`?cursor=…`) |
+|---|---|---|
+| page numbers, "jump to page 7" | **yes** | no — only "next" |
+| total count | **yes** | no (a separate query) |
+| cost at depth | **O(n)** — `skip` walks and discards every skipped doc, so page 500 costs 500 pages of work | **O(log n)** with an index, however deep |
+| stable under writes | **no** — see below | **yes** |
+
+**Drift is the important column.** If a record is inserted while someone pages through,
+everything shifts down by one: the last row of page 1 slides to the top of page 2 and is
+seen twice, while another is skipped. There are **two tests side by side** — one asserting
+cursor paging does not repeat a row when a record is inserted mid-traversal, and one
+asserting offset paging *does*. The second test documents the trade-off rather than
+deploring it.
+
+### Which is used where, and why
+
+**The UI uses offset.** A CRM list with page numbers and "312 results" is what people
+expect, and the collections a human pages through by hand are small enough that `skip` costs
+nothing. Removing page numbers to win an optimisation nobody would notice would be a
+downgrade.
+
+**Cursor exists for the cases that break offset:** the audit log — append-only, unbounded,
+and constantly written at the top, so drift is not theoretical there — and any script
+exporting a whole collection.
+
+Offering both costs one shared helper. Offering only offset would mean the audit log gets
+slower *and* less correct the longer the system runs.
+
+### The keyset predicate, and the part that is easy to get wrong
+
+```js
+{ $or: [ { sortField: { $lt: v } },
+         { sortField: v, _id: { $lt: id } } ] }
+```
+
+The first clause takes everything past the tie; **the second walks the rest of the tie the
+cursor stopped inside.** Using only the first drops the tail of a tied run; using only `_id`
+ignores the sort entirely. The cursor therefore carries the sort value *and* the `_id` — a
+cursor landing mid-run could not otherwise say which of the identical timestamps it meant.
+
+It is combined with `$and` rather than merged into the filter, because the incoming filter
+may already have its own `$or` (a sales rep's scope, a search clause) — overwriting it would
+drop a permission rule. A test confirms scoping survives cursor paging.
+
+Cursors are base64 JSON and treated as opaque. Not for secrecy — anyone can decode one — but
+so the encoding can change later without breaking callers who might otherwise have started
+parsing it. A malformed cursor falls back to the first page rather than erroring.
+
+`nextCursor: null` is how a client knows to stop; comparing counts is unreliable because a
+final page that happens to be exactly `limit` long looks identical to a full one. One extra
+row is fetched (`limit + 1`) purely to answer "is there more?" without a second count query.
+
+### API contract change (additive)
+
+All four list endpoints (`customers`, `products`, `orders`, `audit-logs`) accept `?cursor=`.
+The offset response is unchanged, so nothing existing breaks. The cursor response returns
+`{ success, count, data, nextCursor }` — deliberately **no `total`**, because counting the
+whole collection on every page is precisely the cost cursor paging exists to avoid.
+
+25 new tests. **417 backend tests passing.**
