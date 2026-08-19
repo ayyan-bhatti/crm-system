@@ -787,3 +787,64 @@ label and colour. Shown as a meter rather than a bare number: it is one value on
 0-100 scale, and the bar communicates that instantly in a way "72" does not.
 
 18 new tests. **332 backend tests passing.**
+
+## Phase 2.3 — Structured AI output, in one place
+
+### What changed
+
+`extractJson` was living inside `aiSearchService.js`, and the customer summary imported it
+from there — a service reaching into another service for a parser. Both AI features now go
+through `services/aiJson.js`: defensive parsing, a shared `parseAndValidate`, and the small
+field validators (`string`, `enumValue`, `boundedNumber`) that both response schemas need.
+
+The point of consolidating is not tidiness. **The alternative is two slightly different
+parsers that drift, and the one that drifts is the one that lets something through.**
+
+### The framing that makes the rules obvious
+
+A model's output is **untrusted input, exactly like a request body**. It is not "nearly
+right" data that needs tidying — it is a string from outside the system. Once that is the
+frame, the three rules stop looking paranoid:
+
+- **Parse defensively.** "Respond with JSON only" is an instruction, not a guarantee. The
+  parser handles markdown fences, surrounding prose, nested objects and braces inside
+  string values. Those are real failure modes that were hit, not hypothetical ones — hence
+  counting braces rather than regex-matching, and tracking string literals so a customer
+  note containing `}` cannot truncate the object.
+- **Validate against an allow-list.** Both validators build their result **field by field**,
+  never by spreading the parsed object. That is the whole difference between a schema and a
+  tidy-up: `{ ...raw }` with a few fields corrected carries through every key the model
+  invented, including a `totalRevenue` it made up.
+- **Fail closed.** Anything that does not validate is discarded entirely and the caller
+  degrades to its fallback. Half an answer is not better than a template.
+
+### The two validators guard against different things
+
+| | risk | consequence of a miss |
+|---|---|---|
+| **search filter** | **injection** — its output becomes a database query | a hallucinated `$where` reaching MongoDB |
+| **customer summary** | **fabrication** — its output becomes text a human trusts | a confidently wrong revenue figure on screen |
+
+Same mechanism, opposite failure modes. The summary schema's most important property is
+what it leaves out: no numeric fields at all, so an invented figure has nowhere to land.
+
+### Why not zod or ajv
+
+Both would work; neither is here, for two reasons.
+
+1. The validation this app needs is not "is this a string" — it is *"is this field name on
+   the allow-list for this entity, and is this operator legal for that field type"*, which
+   is domain logic a generic validator expresses awkwardly.
+2. **`filterSchema.js` generates the model's prompt AND the validator from the same object.**
+   The prompt and the validator therefore cannot disagree. That property is worth more than
+   a shorter validator, and a separate schema library would take it away.
+
+### The guarantee
+
+Every failure is a returned value, never an exception: `{ ok: false, reason }`. **No AI
+feature can 500 because a model said something strange.** There is a test that throws six
+kinds of malformed input at `parseAndValidate` — including a `__proto__` payload — and
+asserts none of them throw.
+
+28 new tests. **360 backend tests passing.** No API contract change; this is a refactor
+plus the tests that pin the behaviour.

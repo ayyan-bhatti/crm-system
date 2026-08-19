@@ -1,6 +1,6 @@
 const Anthropic = require('@anthropic-ai/sdk');
 const env = require('../config/env');
-const { extractJson } = require('./aiSearchService');
+const { parseAndValidate, string, enumValue } = require('./aiJson');
 const { TREND_WINDOW_DAYS } = require('./customerMetrics');
 
 /**
@@ -146,26 +146,27 @@ function buildUserMessage(customer, metrics, health = null) {
 function validateSummary(raw) {
   if (!raw || typeof raw !== 'object') return null;
 
-  const text = (value, max) => {
-    if (typeof value !== 'string') return null;
-    const trimmed = value.trim();
-    if (!trimmed) return null;
-    return trimmed.slice(0, max);
-  };
-
-  const headline = text(raw.headline, MAX_HEADLINE);
-  const summary = text(raw.summary, MAX_SUMMARY);
+  const headline = string(raw.headline, MAX_HEADLINE);
+  const summary = string(raw.summary, MAX_SUMMARY);
 
   // Both are required: a summary with no headline renders as a broken card, and
   // half a response is not better than the deterministic fallback.
   if (!headline || !summary) return null;
 
+  /*
+   * Built field by field from an allow-list, never by spreading `raw`.
+   *
+   * That is the difference between a schema and a tidy-up. `{ ...raw }` with a
+   * few fields corrected would carry through every extra key the model invented
+   * — including a `totalRevenue` it made up. Naming each field means anything
+   * unlisted is simply not here.
+   */
   return {
     headline,
     summary,
     // Optional — a customer with no history may genuinely have no useful action.
-    recommendedAction: text(raw.recommendedAction, MAX_ACTION),
-    confidence: CONFIDENCE_VALUES.includes(raw.confidence) ? raw.confidence : 'low',
+    recommendedAction: string(raw.recommendedAction, MAX_ACTION),
+    confidence: enumValue(raw.confidence, CONFIDENCE_VALUES, 'low'),
   };
 }
 
@@ -210,17 +211,13 @@ async function generateSummary(customer, metrics, health = null) {
     return { mode: 'fallback', reason: `AI request failed: ${err.message}` };
   }
 
-  const parsed = extractJson(text);
-  if (!parsed) {
-    return { mode: 'fallback', reason: 'AI response was not valid JSON' };
+  const result = parseAndValidate(text, validateSummary);
+
+  if (!result.ok) {
+    return { mode: 'fallback', reason: result.reason };
   }
 
-  const validated = validateSummary(parsed);
-  if (!validated) {
-    return { mode: 'fallback', reason: 'AI response did not match the expected shape' };
-  }
-
-  return { mode: 'ai', ...validated };
+  return { mode: 'ai', ...result.value };
 }
 
 module.exports = {

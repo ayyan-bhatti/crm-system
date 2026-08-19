@@ -1,5 +1,6 @@
 const Anthropic = require('@anthropic-ai/sdk');
 const env = require('../config/env');
+const { extractJson, parseAndValidate } = require('./aiJson');
 const {
   ENTITIES,
   OPERATORS_BY_TYPE,
@@ -78,55 +79,13 @@ User: the 10 biggest completed orders this year
 {"entity":"order","conditions":[{"field":"status","operator":"eq","value":"completed"},{"field":"createdAt","operator":"withinDays","value":365}],"sort":{"field":"total","direction":"desc"},"limit":10}`;
 }
 
-/**
- * Pull a JSON object out of the model's reply.
- *
- * The model is asked for bare JSON, but instruction-following is not a
- * guarantee, so this tolerates the two things that actually happen in practice:
- * a ```json fence around the object, and a sentence before or after it.
- *
- * Braces are counted rather than regex-matched so that a nested object doesn't
- * truncate the match at the first closing brace. String literals are tracked so
- * a `}` inside a value (e.g. a customer note) doesn't end the object early.
+/*
+ * `extractJson` used to live here. It moved to services/aiJson.js when the
+ * customer summary needed exactly the same defensive parsing — two copies of a
+ * parser that guards against untrusted input is how one of them ends up missing
+ * a case. It is re-exported below so the existing tests and callers are
+ * unaffected.
  */
-function extractJson(text) {
-  if (typeof text !== 'string') return null;
-
-  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  const source = fenced ? fenced[1] : text;
-
-  const start = source.indexOf('{');
-  if (start === -1) return null;
-
-  let depth = 0;
-  let inString = false;
-  let escaped = false;
-
-  for (let i = start; i < source.length; i += 1) {
-    const char = source[i];
-
-    if (escaped) {
-      escaped = false;
-    } else if (char === '\\') {
-      escaped = true;
-    } else if (char === '"') {
-      inString = !inString;
-    } else if (!inString && char === '{') {
-      depth += 1;
-    } else if (!inString && char === '}') {
-      depth -= 1;
-      if (depth === 0) {
-        try {
-          return JSON.parse(source.slice(start, i + 1));
-        } catch {
-          return null; // Balanced braces but not valid JSON.
-        }
-      }
-    }
-  }
-
-  return null; // Never closed.
-}
 
 /** Coerce a value to the declared field type, or return undefined if impossible. */
 function coerce(value, type, meta) {
@@ -304,16 +263,15 @@ async function translateQuery(query) {
     return { mode: 'fallback', filter: null, reason: `AI request failed: ${err.message}` };
   }
 
-  const parsed = extractJson(text);
-  if (!parsed) {
-    return { mode: 'fallback', filter: null, reason: 'AI response was not valid JSON' };
+  // Shared parse-then-validate: same defensive parsing and the same failure
+  // shape as every other AI feature. See services/aiJson.js.
+  const result = parseAndValidate(text, validateFilter);
+
+  if (!result.ok) {
+    return { mode: 'fallback', filter: null, reason: result.reason };
   }
 
-  try {
-    return { mode: 'ai', filter: validateFilter(parsed) };
-  } catch (err) {
-    return { mode: 'fallback', filter: null, reason: `AI filter rejected: ${err.message}` };
-  }
+  return { mode: 'ai', filter: result.value };
 }
 
 module.exports = {
