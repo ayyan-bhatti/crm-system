@@ -1080,3 +1080,92 @@ The offset response is unchanged, so nothing existing breaks. The cursor respons
 whole collection on every page is precisely the cost cursor paging exists to avoid.
 
 25 new tests. **417 backend tests passing.**
+
+## Phase 3.3 — Indexes, and two bugs the explain() tests found
+
+Every index is documented in the model file next to its definition, saying which query it
+serves. An index matching no query is not free: every write maintains it and it takes RAM
+the working indexes would otherwise use.
+
+### Bug 1 — two text indexes serving nothing
+
+`Customer` and `Product` each carried a `text` index, `Customer`'s described as *"powers the
+keyword fallback used by the AI search endpoint."* **It did not.** Nothing in the codebase
+issues a `$text` query — the AI keyword fallback builds `containsRegex` clauses, and so do
+both list endpoints. Both indexes were maintained on every insert and update and read by
+nothing.
+
+They could not have helped even if wired up: `$text` matches whole words with stemming, so
+it finds "trading" from "trade" but **not "rach" inside "Karachi"**. A CRM search box is
+expected to match substrings — a different operation.
+
+### Bug 2 — `createdBy` had no index, so every sales rep's list scanned the collection
+
+Both scope filters are `$or`s:
+
+```js
+{ $or: [{ assignedTo: user._id }, { createdBy: user._id }] }   // customers
+{ $or: [{ createdBy: user._id }, { customer: { $in: [...] } }] } // orders
+```
+
+**MongoDB cannot serve an `$or` from one compound index** — it evaluates each branch
+separately and unions the results — so each branch needs its own index. `createdBy` had none
+on either collection, and `assignedTo` existed only as the *second* field of
+`{status:1, assignedTo:1}`, which an `$or` branch cannot use on its own.
+
+Invisible with seed data. Quadratic with real data.
+
+### Bug 3 — my own `_id` tiebreaker invalidated every sorting index
+
+This is the one I would not have found by reading the code, and it was caused by my *own*
+change in 3.2. Appending `_id` to every sort is correct for pagination determinism, but:
+
+> An index on `{ createdAt: -1 }` does **not** satisfy a sort of `{ createdAt: -1, _id: -1 }`.
+
+MongoDB falls back to fetching every match and sorting it in memory. The index still exists,
+the query still returns the right answer, and the only symptom is that it got slower —
+exactly the regression nobody notices until the collection is large. I verified it directly
+with `explain()` before and after adding `_id` to the index key.
+
+So every sorting index now carries `_id` in the same direction as its sort field.
+
+### The tests assert usage, not existence
+
+Asserting an index *exists* is nearly worthless — it passes just as happily when the index
+is unused. These tests also run `explain()` against the real queries and assert `IXSCAN`
+with **no in-memory `SORT` stage**. That second assertion is what caught bug 3.
+
+Two details that make the tests meaningful rather than decorative:
+
+- **They seed 200 documents.** On a nearly empty collection MongoDB correctly prefers a
+  collection scan — reading four documents beats consulting an index — so an `explain()`
+  assertion against an empty collection proves nothing.
+- **They stringify the plan rather than walking it.** MongoDB reports the plan tree
+  differently between its classic and SBE engines (`inputStage` vs `queryPlan`), and a
+  walker assuming one shape silently reports "no index" on the other.
+
+### What the indexes deliberately do NOT fix
+
+The search box builds an **unanchored, case-insensitive** regex (`/karachi/i`). Two tests
+pin the real behaviour, which is more precise than "regex cannot use an index":
+
+- It **cannot seek** — with no `^` anchor there is no prefix to jump to, so MongoDB scans
+  the *entire index range* and applies the pattern to every key. That is cheaper than a
+  collection scan (the index is smaller; documents are fetched only for matches) but still
+  linear, and no additional index changes it.
+- An **anchored** prefix search (`/^Customer/`) *can* seek — which is the fix available
+  without new infrastructure, at the cost of changing the feature to "starts with".
+
+The other options are Atlas Search (what a production deployment on Atlas should use) or a
+dedicated search service. Neither is done here because the collection is small and the
+honest answer is that it does not need one yet. Writing that down beats implying the index
+list solved a problem it has not.
+
+### One operational note worth carrying forward
+
+Mongoose creates schema indexes **lazily**, on the model's first use. The same applies in
+production: indexes appear when the app first touches each collection, so the first queries
+after a deploy can run unindexed. `syncIndexes()` as a deploy step is how to make that
+deterministic.
+
+25 new tests. **442 backend tests passing.** Phase 3 complete.

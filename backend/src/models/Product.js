@@ -57,7 +57,60 @@ productSchema.virtual('isLowStock').get(function isLowStock() {
 productSchema.set('toJSON', { virtuals: true });
 productSchema.set('toObject', { virtuals: true });
 
-productSchema.index({ name: 'text', sku: 'text', category: 'text' });
-productSchema.index({ category: 1 });
+/* ---------------------------------------------------------------------------
+ * INDEXES
+ * -------------------------------------------------------------------------*/
+
+/*
+ * REMOVED: a text index on name/sku/category — unused, for the same reason as
+ * the one on Customer. Nothing issues a `$text` query; the product list and the
+ * picker both use `containsRegex`.
+ */
+
+/*
+ * `sku` already has a unique index, created automatically by `unique: true`
+ * above. That single index does double duty: it enforces uniqueness AND serves
+ * the SKU lookups, so there is deliberately no second index on it here.
+ */
+
+/* The category filter on the list screen, with the default ordering included. */
+/*
+ * WHY EVERY SORTING INDEX ENDS WITH `_id`
+ *
+ * `getSort` appends `_id` to every sort so the ordering is total (see the long
+ * note in utils/queryHelpers.js — without it, tied documents can appear on two
+ * pages at once). That fix has a consequence that is easy to miss and was
+ * caught here by an explain() test rather than by reading the code:
+ *
+ *   an index on { createdAt: -1 } does NOT satisfy a sort of
+ *   { createdAt: -1, _id: -1 }
+ *
+ * MongoDB falls back to fetching every matching document and sorting them in
+ * memory. The index still exists, the query still returns the right answer, and
+ * the only symptom is that it got slower — which is precisely the kind of
+ * regression that goes unnoticed until the collection is large.
+ *
+ * So each index below carries `_id` in the same direction as its sort field.
+ */
+
+productSchema.index({ category: 1, name: 1, _id: 1 });
+
+/*
+ * Sorting by name: the picker's order, and the products list's most-used sort.
+ */
+productSchema.index({ name: 1, _id: 1 });
+
+/*
+ * Sorting by stock, which is how someone finds what is running out. Ascending
+ * because that sort is only ever asked in the "lowest first" direction.
+ *
+ * Note this does NOT serve `?lowStock=true`, which compares stockQty against
+ * each product's own lowStockThreshold. A field-to-field comparison needs
+ * `$expr`, and `$expr` cannot use an index at all — the filter is evaluated per
+ * document. It is a small collection and a rarely-hit filter, so that is
+ * acceptable; the alternative is storing a denormalised boolean and keeping it
+ * in step on every write, which is more machinery than the problem deserves.
+ */
+productSchema.index({ stockQty: 1, _id: 1 });
 
 module.exports = mongoose.model('Product', productSchema);

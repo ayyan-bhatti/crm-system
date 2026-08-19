@@ -72,8 +72,55 @@ const orderSchema = new mongoose.Schema({
   },
 });
 
-// Supports the status filter and the date-range filter on the orders screen.
-orderSchema.index({ status: 1, createdAt: -1 });
-orderSchema.index({ customer: 1 });
+/* ---------------------------------------------------------------------------
+ * INDEXES
+ * -------------------------------------------------------------------------*/
+
+/* The status filter plus the default newest-first ordering, in one index. */
+/*
+ * WHY EVERY SORTING INDEX ENDS WITH `_id`
+ *
+ * `getSort` appends `_id` to every sort so the ordering is total (see the long
+ * note in utils/queryHelpers.js — without it, tied documents can appear on two
+ * pages at once). That fix has a consequence that is easy to miss and was
+ * caught here by an explain() test rather than by reading the code:
+ *
+ *   an index on { createdAt: -1 } does NOT satisfy a sort of
+ *   { createdAt: -1, _id: -1 }
+ *
+ * MongoDB falls back to fetching every matching document and sorting them in
+ * memory. The index still exists, the query still returns the right answer, and
+ * the only symptom is that it got slower — which is precisely the kind of
+ * regression that goes unnoticed until the collection is large.
+ *
+ * So each index below carries `_id` in the same direction as its sort field.
+ */
+
+orderSchema.index({ status: 1, createdAt: -1, _id: -1 });
+
+/*
+ * Orders for one customer — the customer detail screen, and the `?customer=`
+ * filter. `createdAt` is included so that screen's ordering comes free.
+ */
+orderSchema.index({ customer: 1, createdAt: -1, _id: -1 });
+
+/*
+ * The other half of the sales-rep scope: { $or: [{ createdBy }, { customer: { $in: [...] } }] }.
+ *
+ * As on Customer, an $or evaluates each branch separately, so each branch needs
+ * its own index. This one was missing entirely, which meant every order list
+ * request from a sales rep scanned the collection.
+ */
+orderSchema.index({ createdBy: 1, createdAt: -1, _id: -1 });
+
+/*
+ * The default ordering for admins and managers, whose scope filter is `{}` so
+ * nothing narrows the query before the sort. It also serves the ?from/?to date
+ * range, which is a range scan on the same field.
+ */
+orderSchema.index({ createdAt: -1, _id: -1 });
+
+/* Sorting by value — "the biggest orders", on the dashboard and the list. */
+orderSchema.index({ total: -1, _id: -1 });
 
 module.exports = mongoose.model('Order', orderSchema);

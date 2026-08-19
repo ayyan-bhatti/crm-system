@@ -120,10 +120,29 @@ const auditLogSchema = new mongoose.Schema({
  * slows every write down.
  */
 // The default view: newest first, optionally narrowed by entity type.
-auditLogSchema.index({ createdAt: -1 });
-auditLogSchema.index({ entity: 1, createdAt: -1 });
+/*
+ * WHY EVERY SORTING INDEX ENDS WITH `_id`
+ *
+ * `getSort` appends `_id` to every sort so the ordering is total (see the long
+ * note in utils/queryHelpers.js — without it, tied documents can appear on two
+ * pages at once). That fix has a consequence that is easy to miss and was
+ * caught here by an explain() test rather than by reading the code:
+ *
+ *   an index on { createdAt: -1 } does NOT satisfy a sort of
+ *   { createdAt: -1, _id: -1 }
+ *
+ * MongoDB falls back to fetching every matching document and sorting them in
+ * memory. The index still exists, the query still returns the right answer, and
+ * the only symptom is that it got slower — which is precisely the kind of
+ * regression that goes unnoticed until the collection is large.
+ *
+ * So each index below carries `_id` in the same direction as its sort field.
+ */
+
+auditLogSchema.index({ createdAt: -1, _id: -1 });
+auditLogSchema.index({ entity: 1, createdAt: -1, _id: -1 });
 // "What has this person been doing?" and "what happened to this record?"
-auditLogSchema.index({ 'actor.user': 1, createdAt: -1 });
-auditLogSchema.index({ entityId: 1, createdAt: -1 });
+auditLogSchema.index({ 'actor.user': 1, createdAt: -1, _id: -1 });
+auditLogSchema.index({ entityId: 1, createdAt: -1, _id: -1 });
 
 module.exports = mongoose.model('AuditLog', auditLogSchema);
