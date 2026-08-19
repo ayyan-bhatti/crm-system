@@ -362,3 +362,87 @@ common password. They use a compliant password instead. The model's `minlength` 
 we know the user's name and email to check the password against.
 
 25 new tests. **236 backend tests passing.**
+
+## Phase 1.5 — MongoDB transactions for the order lifecycle
+
+### What was wrong
+
+Creating an order touches two collections: it writes an `Order` and decrements `stockQty`
+on several `Product`s. Those were separate writes with gaps between them, and a crash, a
+timeout, or a serverless function frozen mid-request left the database not merely stale
+but **wrong**:
+
+- stock taken, order never written → inventory vanished into nothing
+- order written, stock not taken → the same unit can be sold twice
+
+The old code compensated by hand — decrement, and on failure loop back over the products
+already touched and add the stock back. That works right up until the process dies between
+the failure and the compensation, at which point nothing runs the undo and there is no
+record that it was owed.
+
+A transaction moves the guarantee from *"our code remembers to clean up"* to *"the database
+will not show anyone a partial result"*. Stronger promise, shorter code.
+
+### How it is done
+
+`utils/transaction.js` wraps `session.withTransaction`, and the three handlers that move
+stock — create, update (status transitions), delete — each run entirely inside one.
+
+**`session.withTransaction` rather than start/commit/abort by hand,** because it retries
+the two errors a correct transaction still has to expect:
+
+- `TransientTransactionError` — two transactions touched the same document and one lost the
+  write conflict. Retrying is the prescribed response, and it is **exactly what happens
+  when two people buy the last unit at once** (Phase 1.6).
+- `UnknownTransactionCommitResult` — the commit may or may not have landed. Retrying is
+  safe; a committed transaction commits idempotently.
+
+Hand-rolled start/commit/abort silently drops both, so the code looks correct and fails
+only under the concurrency it was written for.
+
+**The session is an explicit parameter on every helper,** not something ambient. A query
+that misses it runs *outside* the transaction and is neither isolated nor rolled back —
+that is the standard way a transaction ends up being decorative, and making it a required
+argument is what stops it happening quietly.
+
+**The order document is loaded inside the transaction** in `updateOrder`, not before it.
+Loading outside would reintroduce exactly the read-then-write gap the transaction exists
+to close.
+
+### The graceful-degradation decision
+
+MongoDB transactions require a replica set or sharded cluster. A plain standalone `mongod`
+does not qualify:
+
+| environment | topology | transactions |
+|---|---|---|
+| MongoDB Atlas (incl. free tier) | replica set | yes |
+| `mongod` installed locally for dev | standalone | **no** |
+| the test suite | single-node replica set | yes |
+
+So a developer on a local standalone would otherwise hit an obscure *"Transaction numbers
+are only allowed on a replica set member"* on every order. Rather than demand everyone
+reconfigure their MongoDB, `withTransaction` detects it at first use, warns loudly once,
+and runs the same work without a session — falling back to the old hand-rolled
+compensation, which is degraded but not broken. Detected at runtime rather than inferred
+from the connection string, because the string does not reliably tell you.
+
+### Test harness change
+
+`tests/setup.js` now starts `MongoMemoryReplSet` instead of `MongoMemoryServer`. This
+matters more than it looks: a standalone test database would make every transaction test
+**silently exercise the fallback path and report that the transactions work**. One test
+asserts the harness really is a replica set, for exactly that reason.
+
+Costs a few seconds of extra start-up per test file. Right price for testing the code path
+production runs.
+
+### An honest note on the tests
+
+Most of the new lifecycle tests would *also* pass against the old hand-rolled compensation
+— each of their failures happens at a point the compensation knew how to undo. So there is
+a separate block that tests the wrapper directly: write to two collections, then throw from
+a place no undo exists for. Nothing in the application puts those back. Only the database
+can, and only if the work really was in a transaction.
+
+14 new tests. **250 backend tests passing.** No API contract change.

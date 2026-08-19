@@ -13,6 +13,7 @@ const {
   paginatedResponse,
   getDateRange,
 } = require('../utils/queryHelpers');
+const { withTransaction } = require('../utils/transaction');
 
 const SORTABLE_FIELDS = ['total', 'status', 'createdAt'];
 
@@ -29,6 +30,20 @@ const SORTABLE_FIELDS = ['total', 'status', 'createdAt'];
 // Rule 2 is enforced by the `completedAt` timestamp rather than by the status
 // alone: status can be written repeatedly with the same value, but `completedAt`
 // tells us whether the decrement has already happened.
+//
+// TRANSACTIONS
+//
+// Every handler that moves stock now runs inside a MongoDB transaction (see
+// utils/transaction.js). Two collections change together — Order and Product —
+// and without a transaction a crash between the two writes leaves the database
+// genuinely wrong rather than merely stale: stock taken with no order to show
+// for it, or an order whose stock was never taken and can be sold again.
+//
+// The `session` threaded through these helpers is what puts each query inside
+// the transaction. A query that does not receive it runs outside, is neither
+// isolated nor rolled back, and makes the transaction decorative — which is why
+// it is an explicit parameter on every one of them rather than something
+// ambient.
 // ---------------------------------------------------------------------------
 
 /**
@@ -37,7 +52,7 @@ const SORTABLE_FIELDS = ['total', 'status', 'createdAt'];
  *
  * The client's own `total` is never trusted — it is always recomputed here.
  */
-async function buildOrderItems(rawItems) {
+async function buildOrderItems(rawItems, session = null) {
   if (!Array.isArray(rawItems) || rawItems.length === 0) {
     throw ApiError.badRequest('An order must contain at least one item');
   }
@@ -60,7 +75,7 @@ async function buildOrderItems(rawItems) {
   }
 
   const productIds = [...merged.keys()];
-  const products = await Product.find({ _id: { $in: productIds } });
+  const products = await Product.find({ _id: { $in: productIds } }).session(session);
 
   if (products.length !== productIds.length) {
     const found = new Set(products.map((p) => String(p._id)));
@@ -93,24 +108,38 @@ async function buildOrderItems(rawItems) {
 /**
  * Decrement stock for every line of an order.
  *
- * The `stockQty: { $gte: quantity }` condition makes each update conditional, so
- * two requests completing the same order concurrently cannot drive stock
- * negative — the second one matches nothing and reports zero modified docs.
- * If any line fails, the lines already applied are rolled back.
+ * The `stockQty: { $gte: quantity }` condition is what makes this safe under
+ * concurrency. It is a single atomic operation: MongoDB matches the document
+ * and applies the decrement without anything getting in between, so two
+ * requests for the last unit cannot both succeed. The loser matches no document
+ * and reports zero modified — it does not silently drive stock negative, which
+ * is what a read-then-write check does.
+ *
+ * Inside a transaction there is no manual rollback: if any line fails, the
+ * thrown error aborts the transaction and every decrement already applied
+ * disappears with it. The previous version compensated by hand, which worked
+ * until the process died between the failure and the compensation.
+ *
+ * When transactions are unavailable (a standalone dev MongoDB — see
+ * utils/transaction.js) `session` is null and the hand-rolled compensation is
+ * used instead, so the fallback is degraded rather than broken.
  */
-async function decrementStock(items) {
+async function decrementStock(items, session = null) {
   const applied = [];
 
   for (const item of items) {
     const result = await Product.updateOne(
       { _id: item.product, stockQty: { $gte: item.quantity } },
-      { $inc: { stockQty: -item.quantity } }
+      { $inc: { stockQty: -item.quantity } },
+      { session }
     );
 
     if (result.modifiedCount !== 1) {
-      // Put back whatever we already took before reporting the failure.
-      await restoreStock(applied);
-      const product = await Product.findById(item.product);
+      // Without a transaction, put back whatever we already took. With one, the
+      // abort does it — and doing both would double-credit the stock.
+      if (!session) await restoreStock(applied, null);
+
+      const product = await Product.findById(item.product).session(session);
       throw ApiError.badRequest(
         `Insufficient stock to complete this order for "${product ? product.name : item.product}"`
       );
@@ -121,9 +150,13 @@ async function decrementStock(items) {
 }
 
 /** Add stock back — used when cancelling a completed order, and on rollback. */
-async function restoreStock(items) {
+async function restoreStock(items, session = null) {
   for (const item of items) {
-    await Product.updateOne({ _id: item.product }, { $inc: { stockQty: item.quantity } });
+    await Product.updateOne(
+      { _id: item.product },
+      { $inc: { stockQty: item.quantity } },
+      { session }
+    );
   }
 }
 
@@ -205,39 +238,56 @@ const createOrder = asyncHandler(async (req, res) => {
 
   if (!customerId) throw ApiError.badRequest('An order must reference a customer');
 
-  const customer = await Customer.findById(customerId);
-  if (!customer) throw ApiError.notFound('Customer not found');
-
-  // A sales rep may only place orders for their own customers.
-  if (!canAccessCustomer(req.user, customer)) {
-    throw ApiError.forbidden('You do not have access to this customer');
-  }
-
   if (status && ![ORDER_STATUS.PENDING, ORDER_STATUS.COMPLETED].includes(status)) {
     throw ApiError.badRequest('A new order must be created as pending or completed');
   }
 
-  const { items, total } = await buildOrderItems(rawItems);
   const completing = status === ORDER_STATUS.COMPLETED;
 
-  // Take the stock before writing the order, so a stock failure leaves no
-  // half-valid order behind.
-  if (completing) await decrementStock(items);
+  /*
+   * The whole sequence — validate the customer, price the lines, write the
+   * order, take the stock — happens inside one transaction. Either all of it is
+   * visible or none of it is; there is no moment at which another request can
+   * observe an order whose stock has not been taken, or stock taken for an
+   * order that does not exist.
+   *
+   * `session` has to be passed to every query in here. One that misses it runs
+   * outside the transaction and quietly loses the guarantee, which is the
+   * standard way a transaction ends up being decoration.
+   */
+  const order = await withTransaction(async (session) => {
+    const customer = await Customer.findById(customerId).session(session);
+    if (!customer) throw ApiError.notFound('Customer not found');
 
-  let order;
-  try {
-    order = await Order.create({
-      customer: customer._id,
-      items,
-      total,
-      status: completing ? ORDER_STATUS.COMPLETED : ORDER_STATUS.PENDING,
-      completedAt: completing ? new Date() : null,
-      createdBy: req.user._id,
-    });
-  } catch (err) {
-    if (completing) await restoreStock(items);
-    throw err;
-  }
+    // A sales rep may only place orders for their own customers.
+    if (!canAccessCustomer(req.user, customer)) {
+      throw ApiError.forbidden('You do not have access to this customer');
+    }
+
+    const { items, total } = await buildOrderItems(rawItems, session);
+
+    // Order.create with a session takes an array — the single-document form
+    // does not accept options.
+    const [created] = await Order.create(
+      [
+        {
+          customer: customer._id,
+          items,
+          total,
+          status: completing ? ORDER_STATUS.COMPLETED : ORDER_STATUS.PENDING,
+          completedAt: completing ? new Date() : null,
+          createdBy: req.user._id,
+        },
+      ],
+      { session }
+    );
+
+    // Stock moves last. If it fails, throwing here aborts the transaction and
+    // the order above is never written — no compensation to remember.
+    if (completing) await decrementStock(items, session);
+
+    return created;
+  });
 
   await order.populate([
     { path: 'customer', select: 'name email company city status' },
@@ -262,59 +312,74 @@ const createOrder = asyncHandler(async (req, res) => {
 const updateOrder = asyncHandler(async (req, res) => {
   const { status, items: rawItems } = req.body;
 
-  // The customer is populated because the ownership check may need to read its
-  // `assignedTo` — a sales rep can edit an order they did not create if it
-  // belongs to a customer assigned to them.
-  const order = await Order.findById(req.params.id).populate('customer');
-  if (!order) throw ApiError.notFound('Order not found');
+  /*
+   * Transactional for the same reason creation is: a completion decrements
+   * stock AND stamps completedAt, and a cancellation restores stock AND clears
+   * it. If half of either pair lands, the guard that stops stock being taken
+   * twice is now lying about what happened.
+   *
+   * The order document is loaded inside the transaction as well, so the read
+   * that decides whether to move stock and the write that moves it see the same
+   * snapshot. Loading it outside would reintroduce exactly the read-then-write
+   * gap the transaction is here to close.
+   */
+  const order = await withTransaction(async (session) => {
+    // The customer is populated because the ownership check may need to read
+    // its `assignedTo` — a sales rep can edit an order they did not create if
+    // it belongs to a customer assigned to them.
+    const found = await Order.findById(req.params.id).populate('customer').session(session);
+    if (!found) throw ApiError.notFound('Order not found');
 
-  if (!canAccessOrderDocument(req.user, order)) {
-    throw ApiError.forbidden('You do not have access to this order');
-  }
-
-  // --- Item edits: only while the order is still pending ---------------------
-  if (rawItems !== undefined) {
-    if (order.status !== ORDER_STATUS.PENDING) {
-      throw ApiError.badRequest(
-        `Items cannot be changed on a ${order.status} order. Create a new order instead.`
-      );
-    }
-    const { items, total } = await buildOrderItems(rawItems);
-    order.items = items;
-    order.total = total;
-  }
-
-  // --- Status transitions ----------------------------------------------------
-  if (status !== undefined && status !== order.status) {
-    const from = order.status;
-
-    if (from === ORDER_STATUS.CANCELLED) {
-      throw ApiError.badRequest('A cancelled order cannot be reopened');
+    if (!canAccessOrderDocument(req.user, found)) {
+      throw ApiError.forbidden('You do not have access to this order');
     }
 
-    if (status === ORDER_STATUS.COMPLETED) {
-      // completedAt is the guard: if it is already set, the stock for this
-      // order has been taken once and must not be taken again.
-      if (!order.completedAt) {
-        await decrementStock(order.items);
-        order.completedAt = new Date();
+    // --- Item edits: only while the order is still pending -------------------
+    if (rawItems !== undefined) {
+      if (found.status !== ORDER_STATUS.PENDING) {
+        throw ApiError.badRequest(
+          `Items cannot be changed on a ${found.status} order. Create a new order instead.`
+        );
       }
-      order.status = ORDER_STATUS.COMPLETED;
-    } else if (status === ORDER_STATUS.CANCELLED) {
-      // Only give stock back if it was actually taken.
-      if (order.completedAt) {
-        await restoreStock(order.items);
-        order.completedAt = null;
-      }
-      order.status = ORDER_STATUS.CANCELLED;
-    } else if (status === ORDER_STATUS.PENDING) {
-      throw ApiError.badRequest(`An order cannot move from ${from} back to pending`);
-    } else {
-      throw ApiError.badRequest(`Unknown order status: ${status}`);
+      const { items, total } = await buildOrderItems(rawItems, session);
+      found.items = items;
+      found.total = total;
     }
-  }
 
-  await order.save();
+    // --- Status transitions --------------------------------------------------
+    if (status !== undefined && status !== found.status) {
+      const from = found.status;
+
+      if (from === ORDER_STATUS.CANCELLED) {
+        throw ApiError.badRequest('A cancelled order cannot be reopened');
+      }
+
+      if (status === ORDER_STATUS.COMPLETED) {
+        // completedAt is the guard: if it is already set, the stock for this
+        // order has been taken once and must not be taken again.
+        if (!found.completedAt) {
+          await decrementStock(found.items, session);
+          found.completedAt = new Date();
+        }
+        found.status = ORDER_STATUS.COMPLETED;
+      } else if (status === ORDER_STATUS.CANCELLED) {
+        // Only give stock back if it was actually taken.
+        if (found.completedAt) {
+          await restoreStock(found.items, session);
+          found.completedAt = null;
+        }
+        found.status = ORDER_STATUS.CANCELLED;
+      } else if (status === ORDER_STATUS.PENDING) {
+        throw ApiError.badRequest(`An order cannot move from ${from} back to pending`);
+      } else {
+        throw ApiError.badRequest(`Unknown order status: ${status}`);
+      }
+    }
+
+    await found.save({ session });
+    return found;
+  });
+
   await order.populate([
     { path: 'customer', select: 'name email company city status' },
     { path: 'items.product', select: 'name sku price' },
@@ -329,17 +394,25 @@ const updateOrder = asyncHandler(async (req, res) => {
  * Deleting a completed order restores its stock, so the numbers stay honest.
  */
 const deleteOrder = asyncHandler(async (req, res) => {
-  // Populated for the same reason as in updateOrder — see the note there.
-  const order = await Order.findById(req.params.id).populate('customer');
-  if (!order) throw ApiError.notFound('Order not found');
+  /*
+   * Also transactional: restoring the stock and removing the order are one
+   * change. Restoring stock and then failing to delete would credit inventory
+   * for an order that still exists and can be cancelled again — inventing units
+   * out of nothing.
+   */
+  await withTransaction(async (session) => {
+    // Populated for the same reason as in updateOrder — see the note there.
+    const order = await Order.findById(req.params.id).populate('customer').session(session);
+    if (!order) throw ApiError.notFound('Order not found');
 
-  if (!canAccessOrderDocument(req.user, order)) {
-    throw ApiError.forbidden('You do not have access to this order');
-  }
+    if (!canAccessOrderDocument(req.user, order)) {
+      throw ApiError.forbidden('You do not have access to this order');
+    }
 
-  if (order.completedAt) await restoreStock(order.items);
+    if (order.completedAt) await restoreStock(order.items, session);
 
-  await order.deleteOne();
+    await order.deleteOne({ session });
+  });
 
   res.json({ success: true, message: 'Order deleted', data: { id: req.params.id } });
 });
