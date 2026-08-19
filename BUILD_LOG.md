@@ -1169,3 +1169,88 @@ after a deploy can run unindexed. `syncIndexes()` as a deploy step is how to mak
 deterministic.
 
 25 new tests. **442 backend tests passing.** Phase 3 complete.
+
+---
+
+# Phase 4 — Quality
+
+## Phase 4.1 — Frontend and end-to-end tests
+
+The frontend had **no test setup at all**. It now has two layers, doing different jobs.
+
+### Layer 1 — component tests (Vitest + React Testing Library), 43 tests
+
+Configured inside `vite.config.js` rather than a separate config, so tests run through the
+same plugin pipeline as the app — identical JSX transform and `import.meta.env` handling,
+which means a test cannot pass against a build the browser would never produce.
+
+Coverage: **login** (8), **protected routes and RoleGate** (9), **customer create/edit** (7),
+**order creation** (10), **AI search** (9).
+
+Two principles worth stating:
+
+- **Tests find things the way a user does** — by label, by role, by visible text — never by
+  reaching into state or props. A test that asserts on internals breaks when the component
+  is refactored and passes when the screen is broken, which is exactly backwards.
+- **The API is mocked per test, not globally.** A shared mock server would be less
+  repetitive and much harder to read: you could no longer tell what a test assumes without
+  opening another file.
+
+Three of these tests are regression guards for earlier phases: *"never stores a token in
+localStorage or sessionStorage"* (Phase 1.1), *"waits for the session check instead of
+redirecting while it is pending"* (the refresh-flash bug), and *"keeps an earlier line's
+selection when a later one is searched"* (the async-select bug from Phase 3.1).
+
+### Two real bugs the component tests found
+
+**1. Form labels were not associated with their inputs.** `Field` rendered a bare `<label>`
+next to the control with no `htmlFor` and no nesting. It *looked* right — the text sits
+above the field — but nothing connected them, so a screen reader announced every input as
+unlabelled and clicking a label did not focus its field. `getByLabelText` failing is how it
+surfaced: **a test written the way a user interacts with the page failed on markup a user
+with a screen reader could not use either.** `Field` now generates an id, wires `htmlFor`,
+and links `hint`/`error` through `aria-describedby`.
+
+**2. `CustomerForm` ignored its load error.** It destructured `useFetch` without `error`, so
+a customer that failed to load (deleted, no permission, network down) rendered an **empty
+form with no warning** — and pressing "Save changes" would then PATCH the record with blank
+fields. A failure to *read* became data loss on *write*. It now shows the error and does not
+render the form at all.
+
+### Layer 2 — end-to-end (Playwright), 11 tests
+
+These start the **real backend** against a throwaway in-memory replica set, the real
+frontend, and a real browser.
+
+**Why not mock the network.** Playwright could intercept requests, which is faster and far
+easier to set up — and would miss the entire point. The riskiest work in this project is the
+auth rework: httpOnly cookies, the CSRF double-submit, refresh rotation, the order
+transaction. Every one is an interaction *between* browser and server. A component test
+mocks the server; an API test has no browser. Only this layer can tell you the cookie was
+actually accepted and the CSRF header actually sent.
+
+The headline test is **login → search the picker → create an order → land on its detail
+page**, with nothing mocked. One test verifies the Phase 1.1 guarantee in a real browser
+rather than from a response header: the session cookies exist, `document.cookie` cannot see
+them, and both storages are empty.
+
+Scope is kept narrow on purpose. E2E tests are slow and the flakiest thing in any suite, so
+they cover the flow that must never break rather than duplicating the 442 backend and 43
+component tests. `workers: 1` because the seeded dataset is shared and parallel workers
+would race over the same stock — exactly the flakiness that teaches people to ignore E2E
+failures.
+
+### Two environment problems worth recording
+
+- **Vitest's default `forks` pool cannot start workers when the project path contains a
+  space** — which this one does ("digisofts project"). The failure is an opaque *"Timeout
+  waiting for worker to respond"*. Pinned to `pool: 'threads'`.
+- **mongodb-memory-server re-downloaded 600MB of MongoDB** when launched by Playwright,
+  blowing the start-up timeout and reporting only *"Timed out waiting for webServer"*. It
+  resolves its binary cache relative to the working directory. `process.chdir` alone did not
+  fix it, so `e2eServer.js` now sets `MONGOMS_DOWNLOAD_DIR` outright — stating the location
+  rather than relying on resolution rules, and reusing the copy the Jest suite already
+  downloaded.
+
+**43 component tests + 11 end-to-end tests, all passing.** Run with `npm test` and
+`npm run test:e2e` in `frontend/`.

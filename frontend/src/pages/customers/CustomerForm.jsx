@@ -34,7 +34,16 @@ export default function CustomerForm() {
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  const { data: existing, loading } = useFetch(
+  /*
+   * `loadError` is destructured deliberately — it used to be dropped.
+   *
+   * When loading the record failed (deleted since the link was made, no
+   * permission, network down) the screen rendered an EMPTY form with no
+   * indication anything was wrong. Pressing "Save changes" then PATCHed the
+   * record with blank fields, so a failure to READ turned into data loss on
+   * WRITE. Caught by a test asserting the message appears.
+   */
+  const { data: existing, loading, error: loadError } = useFetch(
     () => (isEdit ? customersApi.get(id) : null),
     [id]
   );
@@ -87,6 +96,19 @@ export default function CustomerForm() {
   }
 
   if (isEdit && loading) return <Spinner full />;
+
+  /*
+   * A record that could not be loaded gets the error and nothing else. Showing
+   * the form as well would invite the user to save over a record we never read.
+   */
+  if (isEdit && loadError) {
+    return (
+      <div className="mx-auto max-w-2xl">
+        <PageHeader title="Edit customer" />
+        <ErrorBanner message={loadError} />
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto max-w-2xl">

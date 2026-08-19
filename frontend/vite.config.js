@@ -15,6 +15,38 @@ import tailwindcss from '@tailwindcss/vite';
  */
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+
+  /**
+   * Vitest.
+   *
+   * Configured here rather than in a separate vitest.config.js so the tests run
+   * through the same plugin pipeline as the app — the JSX transform and the
+   * `import.meta.env` handling are identical, which means a test cannot pass
+   * against a build the browser would never produce.
+   */
+  test: {
+    // React components need a DOM. jsdom is the lighter of the two options and
+    // sufficient here — nothing in these tests depends on real layout.
+    environment: 'jsdom',
+
+    /*
+     * The `threads` pool rather than the default `forks`.
+     *
+     * Vitest's forked workers fail to start when the project path contains a
+     * space — which this one does ("digisofts project") — and the failure is an
+     * opaque "Timeout waiting for worker to respond" rather than anything
+     * naming the cause. Threads have no such problem, and for a suite of pure
+     * component tests the isolation difference does not matter.
+     */
+    pool: 'threads',
+    globals: true,
+    setupFiles: './src/test/setup.js',
+    css: false,
+    // Playwright specs live in e2e/ and are driven by a real browser; Vitest
+    // must not try to run them.
+    exclude: ['node_modules/**', 'e2e/**', 'dist/**'],
+  },
+
   server: {
     port: 5173,
     proxy: {

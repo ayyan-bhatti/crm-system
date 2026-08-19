@@ -1,3 +1,4 @@
+import { cloneElement, useId } from 'react';
 import { card, btnSecondary, input, label as labelClass, STATUS_STYLES, humanize } from '../ui';
 
 /**
@@ -112,14 +113,70 @@ export function PageHeader({ title, subtitle, action }) {
   );
 }
 
-/** A labelled form control. `children` lets a caller swap in a select or textarea. */
-export function Field({ label, error, children, hint, ...inputProps }) {
+/**
+ * A labelled form control. `children` lets a caller swap in a select or textarea.
+ *
+ * THE LABEL IS PROGRAMMATICALLY ASSOCIATED WITH THE CONTROL.
+ *
+ * It previously rendered a bare `<label>` next to the input with no `htmlFor`
+ * and no nesting. It LOOKED correct — the text sits above the field — but
+ * nothing connected the two, which meant:
+ *
+ *   - a screen reader announced the input as unlabelled
+ *   - clicking the label did not focus the field
+ *   - `getByLabelText` could not find it, which is how this was noticed
+ *
+ * The last one is the least important and the reason it was caught: a test
+ * written the way a user interacts with the page fails on markup a user with a
+ * screen reader could not use either. Generating the id here rather than asking
+ * every caller for one means no form can forget it.
+ *
+ * `hint` and `error` are wired to `aria-describedby`, so the requirement or the
+ * failure is announced with the field rather than being visual-only.
+ */
+export function Field({ label, error, children, hint, id, ...inputProps }) {
+  const generatedId = useId();
+  const fieldId = id || inputProps.name || generatedId;
+  const hintId = `${fieldId}-hint`;
+  const errorId = `${fieldId}-error`;
+
+  const describedBy = [error ? errorId : null, hint && !error ? hintId : null]
+    .filter(Boolean)
+    .join(' ');
+
   return (
     <div>
-      <label className={labelClass}>{label}</label>
-      {children || <input className={input} {...inputProps} />}
-      {hint && !error && <p className="mt-1.5 text-xs text-muted">{hint}</p>}
-      {error && <p className="mt-1.5 text-xs text-critical-ink">{error}</p>}
+      <label className={labelClass} htmlFor={fieldId}>
+        {label}
+      </label>
+
+      {children ? (
+        // A caller-supplied control (select, textarea, SearchSelect) gets the
+        // same id so the label still points at something real.
+        cloneElement(children, {
+          id: children.props.id || fieldId,
+          'aria-describedby': describedBy || undefined,
+        })
+      ) : (
+        <input
+          className={input}
+          id={fieldId}
+          aria-describedby={describedBy || undefined}
+          aria-invalid={error ? true : undefined}
+          {...inputProps}
+        />
+      )}
+
+      {hint && !error && (
+        <p id={hintId} className="mt-1.5 text-xs text-muted">
+          {hint}
+        </p>
+      )}
+      {error && (
+        <p id={errorId} className="mt-1.5 text-xs text-critical-ink">
+          {error}
+        </p>
+      )}
     </div>
   );
 }
