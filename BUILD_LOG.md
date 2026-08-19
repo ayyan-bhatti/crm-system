@@ -918,3 +918,76 @@ client would make those decisions invisible at the place they matter. `complete(
 the caller chooses.
 
 13 new tests. **373 backend tests passing.** Phase 2 complete.
+
+---
+
+# Phase 3 — Scalability
+
+## Phase 3.1 — Server-side searchable selects
+
+### The bug this fixes, which is worse than it looks
+
+The order form filled both dropdowns with `limit=100`. The obvious cost is downloading a
+hundred records to render a picker. The **dangerous** cost is different:
+
+> With 101 customers, the hundred-and-first cannot be selected at all. No error, no
+> "showing 100 of 4,000" — a user simply cannot find their customer and has no idea why.
+
+Silent truncation is the worst kind of limit, because nothing about the screen suggests
+anything is missing. (The old code's own comment admitted it: *"a real deployment with
+thousands of records would want a searchable async select instead."*)
+
+### New endpoints, and why they are not just the list endpoint
+
+`GET /api/customers/options` and `GET /api/products/options` — `?search=&limit=`.
+
+Reusing `GET /api/customers` would have worked, and the temptation is real: one endpoint,
+one code path. But a picker fires a request per pause in typing, and the list endpoint
+returns **whole documents with `assignedTo` populated** — a second query against the users
+collection plus a payload of notes, phone numbers and timestamps, per keystroke, to render
+one line of text.
+
+So these return three or four fields, unpopulated, `.lean()` (plain objects with no Mongoose
+document wrapper, measurably cheaper when the result is serialised straight to JSON and
+discarded).
+
+The cost of the extra endpoint is a second place the permission rules have to be right. That
+is paid by reusing `customerScopeFilter` — the *same function* the list endpoint uses — so a
+sales rep cannot discover through the picker what the list would have hidden. Two tests
+cover it, including "a rep searching for another rep's customer by name finds nothing".
+
+**The limit is capped server-side (25) rather than trusted from the query string**, so the
+endpoint cannot be turned into a bulk export of the customer table by passing `limit=10000`.
+
+Products include `price` and `stockQty` even though neither is the label — the order form
+shows both and totals from them, so returning them here removes a follow-up request per line.
+
+### The component: three things it has to get right
+
+`components/SearchSelect.jsx`, a debounced combobox (250ms — one request per typed word
+rather than eight, still fast enough to feel live).
+
+1. **The selected record is held by the parent, not looked up from the options list.** This
+   is the bug most hand-rolled async selects have. A search for "wid" returns twenty
+   products; the one already chosen on another line is very likely not among them, so a
+   component deriving its label from the visible options **blanks out every existing
+   selection the moment anyone types**.
+2. **Debouncing alone is not enough — stale replies are discarded too.** Two requests can
+   still be in flight, and the slower earlier one can land last and overwrite newer results
+   with older ones.
+3. **It is a real combobox.** Arrow keys, Enter, Escape, `role="combobox"`/`listbox`/`option`
+   and `aria-activedescendant`. A div-based picker that only works with a mouse is a
+   *regression* from the `<select>` it replaced, however much better it looks. Options are
+   chosen on `onMouseDown` rather than `onClick`, because click fires after blur — by which
+   point the click-outside handler has closed the list and the selection never happens.
+
+A hidden `required` input carries the browser's native validation: the visible combobox
+holds a *label*, not the id, so marking it required would demand the wrong thing.
+
+### A small flow fix that came with it
+
+Arriving from a customer's page (`/orders/new?customer=…`) gives an id but no name. The form
+now fetches that one record so the picker shows who is selected, instead of an empty box
+that is nonetheless valid — confusing in exactly the flow meant to be the convenient one.
+
+19 new tests. **392 backend tests passing.** Additive API change; no existing contract moved.

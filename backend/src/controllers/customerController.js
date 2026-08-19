@@ -70,6 +70,66 @@ const listCustomers = asyncHandler(async (req, res) => {
   res.json(paginatedResponse({ data, total, page, limit }));
 });
 
+/**
+ * GET /api/customers/options?search=&limit=
+ *
+ * A deliberately minimal endpoint for the searchable customer picker.
+ *
+ * WHY NOT JUST REUSE GET /api/customers
+ *
+ * It would work, and the temptation is real — one endpoint, one code path. But
+ * a picker fires a request per pause in typing, and the list endpoint returns
+ * whole customer documents WITH `assignedTo` populated. That is a second query
+ * to the users collection and a payload of notes, phone numbers and timestamps,
+ * per keystroke, to render a line of text.
+ *
+ * So this returns four fields, unpopulated, `.lean()` — plain objects with no
+ * Mongoose document wrapper, which is measurably cheaper when the result is
+ * about to be serialised straight to JSON and thrown away.
+ *
+ * The cost of the decision is one more endpoint to keep in step with the
+ * permission rules. That is paid by reusing `customerScopeFilter`, the same
+ * function the list endpoint uses — so a sales rep cannot discover customers
+ * through the picker that the list would have hidden.
+ */
+const listCustomerOptions = asyncHandler(async (req, res) => {
+  const { search } = req.query;
+
+  /*
+   * A tighter cap than the list endpoint's.
+   *
+   * A picker showing more than about twenty options is not helping anyone —
+   * past that, the answer is to type more, not to scroll further. Capping here
+   * rather than trusting `?limit=` also means the endpoint cannot be turned
+   * into a bulk export of the customer table by a caller passing limit=10000.
+   */
+  const limit = Math.min(Math.max(1, parseInt(req.query.limit, 10) || 20), 25);
+
+  const filter = { ...customerScopeFilter(req.user) };
+
+  if (search) {
+    const rx = containsRegex(search);
+    const searchClause = [{ name: rx }, { email: rx }, { company: rx }];
+
+    // Same $and dance as the list endpoint: a sales rep's scope is already an
+    // $or, and overwriting it would leak other reps' customers.
+    if (filter.$or) {
+      filter.$and = [{ $or: filter.$or }, { $or: searchClause }];
+      delete filter.$or;
+    } else {
+      filter.$or = searchClause;
+    }
+  }
+
+  const data = await Customer.find(filter)
+    .select('name email company')
+    .sort({ name: 1 })
+    .limit(limit)
+    .lean();
+
+  res.json({ success: true, count: data.length, data });
+});
+
 /** GET /api/customers/:id */
 const getCustomer = asyncHandler(async (req, res) => {
   const customer = await Customer.findById(req.params.id)
@@ -193,6 +253,7 @@ const deleteCustomer = asyncHandler(async (req, res) => {
 module.exports = {
   customerScopeFilter,
   listCustomers,
+  listCustomerOptions,
   getCustomer,
   createCustomer,
   updateCustomer,

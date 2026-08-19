@@ -51,6 +51,37 @@ const listProducts = asyncHandler(async (req, res) => {
 });
 
 /**
+ * GET /api/products/options?search=&limit=
+ *
+ * The product picker's endpoint. Same reasoning as the customer one — see the
+ * note there for why this is not just the list endpoint with a small limit.
+ *
+ * `stockQty` and `price` are included even though they are not part of the
+ * label, because the order form shows both next to each option and uses stock
+ * for its immediate feedback. Fetching them here saves a second request per
+ * selected product, which would otherwise be the picker's real cost.
+ */
+const listProductOptions = asyncHandler(async (req, res) => {
+  const { search } = req.query;
+  const limit = Math.min(Math.max(1, parseInt(req.query.limit, 10) || 20), 25);
+
+  const filter = {};
+
+  if (search) {
+    const rx = containsRegex(search);
+    filter.$or = [{ name: rx }, { sku: rx }];
+  }
+
+  const data = await Product.find(filter)
+    .select('name sku price stockQty')
+    .sort({ name: 1 })
+    .limit(limit)
+    .lean();
+
+  res.json({ success: true, count: data.length, data });
+});
+
+/**
  * GET /api/products/categories
  * The distinct category list, for populating the filter dropdown in the UI.
  * Declared before `/:id` in the router so "categories" isn't read as an id.
@@ -139,6 +170,7 @@ const deleteProduct = asyncHandler(async (req, res) => {
 
 module.exports = {
   listProducts,
+  listProductOptions,
   listCategories,
   getProduct,
   createProduct,

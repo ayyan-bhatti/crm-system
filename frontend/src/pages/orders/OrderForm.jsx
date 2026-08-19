@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { customersApi, ordersApi, productsApi } from '../../api/resources';
 import { errorMessage } from '../../api/client';
 import useFetch from '../../hooks/useFetch';
 import { Card, ErrorBanner, Field, PageHeader, Spinner } from '../../components/common';
+import SearchSelect from '../../components/SearchSelect';
 import { btnPrimary, btnSecondary, input, money } from '../../ui';
 
 /**
@@ -22,24 +23,55 @@ export default function OrderForm() {
   const [searchParams] = useSearchParams();
 
   // Pre-selected when arriving from a customer's page.
-  const [customerId, setCustomerId] = useState(searchParams.get('customer') || '');
-  const [lines, setLines] = useState([{ product: '', quantity: 1 }]);
+  const preselectedCustomerId = searchParams.get('customer') || '';
+  const [customerId, setCustomerId] = useState(preselectedCustomerId);
+
+  /*
+   * The SELECTED records are held here, not looked up from the picker's current
+   * results.
+   *
+   * This is the whole reason the pickers work. A search for "wid" returns
+   * twenty products; the one already chosen on another line is very likely not
+   * among them. A component that derived its label from the visible options
+   * would blank out every existing selection the moment anyone typed.
+   *
+   * It also removes a whole class of request: the price and stock needed to
+   * total the order come back with the option that was picked, so no line ever
+   * needs a follow-up fetch.
+   */
+  const [selectedCustomer, setSelectedCustomer] = useState(null);
+  const [lines, setLines] = useState([{ product: '', quantity: 1, selected: null }]);
+
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  // limit=100 keeps both pickers to a single request; a real deployment with
-  // thousands of records would want a searchable async select instead.
-  const { data: customers } = useFetch(() => customersApi.list({ limit: 100 }), []);
-  const { data: products } = useFetch(() => productsApi.list({ limit: 100 }), []);
+  /*
+   * Arriving from a customer's page gives us an id but no name. One request
+   * fetches the record so the picker can show who is selected rather than an
+   * empty box that is nonetheless valid — confusing in exactly the flow that
+   * is supposed to be the convenient one.
+   */
+  const { data: preselected } = useFetch(
+    () => (preselectedCustomerId ? customersApi.get(preselectedCustomerId) : null),
+    [preselectedCustomerId]
+  );
 
-  const productById = Object.fromEntries((products?.data || []).map((p) => [p._id, p]));
+  useEffect(() => {
+    if (preselected) setSelectedCustomer(preselected);
+  }, [preselected]);
+
+  // Built from what the user has actually picked, so it holds every product on
+  // the form regardless of what the search box currently shows.
+  const productById = Object.fromEntries(
+    lines.filter((line) => line.selected).map((line) => [line.selected._id, line.selected])
+  );
 
   function updateLine(index, patch) {
     setLines((prev) => prev.map((line, i) => (i === index ? { ...line, ...patch } : line)));
   }
 
   function addLine() {
-    setLines((prev) => [...prev, { product: '', quantity: 1 }]);
+    setLines((prev) => [...prev, { product: '', quantity: 1, selected: null }]);
   }
 
   function removeLine(index) {
@@ -103,21 +135,21 @@ export default function OrderForm() {
         <ErrorBanner message={error} onDismiss={() => setError('')} />
 
         <form onSubmit={handleSubmit} className="space-y-5">
-          <Field label="Customer">
-            <select
-              className={input}
+          <Field label="Customer" hint="Start typing to search by name, company or email.">
+            <SearchSelect
               required
               value={customerId}
-              onChange={(e) => setCustomerId(e.target.value)}
-            >
-              <option value="">Select a customer…</option>
-              {(customers?.data || []).map((customer) => (
-                <option key={customer._id} value={customer._id}>
-                  {customer.name}
-                  {customer.company ? ` — ${customer.company}` : ''}
-                </option>
-              ))}
-            </select>
+              selected={selectedCustomer}
+              onChange={(customer) => {
+                setCustomerId(customer._id);
+                setSelectedCustomer(customer);
+              }}
+              fetchOptions={(search) => customersApi.options(search)}
+              getOptionLabel={(customer) => customer.name}
+              getOptionMeta={(customer) => customer.company || customer.email}
+              placeholder="Search customers…"
+              emptyMessage="No customers match that search"
+            />
           </Field>
 
           {/* --- Line items --------------------------------------------- */}
@@ -129,18 +161,20 @@ export default function OrderForm() {
 
                 return (
                   <div key={index} className="flex flex-wrap items-start gap-2">
-                    <select
-                      className={`${input} flex-1 min-w-48`}
-                      value={line.product}
-                      onChange={(e) => updateLine(index, { product: e.target.value })}
-                    >
-                      <option value="">Select a product…</option>
-                      {(products?.data || []).map((p) => (
-                        <option key={p._id} value={p._id}>
-                          {p.name} ({p.sku}) — {money(p.price)} · {p.stockQty} in stock
-                        </option>
-                      ))}
-                    </select>
+                    <div className="min-w-[12rem] flex-1">
+                      <SearchSelect
+                        value={line.product}
+                        selected={line.selected}
+                        onChange={(picked) =>
+                          updateLine(index, { product: picked._id, selected: picked })
+                        }
+                        fetchOptions={(search) => productsApi.options(search)}
+                        getOptionLabel={(p) => p.name}
+                        getOptionMeta={(p) => `${p.sku} · ${money(p.price)} · ${p.stockQty} in stock`}
+                        placeholder="Search products…"
+                        emptyMessage="No products match that search"
+                      />
+                    </div>
 
                     <input
                       type="number"

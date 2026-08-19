@@ -1,6 +1,7 @@
 const express = require('express');
 const {
   listCustomers,
+  listCustomerOptions,
   getCustomer,
   createCustomer,
   updateCustomer,
@@ -19,6 +20,15 @@ const router = express.Router();
 router.use(protect);
 
 router.route('/').get(listCustomers).post(createCustomer);
+
+/*
+ * The searchable picker's endpoint.
+ *
+ * Declared BEFORE '/:id' or Express would read "options" as a customer id and
+ * answer with a CastError — the same trap the products router already avoids
+ * for "categories".
+ */
+router.get('/options', listCustomerOptions);
 router.route('/:id').get(getCustomer).patch(updateCustomer).delete(deleteCustomer);
 
 /*

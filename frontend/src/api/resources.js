@@ -33,12 +33,18 @@ export const customersApi = {
   // Figures computed server-side plus an AI narrative about them. Always
   // returns both; `mode` says whether the narrative came from the model.
   summary: (id) => client.get(`/customers/${id}/summary`).then((r) => r.data.data),
+  // Minimal id/label rows for the searchable picker — not the full documents
+  // the list endpoint returns. See the note on the endpoint itself.
+  options: (search) =>
+    client.get('/customers/options', { params: { search } }).then((r) => r.data.data),
 };
 
 // --- products ---------------------------------------------------------------
 export const productsApi = {
   list: (params) => client.get('/products', { params }).then((r) => r.data),
   categories: () => client.get('/products/categories').then((r) => r.data.data),
+  options: (search) =>
+    client.get('/products/options', { params: { search } }).then((r) => r.data.data),
   get: (id) => client.get(`/products/${id}`).then((r) => r.data.data),
   create: (payload) => client.post('/products', payload).then((r) => r.data.data),
   update: (id, payload) => client.patch(`/products/${id}`, payload).then((r) => r.data.data),

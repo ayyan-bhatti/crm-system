@@ -1,6 +1,7 @@
 const express = require('express');
 const {
   listProducts,
+  listProductOptions,
   listCategories,
   getProduct,
   createProduct,
@@ -15,8 +16,9 @@ const router = express.Router();
 router.use(protect);
 
 // --- Read: any authenticated user, including sales reps --------------------
-// Declared before '/:id' so "categories" isn't parsed as an id.
+// Declared before '/:id' so "categories" and "options" aren't parsed as ids.
 router.get('/categories', listCategories);
+router.get('/options', listProductOptions);
 router.get('/', listProducts);
 router.get('/:id', getProduct);
 
