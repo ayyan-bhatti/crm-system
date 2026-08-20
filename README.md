@@ -389,7 +389,10 @@ response - it never reaches the HTML the browser executes scripts in.
 - **helmet, in `app.js`** - for API responses. `default-src 'none'`, `frame-ancestors
   'none'`, HSTS in production only, and a referrer policy that stops record ids leaking
   through `Referer`.
-- **`vercel.json` `headers`** - the real app CSP, with every directive commented in place.
+- **`vercel.json` `headers`** - the real app CSP. The reasoning for every directive is in
+  [SECURITY_HEADERS.md](SECURITY_HEADERS.md) rather than inline, because `vercel.json`
+  cannot carry comments: JSON has no comment syntax, and Vercel's schema rejects the
+  `"//"` key sometimes used as a workaround — it fails the deploy outright.
 
 One deliberate weakening: `style-src` allows `'unsafe-inline'`, because Recharts sets style
 attributes at runtime and offers no nonce hook. Inline *style* risks defacement; inline

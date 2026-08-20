@@ -18,39 +18,6 @@
   ],
   "headers": [
     {
-      "//": [
-        "Security headers for the FRONTEND (the HTML the browser renders).",
-        "",
-        "These have to live here rather than in helmet. The API and the static",
-        "frontend are two separate Vercel services, so a header set by Express",
-        "only ever lands on a JSON response — it never reaches the document the",
-        "browser is actually executing scripts in. Setting a strict CSP in",
-        "Express and assuming the SPA is protected is a silent no-op, which is",
-        "exactly why both halves are written down and cross-referenced.",
-        "",
-        "The CSP directives, one at a time:",
-        "  default-src 'self'      nothing loads from anywhere but our origin",
-        "  script-src 'self'       no inline scripts, no CDNs. This is the",
-        "                          directive that actually stops XSS: an",
-        "                          injected <script> has no valid source.",
-        "  style-src ... 'unsafe-inline'  a real, deliberate weakening. Recharts",
-        "                          (the dashboard charts) sets style attributes",
-        "                          at runtime, and CSP treats those as inline",
-        "                          styles. Removing it would need nonces on",
-        "                          every generated element, which a third-party",
-        "                          chart library does not offer. Inline STYLE is",
-        "                          a far smaller risk than inline SCRIPT — the",
-        "                          worst case is defacement, not code execution.",
-        "  font-src / style-src google  the app loads IBM Plex Sans from Google",
-        "                          Fonts; these two hosts are what that needs.",
-        "  img-src 'self' data:    data: covers inline SVG icons.",
-        "  connect-src 'self'      XHR/fetch may only reach our own API, so an",
-        "                          injected script cannot exfiltrate data to an",
-        "                          attacker's server even if it runs.",
-        "  frame-ancestors 'none'  nobody may frame the app — clickjacking.",
-        "  object-src 'none'       no Flash/applet embeds, a legacy XSS vector.",
-        "  form-action 'self'      a form cannot be repointed at another site."
-      ],
       "source": "/(.*)",
       "headers": [
         {
@@ -65,7 +32,6 @@
           "value": "max-age=31536000; includeSubDomains"
         },
         {
-          "//": "Deny browser features the app never uses, so an injected script cannot ask for them either.",
           "key": "Permissions-Policy",
           "value": "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
         }
