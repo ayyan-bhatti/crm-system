@@ -1,4 +1,5 @@
 const ApiError = require('./ApiError');
+const { checkBreached } = require('../services/breachedPasswords');
 
 /**
  * Password strength rules, enforced wherever a password is set.
@@ -21,12 +22,13 @@ const ApiError = require('./ApiError');
  *      Below fourteen, three of the four character classes are required,
  *      because a short password has to buy its entropy from variety instead.
  *
- *   2. BLOCKLIST. Reject the passwords that appear at the top of every breach
- *      corpus. Credential stuffing tries those first, so blocking them removes
- *      the cheapest attack outright. A production system would check against a
- *      full breach corpus (Have I Been Pwned's k-anonymity API, or a local
- *      dump); this is a deliberately small in-repo list, and calling that out
- *      is more honest than implying full coverage.
+ *   2. BLOCKLIST, IN TWO LAYERS. The in-repo list below catches the handful of
+ *      passwords everyone thinks of, instantly and with no network call. On top
+ *      of that, `services/breachedPasswords` checks the real Have I Been Pwned
+ *      corpus — half a billion passwords — using k-anonymity, so the password
+ *      itself never leaves this server. The local list is the fast path and the
+ *      offline fallback; the corpus is the one that keeps working as attackers'
+ *      wordlists grow.
  *
  *   3. NOTHING DERIVED FROM THE ACCOUNT. `ayesha@company.com` /
  *      `ayesha2024` is guessed on the first try by anyone who knows the email
@@ -238,8 +240,26 @@ function derivedFromAccount(password, { name, email } = {}) {
  * uses for Mongoose validation failures — so the existing frontend error
  * display shows them with no change.
  */
-function assertStrongPassword(password, user = {}) {
+async function assertStrongPassword(password, user = {}) {
   const problems = checkPassword(password, user);
+
+  /*
+   * The corpus check runs only when the local rules already passed.
+   *
+   * Two reasons. A password failing on length does not need a network round
+   * trip to also be told it is common — the user has to change it either way.
+   * And it keeps the slow path off the request whenever the answer is already
+   * known, which is most rejections.
+   */
+  if (!problems.length) {
+    const { breached, count } = await checkBreached(password);
+    if (breached) {
+      problems.push(
+        `This password has appeared in ${count.toLocaleString('en-US')} known data breaches. ` +
+          'Attackers try breached passwords first, so please choose a different one.'
+      );
+    }
+  }
 
   if (problems.length) {
     throw ApiError.badRequest(

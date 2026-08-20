@@ -95,6 +95,17 @@ env.cookieSecure = env.isProduction;
  * RATE_LIMIT_DISABLED=true is an escape hatch for local load testing.
  */
 env.rateLimitEnabled = !env.isTest && process.env.RATE_LIMIT_DISABLED !== 'true';
+
+/**
+ * Whether to check new passwords against the Have I Been Pwned corpus.
+ *
+ * Off in tests: a unit test must not depend on a third-party service being
+ * reachable, and several hundred tests hitting a public API would be rude as
+ * well as slow. Off also when explicitly disabled, for an air-gapped
+ * deployment or one whose firewall blocks outbound HTTPS — the local rules
+ * still apply, so the policy degrades rather than disappearing.
+ */
+env.breachCheckEnabled = !env.isTest && process.env.BREACH_CHECK_DISABLED !== 'true';
 /** True on Vercel (and most FaaS platforms), which set this automatically. */
 env.isServerless = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
 

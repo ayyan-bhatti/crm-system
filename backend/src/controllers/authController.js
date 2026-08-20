@@ -53,7 +53,7 @@ const register = asyncHandler(async (req, res) => {
   // Checked before the duplicate-email lookup so a weak password is reported
   // even when the address is already taken — otherwise someone fixes the email,
   // resubmits, and only then learns about the password.
-  assertStrongPassword(password, { name, email });
+  await assertStrongPassword(password, { name, email });
 
   const existing = await User.findOne({ email: email.toLowerCase().trim() });
   if (existing) {
@@ -225,7 +225,7 @@ const changePassword = asyncHandler(async (req, res) => {
     throw ApiError.unauthorized('Current password is incorrect');
   }
 
-  assertStrongPassword(newPassword, { name: user.name, email: user.email });
+  await assertStrongPassword(newPassword, { name: user.name, email: user.email });
 
   if (await user.comparePassword(newPassword)) {
     throw ApiError.badRequest('New password must be different from the current one');
