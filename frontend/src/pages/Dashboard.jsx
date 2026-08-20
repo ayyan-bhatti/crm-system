@@ -19,7 +19,7 @@ import {
   Skeleton,
 } from '../components/common';
 import { useAuth } from '../context/AuthContext';
-import { money, moneyCompact, formatDate, link, td, th, token } from '../ui';
+import { money, formatDate, link, td, th, token } from '../ui';
 
 /**
  * The landing page: four headline figures, a revenue trend, two breakdowns,

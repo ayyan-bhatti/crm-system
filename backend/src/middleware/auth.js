@@ -50,9 +50,12 @@ const protect = asyncHandler(async (req, res, next) => {
   let payload;
   try {
     payload = verifyToken(token);
-  } catch (err) {
+  } catch {
     // Covers expired, malformed and tampered tokens alike. The client's only
     // useful reaction is the same in every case: refresh, or log in again.
+    // The error object is deliberately not bound: nothing here inspects it, and
+    // its message must never reach the client — "invalid signature" tells an
+    // attacker more than "invalid or expired token" does.
     throw ApiError.unauthorized('Not authenticated: invalid or expired token');
   }
 

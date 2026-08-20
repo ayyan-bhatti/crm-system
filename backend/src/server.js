@@ -14,7 +14,6 @@ async function start() {
   // A long-running server has no such constraint, so it fails fast here — the
   // errors were already printed in detail by config/env.js.
   if (!env.isConfigValid) {
-    // eslint-disable-next-line no-console
     console.error('[server] Refusing to start with an invalid configuration (see above).');
     process.exit(1);
   }
@@ -26,13 +25,11 @@ async function start() {
   try {
     await connectDB();
   } catch (err) {
-    // eslint-disable-next-line no-console
     console.error(`[db] MongoDB connection failed: ${err.message}`);
     process.exit(1);
   }
 
   const server = app.listen(env.port, () => {
-    // eslint-disable-next-line no-console
     console.log(`[server] SimpleCRM API listening on http://localhost:${env.port} (${env.nodeEnv})`);
   });
 
@@ -42,7 +39,6 @@ async function start() {
    * process manager restart cleanly.
    */
   process.on('unhandledRejection', (err) => {
-    // eslint-disable-next-line no-console
     console.error('[server] Unhandled rejection — shutting down:', err);
     server.close(() => process.exit(1));
   });

@@ -140,7 +140,6 @@ const idempotency = asyncHandler(async (req, res, next) => {
         IdempotencyKey.deleteOne({ _id: reservation._id });
 
     persist.catch((err) => {
-      // eslint-disable-next-line no-console
       console.error('[idempotency] Could not record the outcome for key %s: %s', key, err.message);
     });
   });

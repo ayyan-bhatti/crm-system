@@ -9,7 +9,6 @@ import {
   ErrorBanner,
   PageHeader,
   Pagination,
-  Spinner,
 } from '../../components/common';
 import { RoleGate } from '../../components/ProtectedRoute';
 import { PRODUCT_WRITE_ROLES } from '../../constants';

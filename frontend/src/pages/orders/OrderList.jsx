@@ -8,7 +8,6 @@ import {
   ErrorBanner,
   PageHeader,
   Pagination,
-  Spinner,
   StatusBadge,
 } from '../../components/common';
 import { ORDER_STATUSES } from '../../constants';

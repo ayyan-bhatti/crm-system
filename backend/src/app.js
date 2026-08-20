@@ -143,7 +143,6 @@ app.use(
 
       // Log rather than fail silently — a blocked origin is otherwise only
       // visible in the browser console, never in the server logs.
-      // eslint-disable-next-line no-console
       console.warn(
         `[cors] Blocked origin "${origin}". Allowed: ${allowedOrigins.join(', ') || '(none)'}. ` +
           'Set CLIENT_ORIGIN if this origin should be permitted.'
@@ -250,7 +249,6 @@ app.get('/api/health', async (req, res) => {
 app.use((req, res, next) => {
   if (env.isConfigValid) return next();
 
-  // eslint-disable-next-line no-console
   console.error(
     `[config] Refusing ${req.method} ${req.originalUrl} — server is misconfigured: ` +
       env.configErrors.join(' | ')

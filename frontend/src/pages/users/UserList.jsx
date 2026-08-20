@@ -13,7 +13,7 @@ import {
 } from '../../components/common';
 import { useAuth } from '../../context/AuthContext';
 import { ROLE_VALUES } from '../../constants';
-import { btnDanger, btnPrimary, formatDate, humanize, input, td, th } from '../../ui';
+import { btnPrimary, formatDate, humanize, input, td, th } from '../../ui';
 
 /**
  * Admin-only user management: list users, change roles, add and remove accounts.
@@ -71,12 +71,12 @@ export default function UserList() {
 
       {showForm && (
         <NewUserForm
-          onCreated={() => {
+          onCreated={(created) => {
             setShowForm(false);
-            setNotice('User created.');
+            toast.success(`${created?.name || 'User'} created.`);
             reload();
           }}
-          onError={setActionError}
+          onError={(message) => toast.error(message)}
         />
       )}
 
@@ -162,8 +162,9 @@ function NewUserForm({ onCreated, onError }) {
     setSubmitting(true);
 
     try {
-      await usersApi.create(form);
-      onCreated();
+      // Pass the created user back so the confirmation can name them.
+      const created = await usersApi.create(form);
+      onCreated(created);
     } catch (err) {
       onError(errorMessage(err, 'Could not create the user'));
     } finally {

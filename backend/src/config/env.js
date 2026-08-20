@@ -161,7 +161,6 @@ if (env.isTest) {
   // the Vercel rewrites) the browser sends no Origin header and CORS never
   // engages. It only matters for a cross-origin caller.
   if (env.isProduction && env.clientOrigin.includes('localhost')) {
-    // eslint-disable-next-line no-console
     console.warn(
       '[config] CLIENT_ORIGIN is still "%s" in production. This is harmless ' +
         'while the frontend and API share a domain, but any cross-origin ' +
@@ -181,7 +180,6 @@ env.isConfigValid = configErrors.length === 0;
  * verbose: a deployment failure is read by someone who cannot attach a debugger.
  */
 if (configErrors.length && !env.isTest) {
-  // eslint-disable-next-line no-console
   console.error(
     [
       '',

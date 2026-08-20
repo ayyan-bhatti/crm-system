@@ -140,7 +140,6 @@ async function recordAudit(req, { action, entity, entityId, label, before, after
   } catch (err) {
     // A gap in the trail is bad; refusing the user's write because of one is
     // worse. Logged loudly so the gap is at least known about.
-    // eslint-disable-next-line no-console
     console.error(
       '[audit] Failed to record %s of %s %s: %s',
       action,

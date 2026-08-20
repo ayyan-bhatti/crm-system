@@ -1335,3 +1335,70 @@ which is the right rule anyway. A harness that diverges from the app fails for r
 have nothing to do with the code under test.
 
 **17 new tests** (error boundary 8, toasts 9). **60 frontend tests passing.**
+
+## Phase 4.3 — Continuous integration
+
+`.github/workflows/ci.yml` runs on every push to `main` and every PR against it. **Both**,
+not just PRs: a PR run proves the branch is good, a push run proves `main` is good after the
+merge — and two PRs that each pass alone can still break `main` together.
+
+### Three jobs, and why they are split that way
+
+| job | runs | why separate |
+|---|---|---|
+| **Backend** | lint → 442 Jest tests | Parallel with the frontend, so a frontend failure does not hide a backend one. When something breaks you want to see *everything* that broke, not the first thing. |
+| **Frontend** | lint → 60 Vitest tests → **build** | Same reason. |
+| **End-to-end** | 11 Playwright tests, `needs: [backend, frontend]` | E2E is the slowest and flakiest layer. No point spending three minutes booting browsers to discover a lint error — and `needs` makes a red E2E result unambiguous: the units passed, so the failure is in how the pieces fit together. |
+
+**The build is a test in its own right.** Vite fails on an import that does not resolve and
+on syntax the transform cannot handle — neither of which unit tests catch, because they only
+load the modules a test happens to import. A page nobody has written a test for can still be
+broken, and this is what notices.
+
+`npm ci` rather than `npm install`, so CI tests the exact dependency tree that will be
+deployed and fails if `package.json` and the lockfile disagree. The mongod binary is cached,
+Playwright runs **Chromium only** (three browsers would triple the time to tell us the same
+thing about an internal CRM), and traces are kept for a week **on failure only** — nobody
+opens a trace from a passing run.
+
+### Linting: what it is for, and what it is not for
+
+**Not formatting.** No line-length rule, no opinion about quotes. Those are arguments that
+cost more than they settle, and CI failing because a line is 101 characters is how a team
+learns to ignore CI.
+
+What it catches is the class of mistake that is invisible in review and only appears at
+runtime. Four decisions worth explaining:
+
+- **`no-console` is off in the backend.** `console` is a deliberate part of this service —
+  config problems, CORS rejections, refresh-token reuse and AI usage all report through it,
+  and on a hosted platform the log stream is the only view into a running deployment.
+  Warning about it would mean a disable comment on every one of those lines.
+- **`no-unused-vars` ignores `next`.** Express identifies error handlers by their **arity**,
+  so `(err, req, res, next)` must keep four parameters even when `next` is never called —
+  removing one silently turns the error handler into ordinary middleware and every error
+  becomes an unhandled 500.
+- **`require-atomic-updates` is off**, after seeing what it actually flagged: `req.user =
+  user` after an `await`, thirty times. In Express that is the standard pattern and
+  perfectly safe — each request owns its own `req`. Thirty warnings nobody can act on is
+  exactly how lint output gets ignored.
+- **`react-hooks/exhaustive-deps` is a warning, not an error.** The rule is right most of
+  the time and wrong in one case this codebase keeps hitting: a `fetcher` passed as an
+  inline arrow is a new function every render, so obeying it would loop forever. Making it
+  an error would force either a pile of disables or an infinite loop shipped to satisfy a
+  linter.
+
+### The linter immediately earned its place
+
+It found **a real bug I had just introduced**: converting `UserList` to toasts left two
+calls to `setNotice` and `setActionError` behind, which no longer existed. Creating a user
+would have thrown at runtime. No test covered that handler, and it is exactly the kind of
+thing that survives review — the diff looked complete.
+
+It also found an unused `catch (err)` binding in the auth middleware, now `catch {}` with a
+note about why the error is deliberately not inspected: its message must never reach the
+client, since *"invalid signature"* tells an attacker more than *"invalid or expired
+token"*.
+
+**Phase 4 complete.** 442 backend + 60 frontend + 11 end-to-end tests, all green, all
+running in CI.

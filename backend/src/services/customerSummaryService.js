@@ -197,7 +197,6 @@ async function generateSummary(customer, metrics, health = null) {
     text = await callModel(customer, metrics, health);
   } catch (err) {
     if (!env.isTest) {
-      // eslint-disable-next-line no-console
       console.warn(`[ai-summary] model call failed, using template: ${err.message}`);
     }
     return { mode: 'fallback', reason: `AI request failed: ${err.message}` };

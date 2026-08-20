@@ -53,7 +53,6 @@ async function connectDB() {
       })
       .then((conn) => {
         if (!env.isTest) {
-          // eslint-disable-next-line no-console
           console.log(`[db] MongoDB connected: ${conn.connection.host}/${conn.connection.name}`);
         }
         return conn.connection;

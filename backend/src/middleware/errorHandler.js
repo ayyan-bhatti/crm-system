@@ -27,7 +27,7 @@ function notFound(req, res, next) {
  * 4xx is not logged: those are the client's mistakes, and logging them turns
  * the log into noise that hides the real failures.
  */
-// eslint-disable-next-line no-unused-vars -- Express identifies error handlers by arity (4 args).
+
 function errorHandler(err, req, res, next) {
   let statusCode = err.statusCode || 500;
   let message = err.message || 'Internal server error';
@@ -66,7 +66,6 @@ function errorHandler(err, req, res, next) {
 
   // --- Log every server-side failure, in full --------------------------------
   if (statusCode >= 500 && !env.isTest) {
-    // eslint-disable-next-line no-console
     console.error(
       [
         '',

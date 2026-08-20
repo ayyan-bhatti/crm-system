@@ -138,8 +138,10 @@ client.interceptors.response.use(
       await refreshSession();
       // The refresh set new cookies; replaying the original request now works.
       return client(original);
-    } catch (refreshError) {
+    } catch {
       // The refresh token is gone or was revoked. The session is over.
+      // The refresh error itself is not bound: the caller needs the ORIGINAL
+      // failure, not the failure of our attempt to rescue it.
       notifySessionExpired();
       return Promise.reject(error);
     }

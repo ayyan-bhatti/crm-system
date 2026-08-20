@@ -109,7 +109,6 @@ async function withTransaction(work) {
   } catch (err) {
     if (isUnsupportedError(err)) {
       if (transactionsSupported === null) {
-        // eslint-disable-next-line no-console
         console.warn(
           '[db] This MongoDB deployment does not support transactions (it is a standalone ' +
             'server, not a replica set). Order creation will still work, but a crash ' +

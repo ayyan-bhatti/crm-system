@@ -71,14 +71,12 @@ function pick(array, index) {
 
 async function seed() {
   if (env.isProduction) {
-    // eslint-disable-next-line no-console
     console.error('[seed] Refusing to run with NODE_ENV=production — this deletes all data.');
     process.exit(1);
   }
 
   await connectDB();
 
-  // eslint-disable-next-line no-console
   console.log('[seed] Clearing existing data…');
   await Promise.all([
     User.deleteMany({}),
@@ -94,12 +92,10 @@ async function seed() {
   for (const spec of USERS) {
     users.push(await User.create({ ...spec, password: PASSWORD }));
   }
-  // eslint-disable-next-line no-console
   console.log(`[seed] Created ${users.length} users`);
 
   // --- Products ------------------------------------------------------------
   const products = await Product.insertMany(PRODUCTS);
-  // eslint-disable-next-line no-console
   console.log(`[seed] Created ${products.length} products`);
 
   // --- Customers -----------------------------------------------------------
@@ -122,7 +118,6 @@ async function seed() {
       })
     );
   }
-  // eslint-disable-next-line no-console
   console.log(`[seed] Created ${customers.length} customers`);
 
   // --- Orders --------------------------------------------------------------
@@ -176,10 +171,8 @@ async function seed() {
       }
     }
   }
-  // eslint-disable-next-line no-console
   console.log(`[seed] Created ${orders.length} orders`);
 
-  // eslint-disable-next-line no-console
   console.log(`
 [seed] Done. Sign in with any of these (password: ${PASSWORD}):
 
@@ -196,7 +189,6 @@ Try the AI search with: "customers in Karachi with no orders in the last 30 days
 }
 
 seed().catch((err) => {
-  // eslint-disable-next-line no-console
   console.error('[seed] Failed:', err);
   process.exit(1);
 });

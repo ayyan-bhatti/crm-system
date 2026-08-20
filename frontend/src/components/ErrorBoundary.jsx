@@ -45,7 +45,6 @@ export default class ErrorBoundary extends Component {
      * is empty, and nobody can reproduce it. In a deployment with error
      * tracking this is where the report would be sent.
      */
-    // eslint-disable-next-line no-console
     console.error('[error-boundary] A render error was caught:', error, info.componentStack);
   }
 

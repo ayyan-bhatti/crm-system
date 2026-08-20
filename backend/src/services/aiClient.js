@@ -132,7 +132,6 @@ function logUsage({ feature, model, usage, durationMs, attempts, ok, error }) {
   const input = usage?.input_tokens ?? 0;
   const output = usage?.output_tokens ?? 0;
 
-  // eslint-disable-next-line no-console
   console.info(
     '[ai-usage] %s model=%s in=%d out=%d total=%d duration=%dms attempts=%d result=%s%s',
     feature,

@@ -250,7 +250,6 @@ async function translateQuery(query) {
     text = await callModel(query);
   } catch (err) {
     if (!env.isTest) {
-      // eslint-disable-next-line no-console
       console.warn(`[ai-search] model call failed, using keyword fallback: ${err.message}`);
     }
     return { mode: 'fallback', filter: null, reason: `AI request failed: ${err.message}` };

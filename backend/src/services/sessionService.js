@@ -89,7 +89,6 @@ async function rotateSession(presentedToken, req) {
 
   if (record.revokedAt) {
     await revokeFamily(record.family, 'refresh token reuse detected');
-    // eslint-disable-next-line no-console
     console.warn(
       `[auth] Refresh token reuse detected for user ${record.user?._id ?? 'unknown'} ` +
         `(family ${record.family}). Entire session family revoked.`
