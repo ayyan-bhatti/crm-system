@@ -3,6 +3,8 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import DashboardLayout from './components/DashboardLayout';
+import ErrorBoundary from './components/ErrorBoundary';
+import { ToastProvider } from './components/Toast';
 import { Spinner } from './components/common';
 
 import Login from './pages/Login';
@@ -49,86 +51,97 @@ const AuditLog = lazy(() => import('./pages/AuditLog'));
 export default function App() {
   return (
     <BrowserRouter>
-      <AuthProvider>
-        {/* One boundary around the routes: a lazy page resolves in milliseconds
-            on a warm connection, so a full-page spinner is all this needs. */}
-        <Suspense fallback={<Spinner full />}>
-          <Routes>
-            {/* --- Public ----------------------------------------------- */}
-            <Route path="/login" element={<Login />} />
-            <Route path="/register" element={<Register />} />
+      {/*
+        The outermost boundary. React unmounts the ENTIRE tree on an uncaught
+        render error, so without this one broken component leaves a blank white
+        page with no navigation and no way back — indistinguishable, to the
+        user, from the site being down.
+      */}
+      <ErrorBoundary>
+        <ToastProvider>
+          <AuthProvider>
+            {/* One boundary around the routes: a lazy page resolves in
+                milliseconds on a warm connection, so a full-page spinner is all
+                this needs. */}
+            <Suspense fallback={<Spinner full />}>
+              <Routes>
+                {/* --- Public ----------------------------------------------- */}
+                <Route path="/login" element={<Login />} />
+                <Route path="/register" element={<Register />} />
 
-            {/* --- Authenticated ---------------------------------------- */}
-            <Route
-              element={
-                <ProtectedRoute>
-                  <DashboardLayout />
-                </ProtectedRoute>
-              }
-            >
-              <Route index element={<Dashboard />} />
-
-              <Route path="customers">
-                <Route index element={<CustomerList />} />
-                <Route path="new" element={<CustomerForm />} />
-                <Route path=":id" element={<CustomerDetail />} />
-                <Route path=":id/edit" element={<CustomerForm />} />
-              </Route>
-
-              <Route path="products">
-                <Route index element={<ProductList />} />
+                {/* --- Authenticated ---------------------------------------- */}
                 <Route
-                  path="new"
                   element={
-                    <ProtectedRoute roles={PRODUCT_WRITE_ROLES}>
-                      <ProductForm />
+                    <ProtectedRoute>
+                      <DashboardLayout />
                     </ProtectedRoute>
                   }
-                />
-                <Route path=":id" element={<ProductDetail />} />
-                <Route
-                  path=":id/edit"
-                  element={
-                    <ProtectedRoute roles={PRODUCT_WRITE_ROLES}>
-                      <ProductForm />
-                    </ProtectedRoute>
-                  }
-                />
-              </Route>
+                >
+                  <Route index element={<Dashboard />} />
 
-              <Route path="orders">
-                <Route index element={<OrderList />} />
-                <Route path="new" element={<OrderForm />} />
-                <Route path=":id" element={<OrderDetail />} />
-              </Route>
+                  <Route path="customers">
+                    <Route index element={<CustomerList />} />
+                    <Route path="new" element={<CustomerForm />} />
+                    <Route path=":id" element={<CustomerDetail />} />
+                    <Route path=":id/edit" element={<CustomerForm />} />
+                  </Route>
 
-              <Route
-                path="users"
-                element={
-                  <ProtectedRoute roles={[ROLES.ADMIN]}>
-                    <UserList />
-                  </ProtectedRoute>
-                }
-              />
+                  <Route path="products">
+                    <Route index element={<ProductList />} />
+                    <Route
+                      path="new"
+                      element={
+                        <ProtectedRoute roles={PRODUCT_WRITE_ROLES}>
+                          <ProductForm />
+                        </ProtectedRoute>
+                      }
+                    />
+                    <Route path=":id" element={<ProductDetail />} />
+                    <Route
+                      path=":id/edit"
+                      element={
+                        <ProtectedRoute roles={PRODUCT_WRITE_ROLES}>
+                          <ProductForm />
+                        </ProtectedRoute>
+                      }
+                    />
+                  </Route>
 
-              {/* Admin only in the router AND on the API. The audit trail holds
-                  a copy of every field of every record, so it would otherwise
-                  be a way around every other permission rule in the app. */}
-              <Route
-                path="audit"
-                element={
-                  <ProtectedRoute roles={[ROLES.ADMIN]}>
-                    <AuditLog />
-                  </ProtectedRoute>
-                }
-              />
-            </Route>
+                  <Route path="orders">
+                    <Route index element={<OrderList />} />
+                    <Route path="new" element={<OrderForm />} />
+                    <Route path=":id" element={<OrderDetail />} />
+                  </Route>
 
-            {/* Anything else goes home. */}
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
-        </Suspense>
-      </AuthProvider>
+                  <Route
+                    path="users"
+                    element={
+                      <ProtectedRoute roles={[ROLES.ADMIN]}>
+                        <UserList />
+                      </ProtectedRoute>
+                    }
+                  />
+
+                  {/* Admin only in the router AND on the API. The audit trail holds
+                      a copy of every field of every record, so it would otherwise
+                      be a way around every other permission rule in the app. */}
+                  <Route
+                    path="audit"
+                    element={
+                      <ProtectedRoute roles={[ROLES.ADMIN]}>
+                        <AuditLog />
+                      </ProtectedRoute>
+                    }
+                  />
+                </Route>
+
+                {/* Anything else goes home. */}
+                <Route path="*" element={<Navigate to="/" replace />} />
+              </Routes>
+            </Suspense>
+          </AuthProvider>
+        </ToastProvider>
+      </ErrorBoundary>
     </BrowserRouter>
   );
 }

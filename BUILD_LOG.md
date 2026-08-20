@@ -1254,3 +1254,84 @@ failures.
 
 **43 component tests + 11 end-to-end tests, all passing.** Run with `npm test` and
 `npm run test:e2e` in `frontend/`.
+
+## Phase 4.2 — Frontend polish
+
+### Error boundaries — the gap that mattered most
+
+There were none. **React's behaviour on an uncaught render error is to unmount the entire
+tree** — not the component that threw, everything. So one `undefined.name` in a table cell
+replaced the working application with a blank white page: no message, no navigation, no way
+back except a manual reload, and no way for the user to tell that from the site being down.
+
+`ErrorBoundary` now wraps the whole app, showing a message, a "Try again" that re-renders
+the subtree, and a link home. It is a class component because `componentDidCatch` and
+`getDerivedStateFromError` still have no hook equivalent — worth saying so, or it reads like
+legacy nobody updated.
+
+Two deliberate choices:
+
+- **It logs rather than swallows.** A boundary that shows a friendly message and reports
+  nothing turns a crash into a mystery: the user sees "something went wrong", the console is
+  empty, and nobody can reproduce it. The error message itself is shown only in development
+  — noise at best in production, internal detail at worst.
+- **A `compact` mode** for wrapping a single panel. Replacing the whole screen because one
+  dashboard card broke is the same over-reaction the boundary exists to prevent, at a
+  smaller scale.
+
+It is worth being explicit about what a boundary does **not** catch: only render errors.
+Event handlers, promises and async code need their own handling, which the API layer already
+does. A boundary is the last line, not the only one.
+
+### Toasts — and why banners were not enough
+
+Every screen kept its own `notice`/`error` state and rendered its own banner. That produced
+three problems, and the third is the one that made it worth replacing:
+
+1. the same action was confirmed differently on different screens
+2. a confirmation was invisible if it happened below the fold
+3. **a message rendered by a page vanished the instant that page navigated away** — which is
+   exactly what "Customer deleted" does, since deleting returns you to the list
+
+Toasts live above the routes, so they survive the navigation that caused them.
+
+**Accessibility is the point here, not a detail.** A toast is the one piece of UI that
+appears without the user doing anything, at the place they happen to be looking. If it is
+only visual, a screen-reader user gets no confirmation their action worked at all. So there
+are **two live regions**, because politeness is a property of the region rather than the
+message: `assertive` for errors, which should interrupt, and `polite` for confirmations,
+which should wait for a pause.
+
+**Errors last 8s against 4s for a success.** A success confirms something the user already
+knows they did; an error is news, often with a detail worth reading twice, and losing it
+early means redoing the action just to read the message.
+
+**Not everything became a toast.** A form's *validation* error stays an inline banner: the
+user is still on the form, still looking at the field that needs fixing, and a message that
+floats away after four seconds is the wrong place for something they must act on. Likewise a
+list's own load failure stays inline, because it explains why the table below is empty.
+
+### Skeletons instead of spinners
+
+A centred spinner says "wait" and nothing else. A skeleton says what is coming and roughly
+how much, and — the real gain — it reserves the layout so content appears **in place**
+instead of pushing everything down when it lands. That jump is what makes a fast page feel
+unfinished, and it is worse than the wait it replaced. `TableSkeleton` matches the column
+count for the same reason.
+
+### Empty states that tell the two cases apart
+
+Every list previously showed one empty state. But **"no customers" and "no customers
+matching this search" are different situations** — and showing the first when the second is
+true tells the user the database is empty so they stop looking, when in fact they have a
+filter applied they may have forgotten setting. `ListEmptyState` distinguishes them and
+offers a "Clear filters" button in the filtered case.
+
+### One test-harness lesson
+
+Adding `ToastProvider` broke all seven `CustomerForm` tests: `useToast` throws outside its
+provider. The fix was to make the test harness mirror `App.jsx`'s provider tree exactly —
+which is the right rule anyway. A harness that diverges from the app fails for reasons that
+have nothing to do with the code under test.
+
+**17 new tests** (error boundary 8, toasts 9). **60 frontend tests passing.**

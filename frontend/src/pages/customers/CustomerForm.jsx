@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { customersApi, usersApi } from '../../api/resources';
 import { errorMessage } from '../../api/client';
 import useFetch from '../../hooks/useFetch';
+import { useToast } from '../../components/Toast';
 import { Card, ErrorBanner, Field, PageHeader, Spinner } from '../../components/common';
 import { useAuth } from '../../context/AuthContext';
 import { CUSTOMER_STATUSES, FULL_ACCESS_ROLES } from '../../constants';
@@ -33,6 +34,15 @@ export default function CustomerForm() {
   });
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+
+  /*
+   * A successful save navigates to the customer's detail page, so the
+   * confirmation goes through the toast system. The FAILURE stays as an inline
+   * banner on purpose: the user is still on the form, still looking at the
+   * fields that need fixing, and a message that floats away after four seconds
+   * is the wrong place for something they have to act on.
+   */
+  const toast = useToast();
 
   /*
    * `loadError` is destructured deliberately — it used to be dropped.
@@ -88,6 +98,8 @@ export default function CustomerForm() {
       const saved = isEdit
         ? await customersApi.update(id, payload)
         : await customersApi.create(payload);
+
+      toast.success(isEdit ? 'Changes saved.' : `${saved.name} added.`);
       navigate(`/customers/${saved._id}`, { replace: true });
     } catch (err) {
       setError(errorMessage(err, 'Could not save customer'));

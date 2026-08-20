@@ -2,6 +2,7 @@ import { render } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { AuthProvider } from '../context/AuthContext';
 import ProtectedRoute from '../components/ProtectedRoute';
+import { ToastProvider } from '../components/Toast';
 
 /**
  * Helpers shared by the component tests.
@@ -38,17 +39,28 @@ import ProtectedRoute from '../components/ProtectedRoute';
 export function renderWithProviders(ui, { route = '/', path, guarded = false } = {}) {
   const element = guarded ? <ProtectedRoute>{ui}</ProtectedRoute> : ui;
 
+  /*
+   * The provider tree mirrors App.jsx exactly.
+   *
+   * That is not tidiness — `useToast` throws outside its provider, so a harness
+   * missing one fails every test on a screen that raises a notification, for a
+   * reason that has nothing to do with the screen. Keeping the two trees in
+   * step is what stops the tests and the app disagreeing about what is
+   * available.
+   */
   const wrapper = (
     <MemoryRouter initialEntries={[route]}>
-      <AuthProvider>
-        {path ? (
-          <Routes>
-            <Route path={path} element={element} />
-          </Routes>
-        ) : (
-          element
-        )}
-      </AuthProvider>
+      <ToastProvider>
+        <AuthProvider>
+          {path ? (
+            <Routes>
+              <Route path={path} element={element} />
+            </Routes>
+          ) : (
+            element
+          )}
+        </AuthProvider>
+      </ToastProvider>
     </MemoryRouter>
   );
 

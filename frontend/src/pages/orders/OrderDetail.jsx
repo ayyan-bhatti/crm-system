@@ -3,13 +3,13 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ordersApi } from '../../api/resources';
 import { errorMessage } from '../../api/client';
 import useFetch from '../../hooks/useFetch';
+import { useToast } from '../../components/Toast';
 import {
   Card,
   ErrorBanner,
   PageHeader,
   Spinner,
   StatusBadge,
-  SuccessBanner,
 } from '../../components/common';
 import { btnDanger, btnPrimary, btnSecondary, formatDate, link, money, td, th } from '../../ui';
 
@@ -25,8 +25,15 @@ export default function OrderDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
 
-  const [actionError, setActionError] = useState('');
-  const [notice, setNotice] = useState('');
+  /*
+   * Feedback goes through the toast system rather than a banner on this page.
+   *
+   * Deleting an order navigates away, and a message rendered by this component
+   * would disappear with it — the user would be returned to the list with no
+   * confirmation that anything happened. A toast lives above the routes and
+   * survives the navigation that caused it.
+   */
+  const toast = useToast();
   const [busy, setBusy] = useState(false);
 
   const { data: order, loading, error, reload } = useFetch(() => ordersApi.get(id), [id]);
@@ -40,15 +47,15 @@ export default function OrderDetail() {
     if (!window.confirm(messages[status])) return;
 
     setBusy(true);
-    setActionError('');
-    setNotice('');
 
     try {
       await ordersApi.update(id, { status });
-      setNotice(status === 'completed' ? 'Order completed and stock updated.' : 'Order cancelled.');
+      toast.success(
+        status === 'completed' ? 'Order completed and stock updated.' : 'Order cancelled.'
+      );
       reload();
     } catch (err) {
-      setActionError(errorMessage(err, 'Could not update the order'));
+      toast.error(errorMessage(err, 'Could not update the order'));
     } finally {
       setBusy(false);
     }
@@ -58,13 +65,15 @@ export default function OrderDetail() {
     if (!window.confirm('Delete this order? This cannot be undone.')) return;
 
     setBusy(true);
-    setActionError('');
 
     try {
       await ordersApi.remove(id);
+      // Raised BEFORE navigating: the toast outlives this component, so the
+      // user arrives at the list already knowing the delete succeeded.
+      toast.success('Order deleted.');
       navigate('/orders', { replace: true });
     } catch (err) {
-      setActionError(errorMessage(err, 'Could not delete the order'));
+      toast.error(errorMessage(err, 'Could not delete the order'));
       setBusy(false);
     }
   }
@@ -110,8 +119,6 @@ export default function OrderDetail() {
         }
       />
 
-      <ErrorBanner message={actionError} onDismiss={() => setActionError('')} />
-      <SuccessBanner message={notice} />
 
       <Card className="p-5">
         <div className="mb-4 flex flex-wrap items-start justify-between gap-4">

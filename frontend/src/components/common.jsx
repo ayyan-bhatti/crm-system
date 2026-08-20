@@ -31,6 +31,95 @@ export function Skeleton({ className = '' }) {
   return <div className={`animate-pulse rounded-md bg-neutral-wash ${className}`} />;
 }
 
+/**
+ * A skeleton shaped like the table it is standing in for.
+ *
+ * WHY THIS RATHER THAN A SPINNER
+ *
+ * A centred spinner tells the user "wait" and nothing else. A skeleton tells
+ * them what is coming and roughly how much of it, so the screen does not
+ * rearrange itself when the data lands — that jump is what makes a fast page
+ * feel unfinished, and it is worse than the wait it replaced.
+ *
+ * It reserves the real layout, so the content appears IN PLACE rather than
+ * pushing everything down. Matching the column count matters for the same
+ * reason: a three-column skeleton followed by a six-column table is its own
+ * small lurch.
+ */
+export function TableSkeleton({ rows = 5, columns = 4 }) {
+  return (
+    <div className="px-4 py-3" aria-hidden="true">
+      {Array.from({ length: rows }, (_, rowIndex) => (
+        <div
+          key={rowIndex}
+          className="flex items-center gap-4 border-b border-hairline py-3 last:border-0"
+        >
+          {Array.from({ length: columns }, (_, columnIndex) => (
+            <Skeleton
+              key={columnIndex}
+              // The first column is usually a name and the widest; varying the
+              // rest slightly stops the block reading as a solid grey rectangle.
+              className={`h-4 ${columnIndex === 0 ? 'flex-[2]' : 'flex-1'} ${
+                columnIndex % 2 ? 'opacity-70' : ''
+              }`}
+            />
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * The loading state for a card of figures — the dashboard tiles, the customer
+ * summary. Same reasoning as TableSkeleton.
+ */
+export function CardSkeleton({ lines = 3 }) {
+  return (
+    <div className="space-y-3 p-5" aria-hidden="true">
+      <Skeleton className="h-5 w-1/3" />
+      {Array.from({ length: lines }, (_, index) => (
+        <Skeleton key={index} className={`h-4 ${index === lines - 1 ? 'w-2/3' : 'w-full'}`} />
+      ))}
+    </div>
+  );
+}
+
+/**
+ * The state a list is in when it has nothing to show, told apart properly.
+ *
+ * "No customers" and "no customers MATCHING THIS SEARCH" are different
+ * situations needing different responses, and showing the first when the second
+ * is true is a real usability failure: the user concludes the database is empty
+ * and stops looking, when in fact they have a filter applied that they may have
+ * forgotten about.
+ */
+export function ListEmptyState({ filtered, entity, onClear, action }) {
+  if (filtered) {
+    return (
+      <EmptyState
+        title={`No ${entity} match your filters`}
+        hint="Try a different search, or clear the filters to see everything."
+        action={
+          onClear ? (
+            <button type="button" className={btnSecondary} onClick={onClear}>
+              Clear filters
+            </button>
+          ) : null
+        }
+      />
+    );
+  }
+
+  return (
+    <EmptyState
+      title={`No ${entity} yet`}
+      hint={`They will appear here once the first one is added.`}
+      action={action}
+    />
+  );
+}
+
 /** Red banner for a failed request. Renders nothing when there is no message. */
 export function ErrorBanner({ message, onDismiss }) {
   if (!message) return null;

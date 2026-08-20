@@ -4,7 +4,8 @@ import { productsApi } from '../../api/resources';
 import useFetch, { useDebounced } from '../../hooks/useFetch';
 import {
   Card,
-  EmptyState,
+  ListEmptyState,
+  TableSkeleton,
   ErrorBanner,
   PageHeader,
   Pagination,
@@ -111,9 +112,18 @@ export default function ProductList() {
         </div>
 
         {loading ? (
-          <Spinner full />
+          <TableSkeleton rows={6} columns={5} />
         ) : !data?.data.length ? (
-          <EmptyState title="No products found" hint="Try clearing the filters." />
+          // Distinguishes "no products at all" from "none match your filters" —
+          // see the note on ListEmptyState.
+          <ListEmptyState
+            filtered={Boolean(category || lowStock || search)}
+            entity="products"
+            onClear={() => {
+              setSearchInput('');
+              setSearchParams(new URLSearchParams(), { replace: true });
+            }}
+          />
         ) : (
           <>
             <div className="overflow-x-auto">

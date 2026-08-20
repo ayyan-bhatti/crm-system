@@ -3,7 +3,8 @@ import { ordersApi } from '../../api/resources';
 import useFetch from '../../hooks/useFetch';
 import {
   Card,
-  EmptyState,
+  ListEmptyState,
+  TableSkeleton,
   ErrorBanner,
   PageHeader,
   Pagination,
@@ -94,16 +95,12 @@ export default function OrderList() {
         </div>
 
         {loading ? (
-          <Spinner full />
+          <TableSkeleton rows={6} columns={5} />
         ) : !data?.data.length ? (
-          <EmptyState
-            title="No orders found"
-            hint="Try clearing the filters."
-            action={
-              <Link to="/orders/new" className={btnPrimary}>
-                New order
-              </Link>
-            }
+          <ListEmptyState
+            filtered={Boolean(status || from || to)}
+            entity="orders"
+            onClear={() => setSearchParams(new URLSearchParams(), { replace: true })}
           />
         ) : (
           <>

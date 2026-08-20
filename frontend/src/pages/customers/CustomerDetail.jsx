@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { customersApi, ordersApi } from '../../api/resources';
 import { errorMessage } from '../../api/client';
 import useFetch from '../../hooks/useFetch';
+import { useToast } from '../../components/Toast';
 import {
   Card,
   EmptyState,
@@ -18,7 +19,9 @@ import { btnDanger, btnPrimary, btnSecondary, formatDate, link, money, td, th } 
 export default function CustomerDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const [actionError, setActionError] = useState('');
+  // Deleting navigates back to the list, so the confirmation has to outlive
+  // this component — see the note in components/Toast.
+  const toast = useToast();
   const [deleting, setDeleting] = useState(false);
 
   const { data: customer, loading, error } = useFetch(() => customersApi.get(id), [id]);
@@ -33,13 +36,13 @@ export default function CustomerDetail() {
     if (!window.confirm('Delete this customer? This cannot be undone.')) return;
 
     setDeleting(true);
-    setActionError('');
 
     try {
       await customersApi.remove(id);
+      toast.success(`${customer.name} deleted.`);
       navigate('/customers', { replace: true });
     } catch (err) {
-      setActionError(errorMessage(err, 'Could not delete customer'));
+      toast.error(errorMessage(err, 'Could not delete customer'));
       setDeleting(false);
     }
   }
@@ -67,8 +70,6 @@ export default function CustomerDetail() {
           </div>
         }
       />
-
-      <ErrorBanner message={actionError} onDismiss={() => setActionError('')} />
 
       {/* Loads independently of the details below, so a slow AI call never
           delays the record the user actually navigated to. */}

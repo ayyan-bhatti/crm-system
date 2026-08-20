@@ -4,11 +4,11 @@ import { customersApi, usersApi } from '../../api/resources';
 import useFetch, { useDebounced } from '../../hooks/useFetch';
 import {
   Card,
-  EmptyState,
+  ListEmptyState,
+  TableSkeleton,
   ErrorBanner,
   PageHeader,
   Pagination,
-  Spinner,
   StatusBadge,
 } from '../../components/common';
 import { CUSTOMER_STATUSES } from '../../constants';
@@ -46,6 +46,21 @@ export default function CustomerList() {
 
   // For the "assigned to" dropdown. Available to every role.
   const { data: users } = useFetch(() => usersApi.assignable(), []);
+
+  /*
+   * Whether the empty result is empty BECAUSE of a filter.
+   *
+   * "No customers" and "no customers matching this search" are different
+   * situations. Showing the first when the second is true tells the user the
+   * database is empty and they stop looking — when in fact they have a filter
+   * applied that they may have forgotten setting.
+   */
+  const isFiltered = Boolean(status || assignedTo || search);
+
+  function clearFilters() {
+    setSearchInput('');
+    setSearchParams(new URLSearchParams(), { replace: true });
+  }
 
   /** Update one filter, resetting to page 1 since the result set changed. */
   function setFilter(key, value) {
@@ -114,11 +129,14 @@ export default function CustomerList() {
 
         {/* --- Results --------------------------------------------------- */}
         {loading ? (
-          <Spinner full />
+          // A skeleton shaped like the table, not a spinner — the rows appear
+          // in place instead of the layout jumping when the data lands.
+          <TableSkeleton rows={6} columns={5} />
         ) : !data?.data.length ? (
-          <EmptyState
-            title="No customers found"
-            hint="Try clearing the filters, or add your first customer."
+          <ListEmptyState
+            filtered={isFiltered}
+            entity="customers"
+            onClear={clearFilters}
             action={
               <Link to="/customers/new" className={btnPrimary}>
                 New customer

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { usersApi } from '../../api/resources';
 import { errorMessage } from '../../api/client';
 import useFetch from '../../hooks/useFetch';
+import { useToast } from '../../components/Toast';
 import {
   Card,
   ErrorBanner,
@@ -9,7 +10,6 @@ import {
   PageHeader,
   Spinner,
   StatusBadge,
-  SuccessBanner,
 } from '../../components/common';
 import { useAuth } from '../../context/AuthContext';
 import { ROLE_VALUES } from '../../constants';
@@ -23,37 +23,32 @@ import { btnDanger, btnPrimary, formatDate, humanize, input, td, th } from '../.
  */
 export default function UserList() {
   const { user: currentUser } = useAuth();
-  const [actionError, setActionError] = useState('');
-  const [notice, setNotice] = useState('');
+  const toast = useToast();
   const [showForm, setShowForm] = useState(false);
 
   const { data, loading, error, reload } = useFetch(() => usersApi.list(), []);
 
   async function changeRole(id, role) {
-    setActionError('');
-    setNotice('');
-
     try {
       await usersApi.update(id, { role });
-      setNotice('Role updated.');
+      // Role changes are the most consequential write on this screen and are
+      // recorded in the audit trail; a visible confirmation matters.
+      toast.success('Role updated.');
       reload();
     } catch (err) {
-      setActionError(errorMessage(err, 'Could not update the role'));
+      toast.error(errorMessage(err, 'Could not update the role'));
     }
   }
 
   async function removeUser(id, name) {
     if (!window.confirm(`Delete ${name}? This cannot be undone.`)) return;
 
-    setActionError('');
-    setNotice('');
-
     try {
       await usersApi.remove(id);
-      setNotice('User deleted.');
+      toast.success(`${name} deleted.`);
       reload();
     } catch (err) {
-      setActionError(errorMessage(err, 'Could not delete the user'));
+      toast.error(errorMessage(err, 'Could not delete the user'));
     }
   }
 
@@ -69,8 +64,10 @@ export default function UserList() {
         }
       />
 
-      <ErrorBanner message={actionError || error} onDismiss={() => setActionError('')} />
-      <SuccessBanner message={notice} />
+      {/* The list's own load failure stays inline — it explains why the table
+          below is empty, so it belongs next to the table rather than floating
+          past. Action results go to toasts. */}
+      <ErrorBanner message={error} />
 
       {showForm && (
         <NewUserForm
