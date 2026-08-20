@@ -5,6 +5,8 @@ const {
   refresh,
   logout,
   changePassword,
+  forgotPassword,
+  resetPassword,
   getMe,
 } = require('../controllers/authController');
 const { protect } = require('../middleware/auth');
@@ -35,6 +37,19 @@ router.post('/login', loginLimiter, login);
  */
 router.post('/refresh', refresh);
 router.post('/logout', logout);
+
+/*
+ * The forgot-password flow. Both steps are public by necessity — the whole
+ * point is that the user cannot sign in.
+ *
+ * Both are rate limited, and for different reasons. Requesting a reset sends an
+ * email, so an unthrottled endpoint is a way to use this server to spam someone
+ * else's inbox. Redeeming one accepts a token, so an unthrottled endpoint is
+ * somewhere to guess at them — 32 random bytes are not guessable, but a limit
+ * costs nothing and removes the question.
+ */
+router.post('/forgot-password', passwordResetLimiter, forgotPassword);
+router.post('/reset-password', passwordResetLimiter, resetPassword);
 
 // Authenticated
 router.get('/me', protect, getMe);

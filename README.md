@@ -101,6 +101,12 @@ Once signed in, try the search box on the dashboard:
 | `COOKIE_SAME_SITE` | no | `lax` | `lax` · `strict` · `none`. Only change if the API and frontend are on genuinely different sites (`none` requires HTTPS) |
 | `CLIENT_ORIGIN` | no | `http://localhost:5173` | Allowed CORS origin |
 | `RATE_LIMIT_DISABLED` | no | — | `true` turns the per-IP limiters off, for local load testing |
+| `BREACH_CHECK_DISABLED` | no | — | `true` skips the Have I Been Pwned lookup, for an air-gapped deployment |
+| `AUDIT_RETENTION_DAYS` | no | — | Unset means keep audit entries forever. Pruning is still a manual command |
+| `APP_URL` | no | first `CLIENT_ORIGIN` | Public URL used to build password-reset links |
+| `MAIL_TRANSPORT` | no | `console` | `console` logs the message; `webhook` POSTs it to `MAIL_WEBHOOK_URL` |
+| `MAIL_WEBHOOK_URL` | no | — | Required when `MAIL_TRANSPORT=webhook` |
+| `MAIL_FROM` | no | `SimpleCRM <no-reply@simplecrm.local>` | Sender shown on outgoing mail |
 | `ANTHROPIC_API_KEY` | no | — | Blank ⇒ AI search falls back to keyword search |
 | `ANTHROPIC_MODEL` | no | `claude-sonnet-4-6` | Model used to translate queries |
 
@@ -268,6 +274,18 @@ stop a botnet, where each address stays under the limit while one account absorb
 of guesses. So login is also protected per *account*: from the fifth consecutive failure,
 each further one doubles the wait (1, 2, 4, 8 minutes) capped at 15.
 
+**The counters live in MongoDB, shared across every instance.** express-rate-limit's default
+is a Map inside the process, which on a serverless platform means each function instance
+keeps its own — so the effective limit becomes (configured limit x warm instances) and every
+counter resets when an instance recycles. A "10 per 15 minutes" login limit quietly becomes
+sixty. Redis is the usual answer; this project already runs MongoDB and nothing else, and a
+second datastore for one counter is a real operational cost for a difference measured
+against the bcrypt comparison happening on the same request.
+
+The increment is a single atomic upsert. Read-then-write would let simultaneous requests
+each read the same count and each write count+1 — hiding exactly the burst these limits
+exist to catch.
+
 Exponential rather than flat, so someone who genuinely forgot their password is not
 punished as hard as an attacker. **Capped**, because an uncapped backoff is a weapon: anyone
 could fail logins against a known address and lock that person out of their own account
@@ -314,6 +332,54 @@ advises against, because it produces `Password1!` rather than unpredictability.
 The blocklist is compared against several normalised forms of the input, because people bolt
 digits on (`password123`) and substitute characters (`P@ssw0rd`).
 
+**On top of the local list, every new password is checked against the Have I Been Pwned
+corpus** — over half a billion breached passwords, which is where credential-stuffing tools
+get their wordlists.
+
+That is done with **k-anonymity**, which is what makes sending anything password-shaped to a
+third party acceptable: the password is hashed locally, only the **first five characters** of
+the SHA-1 leave this server, HIBP returns every suffix matching that prefix, and the
+comparison happens here. The service sees five hex characters — matching roughly 800 hashes —
+and cannot tell which was asked about, cannot reconstruct the password, and cannot link the
+request to an account. A test asserts the URL contains the prefix and neither the password
+nor the full hash.
+
+Ten appearances, not one, counts as breached: a password appearing once may be a genuinely
+strong passphrase that happened to be in a dump, and rejecting it teaches people the rules
+are arbitrary.
+
+**It fails open.** If the service is slow, down or firewalled, the check is skipped and the
+local rules still apply — refusing to let anyone sign up because a third party is unreachable
+trades a strong password policy for an outage. `BREACH_CHECK_DISABLED=true` turns it off for
+an air-gapped deployment.
+
+### Forgot password
+
+`POST /auth/forgot-password` emails a link; `POST /auth/reset-password` redeems it. Four
+decisions carry the security of the flow:
+
+- **The response is identical whether or not the account exists.** "No account with that
+  email" is a free enumeration oracle — feed in a list of addresses, learn which are
+  customers. The cost is that a mistyped address waits for a mail that never arrives, which
+  the mail content mitigates: an address with no account still receives a message saying so,
+  which helps the user and tells an attacker nothing, since they cannot read the inbox. The
+  UI holds the same line — it says *"if an account exists"*, never *"we've sent you an
+  email"*.
+- **Tokens are hashed, single-use and expire in 30 minutes.** A reset link bypasses the
+  password entirely and travels through email, which is stored, forwarded and synced to
+  phones. Requesting a new link invalidates any earlier one, so clicking "forgot password"
+  five times does not leave five working keys scattered across a mailbox.
+- **Redeeming revokes every session**, with no exception — unlike change-password, which
+  spares the current device. Someone resetting is not necessarily at a browser we can trust.
+- **The password is validated before the token is consumed.** Otherwise a weak password
+  burns the link, and the user is told both that their password was rejected and that their
+  reset link no longer works.
+
+Delivery is a seam, not an integration: `MAIL_TRANSPORT=console` (the default) writes the
+message and its link to the log so the flow works locally with nothing configured, and
+`webhook` POSTs it to `MAIL_WEBHOOK_URL`, which is enough to connect any provider or queue.
+Hard-wiring one vendor's SDK for a single email would be the wrong dependency.
+
 ### Security headers
 
 Set in **two places**, and the split is easy to get silently wrong. The API and the static
@@ -342,6 +408,20 @@ whose contents change when someone is renamed or deleted is not an audit trail.
 Password hashes and session tokens are redacted: the trail is kept indefinitely and read by
 administrators, which makes it the wrong place to accumulate credentials.
 
+**Retention is opt-in and manual.** Every other growing collection here (refresh tokens,
+idempotency keys, rate-limit counters) expires automatically, and that is uncontroversial —
+those rows stop being useful the moment they expire. An audit trail is different: it is read
+when something has gone wrong, usually about a period nobody was watching at the time, so a
+TTL index deletes evidence silently on a schedule nobody remembers setting and the deletion
+is discovered on the day it matters.
+
+So the default is keep everything. Setting `AUDIT_RETENTION_DAYS` makes entries *eligible*
+for pruning, and `npm run prune-audit` performs it — reporting what it would delete unless
+given `--yes`, because deleting audit records cannot be undone and a retention period typed
+with the wrong number of zeroes looks exactly like a correct one until it runs. The prune is
+recorded in the application log rather than in the audit collection, so the evidence of a
+deletion is not itself subject to the deletion policy.
+
 ---
 
 ## API reference
@@ -361,6 +441,8 @@ Every **state-changing** request authenticated by cookie must also send `X-CSRF-
 | `POST` | `/auth/refresh` | refresh cookie | Rotates the session and reissues both cookies |
 | `POST` | `/auth/logout` | any | Clears the cookies **and revokes the refresh token**. Always `200` |
 | `POST` | `/auth/change-password` | any | Requires the current password. Revokes every *other* session. Rate limited: 5/hour |
+| `POST` | `/auth/forgot-password` | public | Emails a reset link. **Always answers identically**, whether or not the address has an account. Rate limited: 5/hour |
+| `POST` | `/auth/reset-password` | reset token | Redeems a link. Single use, 30-minute expiry, revokes **every** session |
 | `GET` | `/auth/me` | any | The signed-in user — used to restore a session after a page refresh |
 
 The refresh token is **never** in a response body; it exists only as a cookie.
@@ -666,6 +748,15 @@ The tests assert **usage, not existence** - `explain()` must show an `IXSCAN` wi
 in-memory `SORT` stage. Asserting an index exists passes just as happily when it is unused,
 which is how the third finding would have been missed.
 
+**Indexes are built deliberately, not lazily.** Mongoose otherwise creates them on the app's
+first use of a collection, which means the first queries after a deploy run unindexed — and,
+worse, that an index REMOVED from a schema is never dropped from the database. The two unused
+text indexes above would have stayed there forever, still maintained on every write, despite
+being deleted from the code. `syncIndexes()` runs at boot on a long-running server and via
+`npm run indexes` as a deploy step. Serverless skips it on purpose: cold starts are frequent,
+and this only needs doing once per deploy. A failed sync logs and continues, because missing
+indexes make the app slow while refusing to start makes it unavailable.
+
 ---
 
 ## Design system
@@ -941,29 +1032,27 @@ the API would reject. The API enforces every rule independently.
 
 ## Known limitations
 
-Things a production deployment would need, called out rather than left as surprises:
+Things a production deployment would still need, called out rather than left as surprises.
 
-- **The per-IP rate-limit counters are in process memory.** On Vercel each function
-  instance has its own, so the effective limit is roughly (limit x warm instances) and
-  counters reset when an instance recycles. A shared store (Redis, or Mongo-backed) is the
-  fix. The defence that actually protects an account, the per-account lockout, *is* in
-  MongoDB and therefore shared across every instance.
-- **The password blocklist is a small in-repo list.** Production should check against a real
-  breach corpus, such as the Have I Been Pwned k-anonymity API.
-- **No "forgot password" flow.** No email provider is configured, so the reset surface is
-  `POST /auth/change-password`, which requires the current password. A one-time-link flow
-  would need an email service.
+Five earlier entries have since been fixed and are described in their own sections above:
+shared rate-limit counters, breached-password checking, the forgot-password flow, audit
+retention, and deterministic index building.
+
 - **Substring search cannot use an index.** An unanchored `/karachi/i` has no prefix to seek
-  to, so MongoDB scans the whole index range. Fine at this size; MongoDB Atlas Search is the
-  answer at scale.
-- **The audit log has no retention policy.** Deliberately no TTL, since logs that delete
-  themselves are useless on the day you need them, so the collection grows and pruning is a
-  decision for whoever runs the system.
-- **Schema indexes are built lazily**, on the app's first use of each collection, so the
-  first queries after a deploy can run unindexed. `syncIndexes()` as a deploy step would
-  make that deterministic.
+  to, so MongoDB scans the whole index range and applies the pattern to every key. That is
+  cheaper than a collection scan but still linear. The real fixes are MongoDB Atlas Search
+  or a dedicated search service — both are infrastructure decisions rather than code
+  changes, and the collections here are far too small to need one. Two tests pin the actual
+  behaviour so nobody later assumes it is indexed.
+- **Password-reset delivery needs a transport configured.** The flow itself is complete —
+  tokens, expiry, single use, session revocation — but the default `console` transport only
+  writes the link to the log. A real deployment sets `MAIL_TRANSPORT=webhook` and points it
+  at a provider or a queue. Deliberately not hard-wired to one vendor's SDK for a single
+  email.
 - **AI search reads one entity at a time.** A question spanning two entities ("customers
-  and their overdue orders") returns whichever the model judged primary.
+  and their overdue orders") returns whichever the model judged primary. Supporting joins
+  would mean a query language rather than a filter object.
 - **The keyword fallback matches terms, not meaning.** It answers the identifying part of a
   question (a name, city or category) but not the analytical part — "running low",
   "overdue", "top spenders" need the AI path. Its stop-word list is also English-only.
+

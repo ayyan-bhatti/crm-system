@@ -10,6 +10,7 @@ const {
 } = require('../services/sessionService');
 const { setAuthCookies, clearAuthCookies, REFRESH_COOKIE } = require('../utils/cookies');
 const { assertStrongPassword } = require('../utils/passwordPolicy');
+const passwordResetService = require('../services/passwordResetService');
 
 /**
  * Send a freshly issued session to the client.
@@ -242,9 +243,93 @@ const changePassword = asyncHandler(async (req, res) => {
   sendSession(res, { user, ...session });
 });
 
+/**
+ * POST /api/auth/forgot-password
+ *
+ * Always answers 200 with the same body, whether or not the address has an
+ * account. "No account with that email" would be a free account-enumeration
+ * oracle: feed in a list of addresses, learn which ones are customers.
+ *
+ * The cost is a mistyped address waiting for a mail that never arrives, which
+ * the mail content mitigates — an address with no account still receives a
+ * message saying so, which is more helpful than silence and tells an attacker
+ * nothing, since they cannot read the inbox.
+ */
+const forgotPassword = asyncHandler(async (req, res) => {
+  const { email } = req.body;
+
+  if (!email) throw ApiError.badRequest('Email is required');
+
+  // Deliberately not awaited for its RESULT — the response must not vary with
+  // what it found. It is awaited for timing consistency.
+  await passwordResetService.requestReset(email, req);
+
+  res.json({
+    success: true,
+    message:
+      'If an account exists for that address, a password reset link is on its way. ' +
+      'The link expires in 30 minutes.',
+  });
+});
+
+/**
+ * POST /api/auth/reset-password
+ *
+ * Redeems a reset link. The failure reasons ARE distinguishable here — "this
+ * link has expired" is far more useful than a blanket rejection, and unlike the
+ * request step there is nothing to enumerate: a token is not an email address.
+ */
+const resetPassword = asyncHandler(async (req, res) => {
+  const { token, password } = req.body;
+
+  if (!token || !password) {
+    throw ApiError.badRequest('A reset token and a new password are required');
+  }
+
+  /*
+   * The password is validated BEFORE the token is consumed.
+   *
+   * Otherwise a weak password would burn the link: the token is single-use, so
+   * the user would be told their password was rejected and that their reset
+   * link no longer works, and would have to start again.
+   */
+  const preview = await passwordResetService.peek(token);
+  if (preview.ok) {
+    await assertStrongPassword(password, {
+      name: preview.user.name,
+      email: preview.user.email,
+    });
+  }
+
+  const result = await passwordResetService.resetPassword(token, password);
+
+  if (!result.ok) {
+    const messages = {
+      expired: 'This reset link has expired. Please request a new one.',
+      used: 'This reset link has already been used. Please request a new one.',
+      invalid: 'This reset link is not valid. Please request a new one.',
+    };
+    throw ApiError.badRequest(messages[result.reason] || messages.invalid);
+  }
+
+  res.json({
+    success: true,
+    message: 'Your password has been reset. Please sign in with your new password.',
+  });
+});
+
 /** GET /api/auth/me — the currently authenticated user, for session restore. */
 const getMe = asyncHandler(async (req, res) => {
   res.json({ success: true, data: { user: req.user } });
 });
 
-module.exports = { register, login, refresh, logout, changePassword, getMe };
+module.exports = {
+  register,
+  login,
+  refresh,
+  logout,
+  changePassword,
+  forgotPassword,
+  resetPassword,
+  getMe,
+};

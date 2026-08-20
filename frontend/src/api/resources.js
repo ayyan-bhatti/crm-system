@@ -21,6 +21,16 @@ export const authApi = {
   // controller for why both of those matter.
   changePassword: (payload) =>
     client.post('/auth/change-password', payload).then((r) => r.data.data),
+
+  /*
+   * Always resolves for a well-formed request, whether or not the address has
+   * an account — the API answers identically either way so it cannot be used to
+   * discover which addresses are registered.
+   */
+  forgotPassword: (email) =>
+    client.post('/auth/forgot-password', { email }).then((r) => r.data),
+
+  resetPassword: (payload) => client.post('/auth/reset-password', payload).then((r) => r.data),
 };
 
 // --- customers --------------------------------------------------------------

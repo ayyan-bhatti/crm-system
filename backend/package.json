@@ -11,7 +11,8 @@
     "test": "cross-env NODE_ENV=test jest --runInBand --detectOpenHandles",
     "test:watch": "cross-env NODE_ENV=test jest --runInBand --watch",
     "lint": "eslint .",
-    "indexes": "node scripts/syncIndexes.js"
+    "indexes": "node scripts/syncIndexes.js",
+    "prune-audit": "node scripts/pruneAuditLog.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.71.0",

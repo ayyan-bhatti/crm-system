@@ -75,6 +75,24 @@ const env = {
    */
   cookieSameSite: process.env.COOKIE_SAME_SITE || 'lax',
 
+  /**
+   * The app's own public URL, used to build password-reset links.
+   *
+   * Defaults to the client origin, which is correct in every setup where the
+   * frontend and API share a domain (including the Vercel deployment). A
+   * separate variable exists because CLIENT_ORIGIN may be a comma-separated
+   * ALLOW-LIST for CORS, and a link has to point at exactly one place.
+   */
+  appUrl: (process.env.APP_URL || process.env.CLIENT_ORIGIN || 'http://localhost:5173')
+    .split(',')[0]
+    .trim()
+    .replace(/\/$/, ''),
+
+  /** console (default) | webhook — see services/mailer.js. */
+  mailTransport: process.env.MAIL_TRANSPORT || 'console',
+  mailWebhookUrl: process.env.MAIL_WEBHOOK_URL || '',
+  mailFrom: process.env.MAIL_FROM || 'SimpleCRM <no-reply@simplecrm.local>',
+
   anthropicApiKey: process.env.ANTHROPIC_API_KEY || '',
   anthropicModel: process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-6',
 };
@@ -106,6 +124,16 @@ env.rateLimitEnabled = !env.isTest && process.env.RATE_LIMIT_DISABLED !== 'true'
  * still apply, so the policy degrades rather than disappearing.
  */
 env.breachCheckEnabled = !env.isTest && process.env.BREACH_CHECK_DISABLED !== 'true';
+
+/**
+ * How long audit entries are kept, in days. Unset means keep them forever.
+ *
+ * Deliberately opt-in. An audit trail that expires on a schedule nobody
+ * remembers setting is one whose absence is discovered on the day it matters —
+ * see services/auditRetention.js. Pruning is also a manual command rather than
+ * a background job, so a deletion is an operational act with a log line.
+ */
+env.auditRetentionDays = Number(process.env.AUDIT_RETENTION_DAYS) || null;
 /** True on Vercel (and most FaaS platforms), which set this automatically. */
 env.isServerless = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
 

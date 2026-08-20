@@ -31,6 +31,7 @@ require('./../src/models/Order');
 require('./../src/models/AuditLog');
 require('./../src/models/RefreshToken');
 require('./../src/models/IdempotencyKey');
+require('./../src/models/PasswordResetToken');
 
 async function main() {
   if (!env.isConfigValid) {

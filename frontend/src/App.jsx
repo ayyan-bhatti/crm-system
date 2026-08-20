@@ -9,6 +9,8 @@ import { Spinner } from './components/common';
 
 import Login from './pages/Login';
 import Register from './pages/Register';
+import ForgotPassword from './pages/ForgotPassword';
+import ResetPassword from './pages/ResetPassword';
 
 import { PRODUCT_WRITE_ROLES, ROLES } from './constants';
 
@@ -68,6 +70,10 @@ export default function App() {
                 {/* --- Public ----------------------------------------------- */}
                 <Route path="/login" element={<Login />} />
                 <Route path="/register" element={<Register />} />
+                {/* Not lazy-loaded: someone locked out of their account is the
+                    last person who should wait for a chunk to download. */}
+                <Route path="/forgot-password" element={<ForgotPassword />} />
+                <Route path="/reset-password" element={<ResetPassword />} />
 
                 {/* --- Authenticated ---------------------------------------- */}
                 <Route

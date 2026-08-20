@@ -79,6 +79,12 @@ export default function Login() {
             <button type="submit" className={`${btnPrimary} w-full`} disabled={submitting}>
               {submitting ? <Spinner /> : 'Sign in'}
             </button>
+
+            <p className="text-center text-sm">
+              <Link to="/forgot-password" className={link}>
+                Forgot your password?
+              </Link>
+            </p>
           </form>
         </Card>
 

@@ -160,13 +160,25 @@ userSchema.methods.registerFailedLogin = async function registerFailedLogin() {
 };
 
 /**
- * Clear the counters after a successful sign-in.
+ * Clear the counters after a successful sign-in, or a password reset.
  *
- * Skipped when there is nothing to clear, so the overwhelmingly common case —
- * a correct password — costs no extra write.
+ * Skipped only when the fields were actually loaded AND are already clear, so
+ * the overwhelmingly common case — a correct password — costs no extra write.
+ *
+ * The distinction between "loaded and zero" and "not loaded" matters more than
+ * it looks. `failedLoginAttempts` and `lockUntil` are `select: false`, so a
+ * document fetched without them has `undefined` in both. A truthiness check
+ * (`if (!this.failedLoginAttempts && !this.lockUntil) return`) cannot tell that
+ * apart from "already clear" and silently does nothing — which is exactly what
+ * happened on the password-reset path, where the user arrives via `populate()`
+ * and a locked-out account stayed locked after a successful reset.
+ *
+ * Comparing explicitly means an unloaded field falls through to the write,
+ * which is the safe direction: at worst one redundant update.
  */
 userSchema.methods.clearFailedLogins = async function clearFailedLogins() {
-  if (!this.failedLoginAttempts && !this.lockUntil) return;
+  const known = this.failedLoginAttempts !== undefined && this.lockUntil !== undefined;
+  if (known && !this.failedLoginAttempts && !this.lockUntil) return;
 
   await this.constructor.findByIdAndUpdate(this._id, {
     failedLoginAttempts: 0,

@@ -1402,3 +1402,134 @@ token"*.
 
 **Phase 4 complete.** 442 backend + 60 frontend + 11 end-to-end tests, all green, all
 running in CI.
+
+---
+
+# Round 3 — closing out the known limitations
+
+The README carried eight documented limitations. Five were fixable within this codebase and
+are now fixed; three are genuinely infrastructure decisions and stay documented, which is
+the honest outcome rather than pretending otherwise.
+
+## 1. Rate-limit counters now live in MongoDB
+
+express-rate-limit counted in a Map inside the process. On a long-running server that is
+right; on Vercel each function instance has its own memory, so the effective limit was
+**(configured limit x warm instances)** and every counter reset when an instance recycled. A
+"10 attempts per 15 minutes" login limit quietly became sixty.
+
+**Why not Redis,** the usual answer: this project already runs MongoDB and nothing else, and
+a second datastore for one counter is a real operational cost — another thing to provision,
+monitor and pay for. Mongo is slower for this, and "slower" means one indexed upsert on the
+handful of endpoints that are limited, which is not meaningful next to the bcrypt comparison
+on the same request.
+
+Fixed windows rather than a sliding log: a sliding window is more precise at the boundary but
+needs a timestamp per request instead of one counter, for a precision that does not change
+the defence. The increment is a **single atomic upsert** — read-then-write would let
+simultaneous requests each read the same count and each write count+1, hiding exactly the
+burst these limits exist to catch. A test fires eight parallel requests and asserts all eight
+are counted.
+
+Each limiter has its own named store, so signing in does not consume the sign-up budget for
+the same address. Because the Mongo TTL collector runs about a minute behind, an expired
+window is explicitly reset rather than continued.
+
+## 2. Passwords are checked against the Have I Been Pwned corpus
+
+The in-repo blocklist catches the fifty passwords everyone thinks of. The real corpus holds
+over half a billion, which is where credential-stuffing tools get their wordlists — and it
+keeps working as those lists grow without anyone maintaining anything.
+
+**K-anonymity is what makes this acceptable.** The password is hashed locally; only the
+**first five characters** of the SHA-1 leave the server; HIBP returns every suffix matching
+that prefix and the comparison happens here. The service sees five hex characters matching
+roughly 800 hashes — it cannot tell which was asked about, cannot reconstruct the password,
+and cannot link the request to an account. A test asserts the URL contains the prefix and
+neither the password nor the full hash, and the request asks for a padded response so its
+size leaks nothing either.
+
+SHA-1 because that is the corpus format. Broken for signatures, irrelevant here — it is a
+lookup key, and passwords are still stored with bcrypt.
+
+**Ten appearances, not one.** A password appearing once may be a genuinely strong passphrase
+that happened to be in a dump; rejecting it teaches people the rules are arbitrary.
+
+**It fails open**, deliberately: if the service is slow, down or firewalled, the check is
+skipped and the local rules still apply. Refusing to let anyone sign up because a third party
+is unreachable trades a strong password policy for an outage. The corpus is only consulted
+once the local rules pass — a password failing on length does not need a network round trip
+to also be told it is common.
+
+## 3. A real forgot-password flow
+
+Two endpoints, and the security rests on four decisions:
+
+- **The response is identical whether or not the account exists.** Otherwise it is a free
+  enumeration oracle. The cost is a mistyped address waiting for a mail that never arrives,
+  which the mail content mitigates — an address with no account still gets a message saying
+  so, which helps the user and tells an attacker nothing, since they cannot read the inbox.
+  The UI holds the same line: *"if an account exists"*, never *"we have sent you an email"*.
+- **Tokens are hashed, single-use, 30-minute expiry.** A reset link bypasses the password
+  entirely and travels through email — stored, forwarded, synced to phones. Requesting a new
+  link invalidates any earlier one, so clicking "forgot password" five times does not leave
+  five working keys in a mailbox.
+- **Redeeming revokes every session**, with no exception, unlike change-password which spares
+  the current device. Someone resetting is not necessarily at a browser we can trust.
+- **The password is validated before the token is consumed.** The token is single-use, so
+  validating afterwards would burn the link on a rejected password — the user would be told
+  both that their password was too weak and that their link no longer works.
+
+**Delivery is a seam, not an integration.** `console` (default) writes the message and link
+to the log, so the flow is exercisable locally with nothing configured; `webhook` POSTs it to
+a URL, which is enough to connect any provider or queue. Carrying a vendor SDK for one email
+would be the wrong dependency. The console transport warns when it runs in production,
+because a reset link in a log is a credential in a log — stated rather than hidden.
+
+**A real bug this surfaced:** `clearFailedLogins()` skipped its write when the counters
+looked falsy. `failedLoginAttempts` and `lockUntil` are `select: false`, so a user loaded via
+`populate()` has `undefined` in both — indistinguishable from "already clear" under a
+truthiness check. A locked-out account therefore stayed locked after a successful password
+reset. It now compares explicitly, so an unloaded field falls through to the write, which is
+the safe direction: at worst one redundant update.
+
+## 4. Audit retention: opt-in, manual, and logged elsewhere
+
+Every other growing collection expires automatically, and that is uncontroversial — those
+rows stop being useful the moment they expire. An audit trail is different: it is read when
+something has gone wrong, usually about a period nobody was watching at the time. A TTL index
+deletes evidence silently on a schedule nobody remembers setting, and the deletion is
+discovered on the day it matters.
+
+So the default is **keep everything**. `AUDIT_RETENTION_DAYS` makes entries *eligible*, and
+`npm run prune-audit` performs it — reporting what it would delete unless given `--yes`,
+because deletion cannot be undone and a retention period typed with the wrong number of
+zeroes looks exactly like a correct one until it runs.
+
+The prune is recorded in the **application log, not the audit collection**. Writing it into
+the trail would be neater and slightly dishonest: the record of a deletion would then be
+subject to the same deletion policy.
+
+## 5. Indexes are built deliberately
+
+Mongoose created them lazily on first use, which meant the first queries after a deploy ran
+unindexed and — worse — that removing an index from a schema never dropped it. The two unused
+text indexes deleted earlier would have stayed in the database forever, still maintained on
+every write.
+
+`syncIndexes()` now runs at boot on a long-running server and via `npm run indexes` as a
+deploy step. Serverless skips it on purpose: cold starts are frequent, and paying for an index
+check on each one adds latency forever to do work needed once per deploy. A failed sync logs
+and continues — missing indexes make the app slow, refusing to start makes it unavailable.
+
+## What is deliberately still open
+
+- **Substring search cannot use an index.** An unanchored `/karachi/i` has no prefix to seek
+  to. The fixes are Atlas Search or a dedicated search service — infrastructure decisions,
+  and these collections are nowhere near needing one. Two tests pin the real behaviour so
+  nobody later assumes it is indexed.
+- **AI search reads one entity at a time.** Supporting joins would mean a query language
+  rather than a filter object.
+- **The keyword fallback matches terms, not meaning**, and its stop-word list is English-only.
+
+**Totals: 492 backend + 73 frontend + 11 end-to-end tests**, lint clean on both packages.
