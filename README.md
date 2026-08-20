@@ -14,9 +14,12 @@ Mongoose · JWT auth with bcrypt · Jest + Supertest with an in-memory MongoDB.
 - [Environment variables](#environment-variables)
 - [Architecture](#architecture)
 - [Authentication and roles](#authentication-and-roles)
+- [Security](#security)
 - [API reference](#api-reference)
 - [How AI search works](#how-ai-search-works)
+- [AI customer insights](#ai-customer-insights)
 - [Order stock rules](#order-stock-rules)
+- [Pagination and indexes](#pagination-and-indexes)
 - [Design system](#design-system)
 - [Deploying to Vercel](#deploying-to-vercel)
 - [Testing](#testing)
@@ -65,7 +68,8 @@ to `http://localhost:5000`, so the browser only ever talks to one origin.
 
 ### 3. Sign in
 
-If you ran `npm run seed`, four accounts exist (password `password123` for all):
+If you ran `npm run seed`, four accounts exist (password `Karachi-Ledger-72` for all —
+`password123` is now rejected by the password policy, see [Security](#security)):
 
 | Email | Role | Sees |
 | --- | --- | --- |
@@ -92,10 +96,16 @@ Once signed in, try the search box on the dashboard:
 | `NODE_ENV` | no | `development` | `development` · `production` · `test` |
 | `MONGO_URI` | **yes** | `mongodb://127.0.0.1:27017/simplecrm` | Connection string |
 | `JWT_SECRET` | **yes** | — | Server refuses to boot without it (except in tests) |
-| `JWT_EXPIRES_IN` | no | `7d` | Token lifetime |
+| `ACCESS_TOKEN_TTL` | no | `15m` | Access-token lifetime. Short by design — it cannot be revoked |
+| `REFRESH_TOKEN_TTL` | no | `7d` | How long "stay signed in" lasts. This one *is* revocable |
+| `COOKIE_SAME_SITE` | no | `lax` | `lax` · `strict` · `none`. Only change if the API and frontend are on genuinely different sites (`none` requires HTTPS) |
 | `CLIENT_ORIGIN` | no | `http://localhost:5173` | Allowed CORS origin |
+| `RATE_LIMIT_DISABLED` | no | — | `true` turns the per-IP limiters off, for local load testing |
 | `ANTHROPIC_API_KEY` | no | — | Blank ⇒ AI search falls back to keyword search |
 | `ANTHROPIC_MODEL` | no | `claude-sonnet-4-6` | Model used to translate queries |
+
+`JWT_EXPIRES_IN` is **no longer read**. It was the single-token lifetime from before the
+session was split into an access and a refresh token; `ACCESS_TOKEN_TTL` replaced it.
 
 Every one of these is read in exactly one file — `backend/src/config/env.js` — so the app's
 full configuration surface is visible at a glance, and misconfiguration fails loudly at
@@ -171,17 +181,45 @@ correct-looking rows with wrong pagination.
 
 ### How auth works
 
-JWTs are returned in the JSON body of `/auth/register` and `/auth/login`. The React app
-stores the token in `localStorage` and sends it as `Authorization: Bearer <token>`.
+The session is **two httpOnly cookies**. The frontend never handles a token and never
+writes one to `localStorage`.
 
-The alternative — an httpOnly cookie — resists XSS token theft better, but needs CSRF
-protection and cross-site cookie configuration. Bearer tokens keep the flow explicit and
-easy to exercise from tests, which is the right trade-off for this codebase. See
-[Known limitations](#known-limitations).
+| | access token | refresh token |
+| --- | --- | --- |
+| what it is | signed JWT | 32 random bytes, no claims |
+| lifetime | 15 minutes | 7 days |
+| stored server-side? | no | yes, SHA-256 hashed |
+| revocable? | no | **yes** |
+| cookie path | `/` | `/api/auth` |
+
+The split is the point. The access token is stateless, so verifying it is one signature
+check and no database round trip — affordable only because it expires in minutes. The
+refresh token is the long-lived half, so it is the one that has to be revocable, which
+means storing it (hashed: a database leak must not hand over live sessions).
+
+**Rotation and reuse detection.** Every call to `POST /api/auth/refresh` consumes the
+presented token and issues a new one. All tokens descended from one login share a family
+id; if an already-consumed token is presented again, either the user's copy or a thief's is
+being replayed and there is no way to tell which — so the whole family is revoked. That
+caps the value of a stolen refresh token at "until the real user next refreshes".
+
+**`Authorization: Bearer` is still accepted** for scripts, the test suite and any future
+mobile client. That is not a hole in the cookie story: an attacker's page cannot set a
+header on a cross-site request, so bearer calls are inherently CSRF-immune.
 
 `protect` **re-loads the user from the database on every request** rather than trusting
 the token's payload. A deleted account or a changed role therefore takes effect
 immediately, instead of whenever the old token happens to expire.
+
+### Client requirements
+
+- Send credentials (`withCredentials: true`, or `credentials: 'include'`).
+- Send `X-CSRF-Token` on every **state-changing** request, read from the readable
+  `simplecrm_csrf` cookie. Bearer-authenticated clients are exempt.
+- Handle a `401` by calling `POST /api/auth/refresh` once and replaying the request. If
+  several requests fail at once, share **one** refresh — because refresh rotates, parallel
+  refreshes present an already-consumed token and trip reuse detection against the real
+  user.
 
 ### Role matrix
 
@@ -209,18 +247,123 @@ That distinction is enforced in two layers, deliberately:
 
 ---
 
+## Security
+
+Everything below was added in response to a review. Each item says what it defends against
+and what it costs, because a control nobody can explain is a control nobody maintains.
+
+### Rate limiting and account lockout
+
+Two independent defences, because either alone has a hole.
+
+| endpoint | per-IP limit |
+| --- | --- |
+| `POST /auth/login` | 10 / 15 min |
+| `POST /auth/register` | 5 / hour |
+| `POST /auth/change-password` | 5 / hour |
+| AI endpoints | 20 / 5 min per IP, **and** 30 / 5 min per user |
+
+Per-IP limits stop credential stuffing, sign-up spam and runaway scripts. They do **not**
+stop a botnet, where each address stays under the limit while one account absorbs thousands
+of guesses. So login is also protected per *account*: from the fifth consecutive failure,
+each further one doubles the wait (1, 2, 4, 8 minutes) capped at 15.
+
+Exponential rather than flat, so someone who genuinely forgot their password is not
+punished as hard as an attacker. **Capped**, because an uncapped backoff is a weapon: anyone
+could fail logins against a known address and lock that person out of their own account
+permanently.
+
+A locked account is refused *before* bcrypt runs (so it costs no CPU) and refuses the
+**correct** password too - a lockout that lets the right password through protects nothing.
+
+The AI endpoints carry both limits because the IP limiter is wrong in *both* directions on
+its own: an office behind one NAT shares a quota between colleagues, while a user on a phone
+hotspot changes address freely.
+
+### CSRF
+
+Moving the session into cookies *created* this problem - cookies are attached automatically,
+including on a request triggered by another site - so the protection is part of that change
+rather than an extra.
+
+Double-submit: the server plants a random value in a **readable** cookie, the frontend
+echoes it in `X-CSRF-Token`, and the server requires the two to match in constant time. An
+attacker's page can make the browser *send* our cookies but the same-origin policy stops it
+*reading* them, so it cannot produce the header.
+
+That one cookie is deliberately not httpOnly - the frontend has to read it, and the value is
+not a credential; it only proves the request came from our own origin.
+
+Written here rather than using `csurf`, which has been deprecated and unmaintained since
+2022.
+
+### Password policy
+
+Deliberately **not** "8 characters with a capital and a number" - the rule NIST SP 800-63B
+advises against, because it produces `Password1!` rather than unpredictability.
+
+| rule | reasoning |
+| --- | --- |
+| at least 10 characters | the floor |
+| 14+ needs no variety | a passphrase beats a short symbol-soup password and should not be rejected for lacking a digit |
+| 10-13 needs 3 of 4 character classes | a short password has to buy its entropy from variety |
+| not on the common list | credential stuffing tries those first |
+| nothing built from the name or email | guessed first by exactly the person attacking the account |
+| at most 72 bytes | **not style - a real bug.** bcrypt silently truncates there, so a longer password would be accepted, quietly shortened, and any other password sharing its first 72 bytes would open the account |
+
+The blocklist is compared against several normalised forms of the input, because people bolt
+digits on (`password123`) and substitute characters (`P@ssw0rd`).
+
+### Security headers
+
+Set in **two places**, and the split is easy to get silently wrong. The API and the static
+frontend are separate Vercel services, so a header set by Express only ever lands on a JSON
+response - it never reaches the HTML the browser executes scripts in.
+
+- **helmet, in `app.js`** - for API responses. `default-src 'none'`, `frame-ancestors
+  'none'`, HSTS in production only, and a referrer policy that stops record ids leaking
+  through `Referer`.
+- **`vercel.json` `headers`** - the real app CSP, with every directive commented in place.
+
+One deliberate weakening: `style-src` allows `'unsafe-inline'`, because Recharts sets style
+attributes at runtime and offers no nonce hook. Inline *style* risks defacement; inline
+*script* risks code execution, and `script-src 'self'` stays strict. `connect-src 'self'`
+means even a script that somehow ran could not exfiltrate anywhere.
+
+### Audit trail
+
+Every create, update and delete on customers, products, orders and users records who did it,
+the before and after values, which fields changed, and the request metadata. Admin-only and
+read-only - see [API reference](#api-reference).
+
+The actor is **denormalised** (id plus a snapshot of name, email and role). An audit trail
+whose contents change when someone is renamed or deleted is not an audit trail.
+
+Password hashes and session tokens are redacted: the trail is kept indefinitely and read by
+administrators, which makes it the wrong place to accumulate credentials.
+
+---
+
 ## API reference
 
-All routes are prefixed with `/api`. Every route except `register`, `login` and `health`
-requires an `Authorization: Bearer <token>` header.
+All routes are prefixed with `/api`. Every route except `register`, `login`, `refresh`,
+`logout` and `health` requires a session — either the auth cookies or an
+`Authorization: Bearer <token>` header.
+
+Every **state-changing** request authenticated by cookie must also send `X-CSRF-Token`.
 
 ### Auth
 
 | Method | Path | Access | Description |
 | --- | --- | --- | --- |
-| `POST` | `/auth/register` | public | Create an account. First account ⇒ admin, later ⇒ sales_rep. Returns `{ user, token }` |
-| `POST` | `/auth/login` | public | Returns `{ user, token }` |
-| `GET` | `/auth/me` | any | The signed-in user — used to restore a session after refresh |
+| `POST` | `/auth/register` | public | Create an account. First account ⇒ admin, later ⇒ sales_rep. Sets session cookies; returns `{ user, token }`. Rate limited: 5/hour per IP |
+| `POST` | `/auth/login` | public | Sets session cookies; returns `{ user, token }`. Rate limited: 10/15min per IP, plus per-account lockout |
+| `POST` | `/auth/refresh` | refresh cookie | Rotates the session and reissues both cookies |
+| `POST` | `/auth/logout` | any | Clears the cookies **and revokes the refresh token**. Always `200` |
+| `POST` | `/auth/change-password` | any | Requires the current password. Revokes every *other* session. Rate limited: 5/hour |
+| `GET` | `/auth/me` | any | The signed-in user — used to restore a session after a page refresh |
+
+The refresh token is **never** in a response body; it exists only as a cookie.
 
 ### Users
 
@@ -237,9 +380,11 @@ requires an `Authorization: Bearer <token>` header.
 
 | Method | Path | Access | Description |
 | --- | --- | --- | --- |
-| `GET` | `/customers` | any (scoped) | Filters: `?status=` `?assignedTo=` `?city=` `?search=` · Paging: `?page=` `?limit=` `?sort=` |
+| `GET` | `/customers` | any (scoped) | Filters: `?status=` `?assignedTo=` `?city=` `?search=` · Paging: `?page=` `?limit=` `?sort=` or `?cursor=` |
+| `GET` | `/customers/options` | any (scoped) | Minimal id/label rows for the searchable picker. `?search=`, capped at 25 |
 | `POST` | `/customers` | any | Defaults `assignedTo` to the creator |
 | `GET` | `/customers/:id` | owner / manager / admin | |
+| `GET` | `/customers/:id/summary` | owner / manager / admin | Computed figures + health score + an AI narrative. Rate limited |
 | `PATCH` | `/customers/:id` | owner / manager / admin | `assignedTo` requires manager or admin |
 | `DELETE` | `/customers/:id` | owner / manager / admin | |
 
@@ -251,6 +396,7 @@ requires an `Authorization: Bearer <token>` header.
 | --- | --- | --- | --- |
 | `GET` | `/products` | any | Filters: `?category=` `?lowStock=true` `?search=` · Paging as above |
 | `GET` | `/products/categories` | any | Distinct category list, for the filter dropdown |
+| `GET` | `/products/options` | any | Minimal rows for the searchable picker. `?search=`, capped at 25 |
 | `GET` | `/products/:id` | any | |
 | `POST` | `/products` | manager, admin | |
 | `PATCH` | `/products/:id` | manager, admin | |
@@ -264,20 +410,31 @@ global number.
 | Method | Path | Access | Description |
 | --- | --- | --- | --- |
 | `GET` | `/orders` | any (scoped) | Filters: `?status=` `?customer=` `?from=` `?to=` · Paging as above |
-| `POST` | `/orders` | any (own customers) | Optional `status: "completed"` to record an already-fulfilled sale |
+| `POST` | `/orders` | any (own customers) | Optional `status: "completed"` to record an already-fulfilled sale. Accepts an optional `Idempotency-Key` header |
 | `GET` | `/orders/:id` | owner / manager / admin | |
 | `PATCH` | `/orders/:id` | owner / manager / admin | Change `status`, or `items` while still pending |
 | `DELETE` | `/orders/:id` | owner / manager / admin | Restores stock if the order was completed |
 
 The date range is inclusive: `?to=2026-01-31` includes orders placed on the 31st.
 
+**`Idempotency-Key`** makes order creation safe to retry. Send a fresh id per logical
+submission and reuse it on every retry; the server executes at most once per key and
+replays the stored response afterwards (marked `Idempotent-Replay: true`). Reusing a key
+with a *different* body is a `409` — that is a client bug, not a retry.
+
 ### Dashboard and AI search
 
 | Method | Path | Access | Description |
 | --- | --- | --- | --- |
 | `GET` | `/dashboard/summary` | any (scoped) | Customer count, revenue, low-stock count, status breakdown, 5 most recent orders |
-| `POST` | `/ai-search` | any (scoped) | Body `{ query, entity? }` — see below |
+| `POST` | `/ai-search` | any (scoped) | Body `{ query, entity? }` — see below. Rate limited per IP *and* per user |
+| `GET` | `/audit-logs` | **admin** | Filters: `?entity=` `?action=` `?actor=` `?entityId=` `?from=` `?to=` |
+| `GET` | `/audit-logs/:id` | **admin** | One entry with full before/after documents |
 | `GET` | `/health` | public | Liveness probe |
+
+The audit endpoints are admin-only and **read-only**. They hold a copy of every field of
+every record, so anyone who could read them would bypass every other permission rule — and
+an audit trail that can be edited through the API is not evidence of anything.
 
 ---
 
@@ -376,6 +533,63 @@ analytical part.
 
 ---
 
+## AI customer insights
+
+`GET /api/customers/:id/summary` returns three things: computed **figures**, a computed
+**health score**, and an AI-written **narrative** about them.
+
+### The model never does arithmetic
+
+The tempting design is to hand the model the order history and ask it to summarise. That is
+the design that produces a CRM confidently reporting the wrong revenue - language models are
+not arithmetic engines, and a plausible wrong total is invisible to the person reading it.
+
+So `services/customerMetrics.js` computes every figure in one MongoDB aggregation, and the
+model only writes prose about them.
+
+**Enforced twice.** The prompt says the figures are authoritative - but a prompt instruction
+is a request. The guarantee is the response schema, which has **no numeric fields at all**,
+so an invented figure has nowhere to land. A test pushes `totalRevenue: 999999` through the
+validator and asserts it is dropped.
+
+### The health score is a formula, not a judgement
+
+Recency 40% / Frequency 35% / Monetary 25%, banded into healthy / stable / at-risk /
+dormant.
+
+Computed rather than generated for three reasons: the same customer must score the same
+tomorrow (a score that drifts on refresh is a mood, not a metric); a formula can be unit
+tested, so *"is 82 right?"* has an answer; and a rep asking *"why is this account at 41?"*
+deserves *"the last order was 140 days ago"*, not a paraphrase of a hidden judgement. The
+breakdown ships with the score and is rendered under it.
+
+Revenue is weighted **lowest** on purpose - it is the most visible number and the most
+misleading alone. A test pins that: a steady small customer (6 orders, $3k, 25 days ago)
+must outrank a lapsed big spender (1 order, $30k, 300 days ago). They score 82 and 42.
+
+Monetary value uses a fixed ladder rather than a percentile against the customer base. A
+percentile is more respectable statistically and worse in practice: a customer's score would
+move because *somebody else* placed an order.
+
+### Reliability and cost
+
+All AI calls go through `services/aiClient.js`: a 10s timeout per attempt, three attempts,
+250ms backoff doubling with jitter, and one usage log line per call (feature, tokens each
+way, duration, attempts, outcome).
+
+Only retryable failures are retried. A `400` will fail identically every time; not retrying
+a `429` throws away a request that would likely have succeeded a moment later.
+
+The SDK's own `maxRetries` is set to **0**, because leaving it on inside a retry loop
+multiplies them - up to nine calls at nine times the cost for one request, with the logs
+showing one attempt.
+
+Both AI features **degrade rather than fail**: if the model is unavailable the summary is
+written from the same figures by a template, and the response says `mode: "fallback"` so the
+UI can label it honestly. A generated sentence and a templated one look identical on screen.
+
+---
+
 ## Order stock rules
 
 This is the only place in the app where one request mutates a second collection, so the
@@ -396,6 +610,61 @@ rules are worth stating plainly:
    second matches nothing. If a later line fails, earlier lines are rolled back.
 6. **Cancelling or deleting a completed order restores its stock.**
 7. **Items can only be edited while an order is pending.**
+
+---
+
+## Pagination and indexes
+
+### Two paging styles, chosen by the caller
+
+Every list endpoint accepts either. `?cursor=` present means cursor paging; absent means
+offset.
+
+| | offset (`?page=3`) | cursor (`?cursor=...`) |
+| --- | --- | --- |
+| page numbers, jump to page 7 | **yes** | no, only "next" |
+| total count | **yes** | no |
+| cost at depth | **O(n)** - `skip` walks and discards every skipped document | **O(log n)** with an index |
+| stable while rows are inserted | **no** | **yes** |
+
+The UI uses **offset**, because page numbers and "312 results" are what people expect and
+the collections a human pages by hand are small. **Cursor** exists for what breaks offset:
+the audit log (append-only, unbounded, written at the top) and any script walking a whole
+collection.
+
+Drift is the column that matters. Insert a record while someone is paging and everything
+shifts down by one, so the last row of page 1 reappears at the top of page 2 while another
+is skipped. Two tests sit side by side: one asserting cursor paging does not repeat a row in
+that situation, and one asserting **offset paging does** - documenting the trade-off rather
+than pretending it away.
+
+### Sorting is deterministic
+
+`getSort` appends `_id` to every sort. Without it, sorting by a non-unique field leaves
+MongoDB free to order tied documents differently between two queries - and ties are common,
+since any bulk import stamps many rows with the same `createdAt`. The symptom is silent: a
+record appears on two pages while another never appears, and the total still reads correctly.
+
+### Indexes
+
+Each index sits next to a comment naming the query it serves. Three findings came out of
+reviewing them:
+
+- **Two text indexes served nothing.** Nothing in the codebase issues a `$text` query - both
+  the lists and the AI keyword fallback build regexes. They could not have helped anyway:
+  `$text` matches whole words with stemming, so it finds "trading" from "trade" but not
+  "rach" inside "Karachi".
+- **`createdBy` had no index**, despite appearing in both scope filters. MongoDB cannot serve
+  an `$or` from one compound index - it evaluates each branch separately - so every sales
+  rep's list was scanning the collection.
+- **Adding `_id` to every sort invalidated the sorting indexes.** An index on
+  `{ createdAt: -1 }` does *not* satisfy a sort of `{ createdAt: -1, _id: -1 }`; MongoDB
+  falls back to an in-memory sort. Right answer, just slower. Every sorting index now carries
+  `_id` in a matching direction.
+
+The tests assert **usage, not existence** - `explain()` must show an `IXSCAN` with no
+in-memory `SORT` stage. Asserting an index exists passes just as happily when it is unused,
+which is how the third finding would have been missed.
 
 ---
 
@@ -554,28 +823,76 @@ it confirms the backend service is routed and whether it reached the database.
 
 ## Testing
 
+Three layers, each doing a job the others cannot.
+
 ```bash
-cd backend
-npm test              # 167 tests across 5 suites
-npm run test:watch
+cd backend   && npm test          # 442 tests, 19 suites
+cd frontend  && npm test          # 60 component tests, 7 files
+cd frontend  && npm run test:e2e  # 11 end-to-end tests (real stack, real browser)
 ```
 
-Tests run against **mongodb-memory-server** — a real MongoDB, downloaded once and run in
-memory. The suite never touches a configured database and leaves nothing behind. Each test
-file gets its own instance; collections are cleared between individual tests (rather than
-dropped) so unique indexes on `User.email` and `Product.sku` stay in place.
+Lint runs in both packages with `npm run lint`. All of it runs in CI on every push and pull
+request - see `.github/workflows/ci.yml`.
+
+### Backend - Jest + Supertest, 442 tests
+
+Run against **mongodb-memory-server**: a real MongoDB, downloaded once and run in memory.
+The suite never touches a configured database and leaves nothing behind.
+
+It runs as a **single-node replica set**, not a standalone server. That matters: standalone
+MongoDB does not support transactions at all, so the order tests would either fail or -
+worse - silently exercise the non-transactional fallback and report success. One test
+asserts the harness really is a replica set, for exactly that reason.
 
 | Suite | Covers |
 | --- | --- |
-| `auth.test.js` | Registration, the admin-bootstrap rule, role-in-body being ignored, bcrypt hashing, login, identical messages for wrong-password vs unknown-email, token rejection cases |
-| `roles.test.js` | The 403s — product writes by a rep, user management by manager and rep, cross-rep customer and order access, plus the positive cases that must keep working |
-| `customer.test.js` | CRUD, pagination, every filter, regex-metacharacter escaping in search, search combined with rep scope, `createdBy` immutability |
-| `order.test.js` | Server-side totals, price snapshotting, insufficient stock, duplicate-line merging, decrement on completion, **no double-decrement**, restore on cancel/delete, rollback on partial failure |
-| `aiSearch.test.js` | JSON extraction edge cases, the validator's allow-list (including injection attempts), the flagship query, role scoping through the AI path, every fallback trigger, and the fallback's tokenising / entity inference / ranking |
+| `auth.test.js` | Registration, the admin-bootstrap rule, role-in-body being ignored, bcrypt hashing, login, identical messages for wrong-password vs unknown-email |
+| `session.test.js` | Cookie flags (httpOnly, SameSite, Path), short access-token lifetime, refresh token absent from bodies and stored only hashed, rotation, replay rejection, family revocation on reuse, logout revoking a captured token |
+| `csrf.test.js` | The attack reproduced directly - session cookie, no header, must fail - plus every exemption |
+| `password.test.js` | The policy rules, registration and change-password enforcement, other sessions revoked on change, security headers |
+| `rateLimit.test.js` | Per-IP limits and the per-account lockout, including that a locked account refuses the *correct* password |
+| `roles.test.js` | The 403s, plus the positive cases that must keep working |
+| `customer.test.js` | CRUD, pagination, filters, regex escaping, search combined with rep scope |
+| `order.test.js` | Server-side totals, price snapshotting, stock rules, no double-decrement |
+| `orderTransaction.test.js` | Partial-write rollback, including a test that writes to two collections then throws from a point no compensation covers - the case only a real transaction survives |
+| `orderConcurrency.test.js` | Two simultaneous buyers of the last unit, a burst of ten against a stock of five, and idempotent creation |
+| `audit.test.js` | Every write logged, before/after values, actor snapshotting surviving account deletion, redaction, admin-only access |
+| `pagination.test.js` | Sort determinism, cursor traversal, and a pair of tests showing cursor paging does not repeat a row mid-insert **while offset paging does** |
+| `indexes.test.js` | `explain()` assertions that the real queries use the indexes, with no in-memory sort |
+| `aiSearch` / `aiJson` / `aiClient` / `customerSummary` / `leadScore` | Parsing, allow-list validation, retry policy, degradation, and the scoring formula |
+| `options.test.js` | The picker endpoints, including that they cannot be used to see another rep's customers |
 
-**The Anthropic API is never called from the test suite.** `translateQuery` is stubbed, so
-tests are fast, deterministic, and need no API key. What is tested is everything around the
-model — parsing, validation, scoping, and degradation.
+**The Anthropic API is never called from the test suite.** The service functions are
+stubbed, so tests are fast, deterministic, and need no API key. What is tested is everything
+around the model - parsing, validation, scoping, and degradation.
+
+### Frontend - Vitest + React Testing Library, 60 tests
+
+Login, protected routes, customer create/edit, order creation, AI search, the error
+boundary and the toast system.
+
+Tests find things **the way a user does** - by label, by role, by visible text - never by
+reaching into state or props. A test that asserts on internals breaks when the component is
+refactored and passes when the screen is broken.
+
+That approach found two real bugs: form labels that were not programmatically associated
+with their inputs (so screen readers announced every field as unlabelled), and a form that
+rendered blank when its record failed to load - where pressing Save would have written the
+blank fields over the record.
+
+### End-to-end - Playwright, 11 tests
+
+These start the **real backend** against a throwaway in-memory replica set, the real
+frontend, and a real browser. Nothing is mocked.
+
+That is deliberate. The riskiest work here - httpOnly cookies, the CSRF header, refresh
+rotation, the order transaction - is all interaction *between* browser and server. A
+component test mocks the server; an API test has no browser. Only this layer can confirm the
+cookie was accepted and the header actually sent.
+
+The headline test is login, search the picker, create an order, land on its detail page.
+Another verifies in a real browser that `document.cookie` cannot see the session and both
+web storages are empty.
 
 ---
 
@@ -626,19 +943,25 @@ the API would reject. The API enforces every rule independently.
 
 Things a production deployment would need, called out rather than left as surprises:
 
-- **The token is in `localStorage`**, which is readable by any script running on the page.
-  An httpOnly cookie plus CSRF protection would be the hardening step.
-- **No rate limiting.** `/auth/login` and `/api/ai-search` are the two that most want it —
-  the first against credential stuffing, the second because it costs money per request.
-- **No refresh tokens.** When a JWT expires the user is signed out and must log in again.
-- **Stock updates are not transactional.** Conditional updates plus explicit rollback make
-  overselling impossible, but a process crash mid-rollback could leave stock inconsistent.
-  MongoDB multi-document transactions would close that gap; they need a replica set, which
-  a single-node local install does not provide.
-- **The order form loads up to 100 customers and products** into its dropdowns. Beyond
-  that, they need to become searchable async selects.
-- **No frontend test suite.** The backend is covered; the React app is verified by a
-  production build and manual use.
+- **The per-IP rate-limit counters are in process memory.** On Vercel each function
+  instance has its own, so the effective limit is roughly (limit x warm instances) and
+  counters reset when an instance recycles. A shared store (Redis, or Mongo-backed) is the
+  fix. The defence that actually protects an account, the per-account lockout, *is* in
+  MongoDB and therefore shared across every instance.
+- **The password blocklist is a small in-repo list.** Production should check against a real
+  breach corpus, such as the Have I Been Pwned k-anonymity API.
+- **No "forgot password" flow.** No email provider is configured, so the reset surface is
+  `POST /auth/change-password`, which requires the current password. A one-time-link flow
+  would need an email service.
+- **Substring search cannot use an index.** An unanchored `/karachi/i` has no prefix to seek
+  to, so MongoDB scans the whole index range. Fine at this size; MongoDB Atlas Search is the
+  answer at scale.
+- **The audit log has no retention policy.** Deliberately no TTL, since logs that delete
+  themselves are useless on the day you need them, so the collection grows and pruning is a
+  decision for whoever runs the system.
+- **Schema indexes are built lazily**, on the app's first use of each collection, so the
+  first queries after a deploy can run unindexed. `syncIndexes()` as a deploy step would
+  make that deterministic.
 - **AI search reads one entity at a time.** A question spanning two entities ("customers
   and their overdue orders") returns whichever the model judged primary.
 - **The keyword fallback matches terms, not meaning.** It answers the identifying part of a
