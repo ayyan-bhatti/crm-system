@@ -7,6 +7,7 @@
 const app = require('./app');
 const env = require('./config/env');
 const { connectDB } = require('./config/db');
+const { syncIndexesOnBoot } = require('./config/indexes');
 
 async function start() {
   // env.js records configuration problems instead of exiting, because exiting
@@ -28,6 +29,16 @@ async function start() {
     console.error(`[db] MongoDB connection failed: ${err.message}`);
     process.exit(1);
   }
+
+  /*
+   * Bring the indexes in line with the schemas before serving.
+   *
+   * Mongoose otherwise builds them lazily on first use, which means the first
+   * queries after a deploy run unindexed — and, worse, that an index REMOVED
+   * from a schema is never dropped from the database. Awaited so the server
+   * does not start serving mid-build. It never throws; see config/indexes.js.
+   */
+  await syncIndexesOnBoot();
 
   const server = app.listen(env.port, () => {
     console.log(`[server] SimpleCRM API listening on http://localhost:${env.port} (${env.nodeEnv})`);

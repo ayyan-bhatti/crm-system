@@ -1,7 +1,7 @@
 const { api } = require('./helpers');
 const env = require('../src/config/env');
 const User = require('../src/models/User');
-const { loginLimiter, registerLimiter } = require('../src/middleware/rateLimit');
+const { RateLimitHit } = require('../src/middleware/mongoRateLimitStore');
 
 /**
  * Rate limiting and account lockout.
@@ -19,35 +19,30 @@ const CREDENTIALS = {
   password: 'Karachi-Ledger-72',
 };
 
-/**
- * The address supertest connects from. Resetting it between tests is necessary
- * because a limiter's counters live in the middleware instance, which is
- * created once when the module loads and therefore outlives an individual test.
+/*
+ * Counters now live in MongoDB rather than process memory, so resetting them is
+ * asynchronous and must be awaited — a fire-and-forget reset would race the
+ * first request of the next test and produce failures that look like flakes.
  */
-const TEST_IP = '::ffff:127.0.0.1';
-
-function resetLimiters() {
-  [loginLimiter, registerLimiter].forEach((limiter) => {
-    limiter.resetKey(TEST_IP);
-    limiter.resetKey('127.0.0.1');
-  });
+async function resetLimiters() {
+  await RateLimitHit.deleteMany({});
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   env.rateLimitEnabled = true;
-  resetLimiters();
+  await resetLimiters();
 });
 
-afterEach(() => {
+afterEach(async () => {
   env.rateLimitEnabled = false;
-  resetLimiters();
+  await resetLimiters();
 });
 
 describe('Per-IP rate limiting', () => {
   describe('POST /api/auth/login', () => {
     beforeEach(async () => {
       await api().post('/api/auth/register').send(CREDENTIALS);
-      resetLimiters(); // The registration above should not count against login.
+      await resetLimiters(); // The registration above should not count against login.
     });
 
     it('allows a normal number of attempts', async () => {
@@ -227,5 +222,94 @@ describe('Account lockout', () => {
 
     expect(res.body.data.user.failedLoginAttempts).toBeUndefined();
     expect(res.body.data.user.lockUntil).toBeUndefined();
+  });
+});
+
+
+describe('the counters are shared, not per-process', () => {
+  beforeEach(async () => {
+    env.rateLimitEnabled = true;
+    await RateLimitHit.deleteMany({});
+  });
+
+  afterEach(async () => {
+    env.rateLimitEnabled = false;
+    await RateLimitHit.deleteMany({});
+  });
+
+  /**
+   * The point of moving the store into MongoDB.
+   *
+   * With the in-memory default, every serverless instance kept its own Map, so
+   * the real limit was (configured limit x warm instances) and every counter
+   * vanished when an instance recycled. Persisting the count is what makes the
+   * limit mean what it says.
+   */
+  it('persists the count outside the process', async () => {
+    await api().post('/api/auth/login').send({ email: 'nobody@example.com', password: 'wrong' });
+
+    const stored = await RateLimitHit.find({});
+
+    expect(stored).toHaveLength(1);
+    expect(stored[0].count).toBe(1);
+    // A second instance reading this document sees the same count.
+    expect(stored[0].key).toMatch(/^login:/);
+  });
+
+  /**
+   * Each limiter keeps its own counters. Sharing one would make signing in
+   * consume the sign-up budget for the same address.
+   */
+  it('keeps each limiter’s counters separate', async () => {
+    await api().post('/api/auth/login').send({ email: 'nobody@example.com', password: 'wrong' });
+    await api()
+      .post('/api/auth/register')
+      .send({ name: 'A', email: 'a@example.com', password: 'Karachi-Ledger-72' });
+
+    const keys = (await RateLimitHit.find({})).map((row) => row.key.split(':')[0]).sort();
+
+    expect(keys).toEqual(['login', 'register']);
+  });
+
+  /** The window is bounded, so the collection cannot grow forever. */
+  it('stamps every counter with an expiry', async () => {
+    await api().post('/api/auth/login').send({ email: 'nobody@example.com', password: 'wrong' });
+
+    const [stored] = await RateLimitHit.find({});
+
+    expect(stored.expiresAt.getTime()).toBeGreaterThan(Date.now());
+  });
+
+  /**
+   * A window that has ended starts a fresh count rather than continuing the old
+   * one. This matters because Mongo's TTL collector runs about once a minute,
+   * so an expired document can still be present when the next request arrives.
+   */
+  it('starts a new window when the old one has expired', async () => {
+    await api().post('/api/auth/login').send({ email: 'nobody@example.com', password: 'wrong' });
+
+    // Simulate the window having ended without waiting for it.
+    await RateLimitHit.updateMany({}, { expiresAt: new Date(Date.now() - 1000) });
+
+    await api().post('/api/auth/login').send({ email: 'nobody@example.com', password: 'wrong' });
+
+    const [stored] = await RateLimitHit.find({});
+    expect(stored.count).toBe(1);
+  });
+
+  /**
+   * The increment is one atomic upsert, so a burst of simultaneous requests
+   * each count — a read-then-write store would let them all read the same value
+   * and all write value+1, hiding exactly the traffic this exists to catch.
+   */
+  it('counts every request in a simultaneous burst', async () => {
+    await Promise.all(
+      Array.from({ length: 8 }, () =>
+        api().post('/api/auth/login').send({ email: 'nobody@example.com', password: 'wrong' })
+      )
+    );
+
+    const [stored] = await RateLimitHit.find({});
+    expect(stored.count).toBe(8);
   });
 });

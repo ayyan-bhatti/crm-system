@@ -1,6 +1,7 @@
 const rateLimit = require('express-rate-limit');
 const { ipKeyGenerator } = require('express-rate-limit');
 const env = require('../config/env');
+const { MongoRateLimitStore } = require('./mongoRateLimitStore');
 
 /**
  * Per-IP rate limits for the endpoints that are worth attacking.
@@ -16,20 +17,21 @@ const env = require('../config/env');
  * *account* rather than the address, so a distributed attack on one password
  * still gets throttled.
  *
- * WHY IN-MEMORY, AND WHAT THAT COSTS
+ * WHERE THE COUNTERS LIVE
  *
- * express-rate-limit's default store is a Map in the process. On a long-running
- * server that is exactly right. On Vercel each function instance has its own
- * memory, so the real limit is roughly (configured limit x number of warm
- * instances), and counters reset when an instance is recycled. That is a real
- * weakness and worth stating plainly rather than pretending otherwise.
+ * In MongoDB, shared across every instance — see middleware/mongoRateLimitStore.
  *
- * The fix is a shared store (Redis, or a Mongo-backed store). It is not done
- * here because it adds an external dependency to a project that currently needs
- * only MongoDB, and because the defence that actually protects an account —
- * the lockout — is already stored in MongoDB and therefore shared across every
- * instance. The IP limiter is the cheap outer layer; the durable one sits
- * behind it.
+ * express-rate-limit's default is a Map inside the process. On a long-running
+ * server that is right. On Vercel it is close to useless: each function
+ * instance has its own memory, so the effective limit becomes (configured limit
+ * x warm instances) and every counter resets when an instance is recycled. A
+ * "10 per 15 minutes" login limit quietly becomes sixty.
+ *
+ * Redis is the usual answer; this project already runs MongoDB and nothing
+ * else, and a second datastore for one counter is a real operational cost. Mongo
+ * is slower than Redis for this, and "slower" means one indexed upsert on the
+ * few endpoints that are limited — not meaningful next to the bcrypt comparison
+ * on the same request.
  */
 
 /**
@@ -39,10 +41,16 @@ const env = require('../config/env');
  * so a throttled client parses the response exactly like any other failure
  * instead of hitting express-rate-limit's plain-text default.
  */
-function createLimiter({ windowMs, max, message, keyGenerator }) {
+function createLimiter({ name, windowMs, max, message, keyGenerator }) {
   return rateLimit({
     windowMs,
     max,
+    /*
+     * Each limiter gets its OWN named store. Sharing one would make the login
+     * and register limiters count against the same key for the same IP, so
+     * signing in would consume the sign-up budget.
+     */
+    store: new MongoRateLimitStore({ name }),
     // Defaults to the client IP when no key generator is given.
     ...(keyGenerator ? { keyGenerator } : {}),
     // Return rate-limit state in the standard RateLimit-* headers so a client
@@ -84,6 +92,7 @@ function createLimiter({ windowMs, max, message, keyGenerator }) {
  * complains.
  */
 const loginLimiter = createLimiter({
+  name: 'login',
   windowMs: 15 * 60 * 1000,
   max: 10,
   message:
@@ -98,6 +107,7 @@ const loginLimiter = createLimiter({
  * sixth account in an hour from one address.
  */
 const registerLimiter = createLimiter({
+  name: 'register',
   windowMs: 60 * 60 * 1000,
   max: 5,
   message: 'Too many accounts created from this address. Please try again later.',
@@ -111,6 +121,7 @@ const registerLimiter = createLimiter({
  * which makes it easy to forget to protect.
  */
 const passwordResetLimiter = createLimiter({
+  name: 'password-reset',
   windowMs: 60 * 60 * 1000,
   max: 5,
   message: 'Too many password change attempts. Please try again later.',
@@ -129,6 +140,7 @@ const passwordResetLimiter = createLimiter({
  * sharing an address would otherwise share a budget.
  */
 const aiSearchLimiter = createLimiter({
+  name: 'ai-ip',
   windowMs: 5 * 60 * 1000,
   max: 20,
   message: 'Too many AI searches. Please wait a moment before searching again.',
@@ -154,6 +166,7 @@ const aiSearchLimiter = createLimiter({
  * searches in five minutes than an unauthenticated address should ever get.
  */
 const aiPerUserLimiter = createLimiter({
+  name: 'ai-user',
   windowMs: 5 * 60 * 1000,
   max: 30,
   message:
