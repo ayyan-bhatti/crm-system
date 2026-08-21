@@ -1,7 +1,7 @@
 {
   "name": "simplecrm-backend",
   "version": "1.0.0",
-  "description": "SimpleCRM backend — Express + MongoDB REST API with JWT auth and AI-assisted search",
+  "description": "SimpleCRM backend \u2014 Express + MongoDB REST API with JWT auth and AI-assisted search",
   "main": "src/server.js",
   "type": "commonjs",
   "scripts": {
@@ -43,5 +43,8 @@
       "<rootDir>/tests/setup.js"
     ],
     "testTimeout": 30000
+  },
+  "engines": {
+    "node": ">=20.19.0"
   }
 }

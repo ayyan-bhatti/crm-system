@@ -1181,6 +1181,54 @@ a health check that fails for the same reason as everything else tells you nothi
 `.vercelignore` keeps `backend/tests` out of the bundle, since they pull in
 `mongodb-memory-server`, which downloads a real MongoDB binary.
 
+### Environment variables added since the first deploy
+
+All of these are **optional with safe defaults**, so an existing deployment keeps working
+without setting any of them. Add them when you want the behaviour they describe.
+
+| Variable | Set it when |
+| --- | --- |
+| `ACCESS_TOKEN_TTL` / `REFRESH_TOKEN_TTL` | You want session lifetimes other than 15m / 7d |
+| `COOKIE_SAME_SITE` | The API and frontend end up on genuinely different sites (`none` needs HTTPS) |
+| `APP_URL` | `CLIENT_ORIGIN` is a comma-separated list — password-reset and invite links need exactly one origin |
+| `MAIL_TRANSPORT` / `MAIL_WEBHOOK_URL` / `MAIL_FROM` | **Recommended in production.** The default `console` transport only writes reset and invite links to the log |
+| `LOG_LEVEL` | Default is `info` in production |
+| `AUDIT_RETENTION_DAYS` | You want audit entries to become eligible for pruning. Unset means keep forever |
+| `BREACH_CHECK_DISABLED` | Outbound HTTPS is firewalled and the Have I Been Pwned lookup cannot reach the internet |
+| `AI_CACHE_DISABLED` / `AI_MAX_PROMPT_CHARS` | You want to turn off search caching or change the 8000-character prompt ceiling |
+
+`JWT_EXPIRES_IN` is **no longer read** — `ACCESS_TOKEN_TTL` replaced it. Leaving it set is
+harmless; it simply does nothing.
+
+### Node version
+
+Both `package.json` files declare `engines.node >= 20.19.0`, which Vercel reads to pick the
+runtime. The floor comes from two places: Vite 7 requires `^20.19.0 || >=22.12.0` to build the
+frontend, and the backend uses global `fetch` (Node 18+) for the breach check and the mail
+webhook. Declaring it means the platform is not choosing a version by guess.
+
+### Things that deliberately do NOT run on serverless
+
+- **Index syncing.** `syncIndexes()` runs at boot on a long-running server, and is skipped on
+  a serverless instance — cold starts are frequent, and paying for an index check on each one
+  would add latency forever to do work that only needs doing once per deploy. Run
+  `npm run indexes` as a deploy step instead.
+- **The pino transport.** Pretty-printing spawns a worker thread, which is the classic way
+  logging breaks on serverless. In production the transport is `undefined` and pino writes
+  JSON straight to stdout, which is exactly what Vercel's log collector wants.
+
+### After deploying
+
+```bash
+curl https://<your-app>/api/health     # 200 = configured and connected
+cd backend && npm run indexes          # once per deploy, against the production MONGO_URI
+```
+
+`/api/health` reports which environment variables are missing by name, so a misconfiguration
+is readable over HTTP rather than being a blind 500.
+
+---
+
 ### Deploy
 
 ```bash
