@@ -1,9 +1,9 @@
 const crypto = require('crypto');
 const InviteToken = require('../models/InviteToken');
 const User = require('../models/User');
-const env = require('../config/env');
 const ms = require('../utils/ms');
 const mailer = require('./mailer');
+const { publicUrl } = require('../utils/publicUrl');
 const ApiError = require('../utils/ApiError');
 const { USER_STATUS } = require('../config/constants');
 
@@ -39,9 +39,14 @@ function hashToken(token) {
 /**
  * Invite someone, or re-invite a pending user.
  *
- * @returns {Promise<{ user: object, resent: boolean }>}
+ * `req` is used only to work out which origin the invite link should point at
+ * when APP_URL is not configured — without it the link falls back to
+ * localhost, which is a working token at a URL the recipient cannot open. See
+ * utils/publicUrl.
+ *
+ * @returns {Promise<{ user: object, resent: boolean, emailed: boolean, link: string }>}
  */
-async function inviteUser({ name, email, role }, invitedBy) {
+async function inviteUser({ name, email, role }, invitedBy, req) {
   const normalised = String(email || '').toLowerCase().trim();
 
   if (!name || !normalised) {
@@ -96,7 +101,7 @@ async function inviteUser({ name, email, role }, invitedBy) {
     expiresAt: new Date(Date.now() + ms(TOKEN_TTL)),
   });
 
-  const link = `${env.appUrl}/accept-invite?token=${token}`;
+  const link = publicUrl(req, `/accept-invite?token=${token}`);
 
   const delivery = await mailer.sendMail({
     to: user.email,

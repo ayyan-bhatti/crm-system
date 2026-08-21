@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const { requestOrigin } = require('./utils/publicUrl');
 const cookieParser = require('cookie-parser');
 const helmet = require('helmet');
 const mongoose = require('mongoose');
@@ -141,29 +142,67 @@ app.use(
  * It still matters for: local development (Vite on :5173 → API on :5000), and
  * any separate client. A comma-separated list is accepted so preview
  * deployments can be allowed alongside production.
+ *
+ * When CLIENT_ORIGIN is not set at all, an origin matching the host the request
+ * arrived on is also allowed — see the note inside. Without that, a deployment
+ * whose frontend is on a different origin from the API is refused by the
+ * localhost default, and the page sees only "Network Error".
  */
 const allowedOrigins = env.clientOrigin
   .split(',')
   .map((origin) => origin.trim())
   .filter(Boolean);
 
+/**
+ * The options-DELEGATE form of `cors`, rather than a plain options object.
+ *
+ * The `origin` callback in the object form is only handed the origin string,
+ * and the check below needs the request as well — to compare the caller's
+ * origin against the host this request actually arrived on. The delegate form
+ * is the supported way to see it.
+ */
 app.use(
-  cors({
-    origin(origin, callback) {
-      // No Origin header = same-origin request, curl, or a server-to-server
-      // call. Nothing to check.
-      if (!origin) return callback(null, true);
-      if (allowedOrigins.includes(origin)) return callback(null, true);
+  cors((req, done) => {
+    const origin = req.headers.origin;
 
-      // Log rather than fail silently — a blocked origin is otherwise only
-      // visible in the browser console, never in the server logs.
-      log.warn(
-        { origin, allowedOrigins },
-        'blocked a cross-origin request — set CLIENT_ORIGIN if this origin should be permitted'
-      );
-      return callback(null, false);
-    },
-    credentials: true,
+    /** Answer the way the object form would have. */
+    const allow = (permitted) => done(null, { origin: permitted, credentials: true });
+
+    // No Origin header = same-origin request, curl, or a server-to-server
+    // call. Nothing to check.
+    if (!origin) return allow(true);
+    if (allowedOrigins.includes(origin)) return allow(true);
+
+    /*
+     * NOT CONFIGURED, AND THE CALLER IS THIS DEPLOYMENT ITSELF.
+     *
+     * CLIENT_ORIGIN defaults to http://localhost:5173. On a deployment where
+     * nobody set it, that default is the entire allow-list, so a browser on
+     * the real domain is refused — and a CORS refusal is invisible to the
+     * page that made the request. Axios reports the literal string "Network
+     * Error" with no status and no body, which is indistinguishable from the
+     * server being down and tells the user nothing.
+     *
+     * Allowing an origin that matches the host the request arrived on fixes
+     * that without widening anything: it is the same origin the browser would
+     * have reached us on, so permitting it grants no access that a
+     * same-origin request did not already have. A genuinely foreign origin
+     * still does not match, and is still refused.
+     *
+     * Only when unconfigured. An explicit CLIENT_ORIGIN is an allow-list the
+     * operator wrote, and is honoured exactly as written.
+     */
+    if (!process.env.CLIENT_ORIGIN && origin === requestOrigin(req)) {
+      return allow(true);
+    }
+
+    // Log rather than fail silently — a blocked origin is otherwise only
+    // visible in the browser console, never in the server logs.
+    log.warn(
+      { origin, allowedOrigins },
+      'blocked a cross-origin request — set CLIENT_ORIGIN if this origin should be permitted'
+    );
+    return allow(false);
   })
 );
 

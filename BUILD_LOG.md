@@ -1929,4 +1929,67 @@ runs before the controller — and a second test covers the closed case it used 
 
 ---
 
-**Final totals: 616 backend + 94 frontend + 11 end-to-end**, lint clean on both packages.
+## Two bug reports, one root cause
+
+Reported as two things: "network error once I logged in as a sales rep", and "the token or
+link it generates for invite user isn't working". They turned out to be the same missing
+configuration, surfacing in two places that look nothing alike.
+
+`CLIENT_ORIGIN` defaults to `http://localhost:5173`, and `APP_URL` falls back to it. On a
+laptop both are right. On a deployment where neither was set:
+
+**The invite link pointed at localhost.** Confirmed by reproducing it against the real app —
+`http://localhost:5173/accept-invite?token=...`. The token was perfectly valid; I redeemed it
+in the repro. The URL was simply somewhere the recipient could not go, which is why it
+presented as "the link doesn't work" rather than as a missing environment variable.
+
+**The CORS allow-list was localhost too**, so a browser on the real domain was refused. This
+is the nastier of the two, because a CORS refusal is invisible to the page that made the
+request by design: axios gets no status and no body, and reports the literal string
+`Network Error`. Identical to what it says when the server is switched off.
+
+### The fix, in one idea
+
+Both now fall back to **the origin the request actually arrived on** — `x-forwarded-host` and
+`x-forwarded-proto`, which Vercel sets from the hostname it routed. A deployment nobody
+configured produces working links and answers its own browser, instead of failing in two
+directions at once.
+
+Explicit configuration still wins outright, and that ordering is the security-relevant part.
+Deriving a link from a request is the classic host-header injection vector: forge a Host,
+request a reset for someone else's address, and the email in their inbox carries your domain.
+Three things make this the right default anyway:
+
+- It only applies when nothing is configured. Setting `APP_URL` disables the path completely.
+- The alternative is not a safer link, it is a link to localhost — broken for 100% of
+  recipients. A configuration mistake should degrade to something that works.
+- Behind a proxy the forwarded host comes from the platform, not from the client.
+
+The host value is validated rather than sanitised before it goes into a URL: anything outside
+the character set of a hostname and port is refused. A header with a slash or a quote in it
+is not a hostname that needs rescuing.
+
+For CORS the check deliberately uses a *different* function — `requestOrigin`, not
+`publicOrigin`. It is asking "did this request arrive on the origin the caller claims to be
+from", which has nothing to do with whether `APP_URL` is set; folding in that fallback would
+have made the answer depend on unrelated configuration. Writing the test is what surfaced
+that, because the test had to reach past one setting to exercise the other.
+
+The `cors` middleware also had to move from its options-object form to the options-**delegate**
+form, because the object form's `origin` callback is handed only the origin string and this
+check needs the request.
+
+### And the message the user actually saw
+
+`errorMessage` returned axios's `Network Error` verbatim, which is the least useful string
+available: it names neither cause. It now says the server could not be reached, gives both
+possibilities, and points at the browser console — where the real CORS message is logged and
+nowhere else.
+
+**20 new backend tests** across two new files. `cors.test.js` is the first coverage this
+middleware has had, which is the honest reason a localhost default survived to production:
+nothing asserted what happened to a browser on any other origin.
+
+---
+
+**Final totals: 636 backend + 94 frontend + 11 end-to-end**, lint clean on both packages.

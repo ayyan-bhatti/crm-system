@@ -170,7 +170,8 @@ const inviteUserHandler = asyncHandler(async (req, res) => {
 
   const { user, resent, emailed, link } = await inviteService.inviteUser(
     { name, email, role: role || ROLES.SALES_REP },
-    req.user
+    req.user,
+    req
   );
 
   await recordAudit(req, {

@@ -109,6 +109,20 @@ Once signed in, try the search box on the dashboard:
 | `MAIL_WEBHOOK_URL` | no | — | Required when `MAIL_TRANSPORT=webhook` |
 | `MAIL_WEBHOOK_AUTH` | no | — | Sent verbatim as the `Authorization` header on that POST. Needed by every hosted provider |
 | `ALLOW_PUBLIC_SIGNUP` | no | `true` | `false` closes `/register` to everyone but the first account, so people arrive by invitation only |
+
+**A note on `APP_URL` and `CLIENT_ORIGIN`.** Neither is required, but leaving both unset used
+to break a deployment in two ways that looked unrelated:
+
+- Invite and password-reset links fell back to `http://localhost:5173`, so the token was
+  valid and the URL pointed at the recipient's own machine.
+- The CORS allow-list fell back to the same localhost default, so a browser on the real
+  domain was refused. A CORS refusal is invisible to the page, and axios reports it as the
+  literal string `Network Error` — no status, no body, nothing to act on.
+
+Both now fall back to **the origin the request actually arrived on**, so an unconfigured
+deployment works. Setting `APP_URL` is still the right thing for anything sending real mail:
+an explicitly configured origin cannot be influenced by a request header, which is what makes
+a deployment immune to host-header injection in reset emails. See `src/utils/publicUrl.js`.
 | `MAIL_FROM` | no | `SimpleCRM <no-reply@simplecrm.local>` | Sender shown on outgoing mail |
 | `LOG_LEVEL` | no | `info` in production, `debug` otherwise | `fatal` · `error` · `warn` · `info` · `debug` · `trace` |
 | `AI_CACHE_DISABLED` | no | — | `true` turns off the 5-minute AI search response cache |
@@ -1301,7 +1315,17 @@ on every write until this command removes them. Expect output like:
 [indexes] Synced 10 collections with their schemas.
 ```
 
-**2. Configure a mail transport.** Until you do, password-reset and invite links are only
+**2. Set `APP_URL` to your deployment's URL** (optional but recommended):
+
+```
+APP_URL=https://your-app.vercel.app
+```
+
+Links now fall back to the request's own origin, so invitations work without it. Setting it
+explicitly means the origin in an outgoing email cannot be influenced by a request header at
+all, which matters once real password-reset mail is going to real users.
+
+**3. Configure a mail transport.** Until you do, password-reset and invite links are only
 written to the log — which is a working link sitting in your log output, readable by anyone
 with log access. Set all four (see [Forgot password](#forgot-password) for why the auth header
 matters):

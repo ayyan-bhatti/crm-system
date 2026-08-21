@@ -1,7 +1,6 @@
 const crypto = require('crypto');
 const PasswordResetToken = require('../models/PasswordResetToken');
 const User = require('../models/User');
-const env = require('../config/env');
 const ms = require('../utils/ms');
 /*
  * Imported as a module object, not destructured.
@@ -13,6 +12,7 @@ const ms = require('../utils/ms');
  * reason.
  */
 const mailer = require('./mailer');
+const { publicUrl } = require('../utils/publicUrl');
 const { revokeAllForUser } = require('./sessionService');
 
 /**
@@ -102,7 +102,7 @@ async function requestReset(email, req) {
     requestedUserAgent: String(req?.get?.('user-agent') || '').slice(0, 255),
   });
 
-  const link = `${env.appUrl}/reset-password?token=${token}`;
+  const link = publicUrl(req, `/reset-password?token=${token}`);
 
   await mailer.sendMail({
     to: user.email,

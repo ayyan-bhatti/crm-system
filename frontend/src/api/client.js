@@ -164,7 +164,31 @@ export function errorMessage(error, fallback = 'Something went wrong') {
     if (parts.length) return parts.join(' ');
   }
 
-  return data?.message || error?.message || fallback;
+  if (data?.message) return data.message;
+
+  /*
+   * NO RESPONSE AT ALL.
+   *
+   * axios reports this as the literal string "Network Error", which is the
+   * least useful thing it could say: it is what the browser hands over when a
+   * request is blocked by CORS, and also when the server is genuinely
+   * unreachable. Showing it verbatim told users their app was "showing network
+   * error" with nothing to act on — and the actual cause was a CORS refusal,
+   * which is invisible to the page by design.
+   *
+   * So the message names the possibilities instead of repeating the browser's
+   * word for "something happened out there". The console note is for whoever
+   * is debugging it; the browser logs the real CORS message there and nowhere
+   * else.
+   */
+  if (error?.request && !error?.response) {
+    return (
+      'Could not reach the server. It may be offline, or the browser may have blocked ' +
+      'the response — check the browser console for a CORS message.'
+    );
+  }
+
+  return error?.message || fallback;
 }
 
 export default client;

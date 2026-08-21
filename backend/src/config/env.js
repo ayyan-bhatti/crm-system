@@ -99,6 +99,16 @@ const env = {
     .trim()
     .replace(/\/$/, ''),
 
+  /*
+   * Whether the value above came from configuration or from the fallback.
+   *
+   * utils/publicUrl needs to tell those apart. An explicitly configured origin
+   * is authoritative and is used for every link; the localhost fallback is a
+   * developer default that must NOT be baked into an invitation sent from a
+   * deployment, because it points the recipient at their own machine.
+   */
+  appUrlConfigured: Boolean(process.env.APP_URL || process.env.CLIENT_ORIGIN),
+
   /** console (default) | webhook — see services/mailer.js. */
   mailTransport: process.env.MAIL_TRANSPORT || 'console',
   mailWebhookUrl: process.env.MAIL_WEBHOOK_URL || '',
