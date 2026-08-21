@@ -1,5 +1,8 @@
 const crypto = require('crypto');
 const env = require('../config/env');
+const { componentLogger } = require('../config/logger');
+
+const log = componentLogger('password');
 
 /**
  * Check a password against the Have I Been Pwned breach corpus.
@@ -113,11 +116,7 @@ async function checkBreached(password) {
   } catch (err) {
     // Timeout, DNS failure, firewall. Log once and let the password through on
     // the local rules — see the fail-open note.
-    if (!env.isTest) {
-      console.warn(
-        `[password] Breach check unavailable (${err.message}). Falling back to the local rules.`
-      );
-    }
+    log.warn({ err }, 'breach check unavailable — falling back to the local rules');
     return { breached: false, count: 0, checked: false };
   }
 }

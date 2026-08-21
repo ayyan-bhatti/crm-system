@@ -2,6 +2,9 @@ const crypto = require('crypto');
 const IdempotencyKey = require('../models/IdempotencyKey');
 const ApiError = require('../utils/ApiError');
 const asyncHandler = require('../utils/asyncHandler');
+const { componentLogger } = require('../config/logger');
+
+const log = componentLogger('idempotency');
 
 /**
  * Make a write endpoint safe to retry.
@@ -140,7 +143,7 @@ const idempotency = asyncHandler(async (req, res, next) => {
         IdempotencyKey.deleteOne({ _id: reservation._id });
 
     persist.catch((err) => {
-      console.error('[idempotency] Could not record the outcome for key %s: %s', key, err.message);
+      log.error({ err, key }, 'could not record the outcome of an idempotent request');
     });
   });
 

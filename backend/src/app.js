@@ -1,6 +1,5 @@
 const express = require('express');
 const cors = require('cors');
-const morgan = require('morgan');
 const cookieParser = require('cookie-parser');
 const helmet = require('helmet');
 const mongoose = require('mongoose');
@@ -10,6 +9,10 @@ const { connectDB } = require('./config/db');
 const { notFound, errorHandler } = require('./middleware/errorHandler');
 const ensureDb = require('./middleware/ensureDb');
 const { issueCsrfToken, verifyCsrf } = require('./middleware/csrf');
+const { requestLogger } = require('./middleware/requestLogger');
+const { componentLogger } = require('./config/logger');
+
+const log = componentLogger('http');
 
 const authRoutes = require('./routes/authRoutes');
 const userRoutes = require('./routes/userRoutes');
@@ -19,6 +22,7 @@ const orderRoutes = require('./routes/orderRoutes');
 const dashboardRoutes = require('./routes/dashboardRoutes');
 const aiSearchRoutes = require('./routes/aiSearchRoutes');
 const auditRoutes = require('./routes/auditRoutes');
+const internalRoutes = require('./routes/internalRoutes');
 
 /**
  * The Express application.
@@ -50,6 +54,16 @@ const app = express();
  * cannot spoof its own address by sending its own X-Forwarded-For header.
  */
 app.set('trust proxy', 1);
+
+/*
+ * Request id + structured request log, FIRST.
+ *
+ * Before helmet, CORS and body parsing, so that a request rejected by any of
+ * them still gets an id and still appears in the log. A request that fails at
+ * the CORS layer and leaves no trace is precisely the one somebody will need to
+ * find later.
+ */
+app.use(requestLogger);
 
 // --- Global middleware -----------------------------------------------------
 
@@ -143,9 +157,9 @@ app.use(
 
       // Log rather than fail silently — a blocked origin is otherwise only
       // visible in the browser console, never in the server logs.
-      console.warn(
-        `[cors] Blocked origin "${origin}". Allowed: ${allowedOrigins.join(', ') || '(none)'}. ` +
-          'Set CLIENT_ORIGIN if this origin should be permitted.'
+      log.warn(
+        { origin, allowedOrigins },
+        'blocked a cross-origin request — set CLIENT_ORIGIN if this origin should be permitted'
       );
       return callback(null, false);
     },
@@ -180,10 +194,13 @@ app.use(cookieParser());
 app.use(issueCsrfToken);
 app.use(verifyCsrf);
 
-// Request logging — noise-free during tests.
-if (!env.isTest) {
-  app.use(morgan(env.isProduction ? 'combined' : 'dev'));
-}
+/*
+ * morgan is gone: middleware/requestLogger replaces it.
+ *
+ * They overlap, and morgan's line is prose — it cannot carry the request id,
+ * the user, or the route pattern, and nothing can filter it. Running both would
+ * mean two lines per request saying the same thing in two formats.
+ */
 
 // --- Routes ----------------------------------------------------------------
 
@@ -249,9 +266,9 @@ app.get('/api/health', async (req, res) => {
 app.use((req, res, next) => {
   if (env.isConfigValid) return next();
 
-  console.error(
-    `[config] Refusing ${req.method} ${req.originalUrl} — server is misconfigured: ` +
-      env.configErrors.join(' | ')
+  log.error(
+    { req: { method: req.method, url: req.originalUrl }, configErrors: env.configErrors },
+    'refusing request — the server is misconfigured'
   );
 
   return res.status(500).json({
@@ -278,6 +295,7 @@ app.use('/api/orders', orderRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/ai-search', aiSearchRoutes);
 app.use('/api/audit-logs', auditRoutes);
+app.use('/api/internal', internalRoutes);
 
 // --- Error handling --------------------------------------------------------
 // Registered last so they see errors from every route above.

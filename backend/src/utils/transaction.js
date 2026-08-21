@@ -1,4 +1,7 @@
 const mongoose = require('mongoose');
+const { componentLogger } = require('../config/logger');
+
+const log = componentLogger('db');
 
 /**
  * Run a unit of work inside a MongoDB transaction.
@@ -109,11 +112,11 @@ async function withTransaction(work) {
   } catch (err) {
     if (isUnsupportedError(err)) {
       if (transactionsSupported === null) {
-        console.warn(
-          '[db] This MongoDB deployment does not support transactions (it is a standalone ' +
-            'server, not a replica set). Order creation will still work, but a crash ' +
-            'mid-write could leave stock and orders out of step. Use MongoDB Atlas, or ' +
-            'start a local replica set, to get the guarantee.'
+        log.warn(
+          'this MongoDB deployment does not support transactions (standalone, not a ' +
+            'replica set). Order creation still works, but a crash mid-write could leave ' +
+            'stock and orders out of step. Use MongoDB Atlas, or a local replica set, ' +
+            'for the guarantee.'
         );
       }
       transactionsSupported = false;

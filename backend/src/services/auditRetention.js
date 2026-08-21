@@ -1,5 +1,8 @@
 const AuditLog = require('../models/AuditLog');
 const env = require('../config/env');
+const { componentLogger } = require('../config/logger');
+
+const log = componentLogger('audit');
 
 /**
  * Pruning the audit trail, on an explicit policy.
@@ -73,12 +76,10 @@ async function pruneAuditLog(retentionDays = env.auditRetentionDays) {
    * deletion policy, so the evidence that entries were removed would eventually
    * be removed too. The application log is outside the thing being pruned.
    */
-  if (!env.isTest) {
-    console.log(
-      `[audit] Pruned ${deletedCount} entries older than ${retentionDays} days ` +
-        `(before ${cutoff.toISOString()}).`
-    );
-  }
+  log.info(
+    { deleted: deletedCount, retentionDays, cutoff },
+    'pruned audit entries past the retention period'
+  );
 
   return { deleted: deletedCount, cutoff, enabled: true };
 }

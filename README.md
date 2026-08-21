@@ -21,6 +21,7 @@ Mongoose · JWT auth with bcrypt · Jest + Supertest with an in-memory MongoDB.
 - [Order stock rules](#order-stock-rules)
 - [Pagination and indexes](#pagination-and-indexes)
 - [Design system](#design-system)
+- [Observability](#observability)
 - [Deploying to Vercel](#deploying-to-vercel)
 - [Testing](#testing)
 - [Design decisions](#design-decisions)
@@ -107,6 +108,7 @@ Once signed in, try the search box on the dashboard:
 | `MAIL_TRANSPORT` | no | `console` | `console` logs the message; `webhook` POSTs it to `MAIL_WEBHOOK_URL` |
 | `MAIL_WEBHOOK_URL` | no | — | Required when `MAIL_TRANSPORT=webhook` |
 | `MAIL_FROM` | no | `SimpleCRM <no-reply@simplecrm.local>` | Sender shown on outgoing mail |
+| `LOG_LEVEL` | no | `info` in production, `debug` otherwise | `fatal` · `error` · `warn` · `info` · `debug` · `trace` |
 | `ANTHROPIC_API_KEY` | no | — | Blank ⇒ AI search falls back to keyword search |
 | `ANTHROPIC_MODEL` | no | `claude-sonnet-4-6` | Model used to translate queries |
 
@@ -877,6 +879,126 @@ Which form carries which job:
 lazy-loaded at the route boundary. Without that, every visitor downloads the charting
 library before they can type a password. The initial bundle is ~302 kB (99 kB gzipped);
 the 419 kB chart chunk arrives only when the dashboard does.
+
+## Observability
+
+### Structured logging
+
+Every log line is a JSON object with a level, an ISO timestamp, a **request id**, and
+whatever context the event has. `console.log('[db] connected to ' + host)` is readable by a
+person watching a terminal and almost useless to anything else — and on a hosted platform
+nobody watches a terminal. Logs are searched, filtered and alerted on, and that needs fields
+rather than sentences.
+
+```json
+{"level":"info","time":"2026-08-21T09:14:22.118Z","component":"http",
+ "requestId":"c1f4…","userId":"652f…","req":{"method":"POST","route":"/api/orders"},
+ "res":{"statusCode":201},"durationMs":84.2,"msg":"request completed"}
+```
+
+Locally it prints readable prose via `pino-pretty` when that is installed; its absence is
+not fatal, because a missing dev dependency should never stop the server.
+
+**Three places still use `console` on purpose:**
+
+- `config/env.js` — `config/logger` reads it to decide its level, so requiring the logger
+  there would be a circular dependency, and the failure would be the worst kind: the config
+  error you are trying to report becomes an unrelated module-load crash.
+- the CLI scripts (`seed`, `syncIndexes`, `pruneAuditLog`) — the output is prose for a human
+  at a terminal, not records for a log platform.
+- `middleware/requestLogger` and the error handler log *through* pino, not console.
+
+Secrets are redacted centrally (`password`, `token`, `authorization`, `cookie` and friends)
+rather than relying on every call site to remember. Logs are retained, shipped to third
+parties and read by people who are not the user, which makes them the wrong place for a
+credential.
+
+**The logger is silent under `NODE_ENV=test`.** Not laziness: the suite deliberately
+exercises failure paths — expired tokens, refused logins, rolled-back transactions — and
+hundreds of lines of *expected* errors make a real failure impossible to spot.
+
+### Request ids, and tracing a user's report
+
+Every response carries `X-Request-Id`, and **every error response repeats it in the body**:
+
+```json
+{ "success": false, "message": "Order not found", "requestId": "c1f4a9b2-…" }
+```
+
+That is what makes the logging useful to a real person. A user says *"it failed and showed
+me c1f4a9b2"* and that string finds every line produced while handling their request, across
+every module. Without it, support starts from a timestamp and a guess.
+
+An **incoming** `x-request-id` (or Vercel's `x-vercel-id`) is **forwarded, not replaced** —
+the platform uses it in its own logs, and generating a fresh one would break the chain
+exactly where correlating across systems matters. It is validated first, because a header is
+user input and an unvalidated one ends up in every log line: that is how log injection works.
+
+The id reaches code five calls deep without being passed as an argument, via
+`AsyncLocalStorage`. Threading `req` through every service function purely so it could log
+would distort every signature in the codebase for one cross-cutting concern.
+
+### Viewing logs on Vercel
+
+Structured JSON is what Vercel's log viewer parses, so the fields above are directly
+filterable.
+
+**In the dashboard:** *Project → Logs*, then filter. Useful queries:
+
+| goal | filter |
+| --- | --- |
+| one user's report | `c1f4a9b2` (paste the request id straight in) |
+| everything failing | `level=error` |
+| one endpoint | `route=/api/orders` |
+| one subsystem | `component=ai` (or `auth`, `db`, `mail`, `audit`) |
+| slow requests | `durationMs>1000` |
+
+**From the CLI:**
+
+```bash
+vercel logs <deployment-url> --follow          # live tail
+vercel logs <deployment-url> | grep c1f4a9b2   # one request, end to end
+```
+
+Log **drains** (*Project → Settings → Log Drains*) forward the same JSON to Datadog, Better
+Stack or an HTTP endpoint if it needs to outlive Vercel's retention window — no code change,
+because the output is already structured.
+
+### Metrics
+
+`GET /api/internal/metrics` — **admin only** — returns request counts, error rates and
+latency buckets per route.
+
+```json
+{ "scope": "this server instance only", "instanceId": "a1b2c3d4",
+  "totals": { "requests": 1284, "serverErrors": 3, "errorRate": 0.0023 },
+  "routes": [ { "method": "GET", "route": "/api/customers",
+                "count": 412, "errorRate": 0,
+                "latencyMs": { "mean": 31.4, "max": 210, "buckets": { "50": 380, "100": 28 } } } ] }
+```
+
+Three decisions worth knowing:
+
+- **Admin, not an IP allow-list.** An allow-list is the usual answer and does not work on
+  serverless: the app sees the edge network's addresses, not a stable office IP, so the list
+  would be either wrong or meaninglessly broad. The app already has a strong, well-tested
+  notion of "administrator".
+- **In memory, unlike the rate limiter.** The two look similar and are not. A rate limiter
+  is a *control* — wrong counters mean a wrong limit, which is why it moved to MongoDB.
+  Metrics are an *observation*, and a per-instance view is still a true sample. Writing to
+  the database on every request to improve it would mean the measurement changing the thing
+  measured. **The response says so itself** via `scope` and `instanceId`, rather than
+  letting a reader mistake one instance's numbers for the deployment's.
+- **Latency in buckets, and route labels capped.** Keeping every raw duration would grow
+  without bound, and the questions people actually ask ("how many took over a second?") are
+  bucket questions. The label cap stops a scanner hitting a thousand unmatched URLs from
+  growing the map until the process runs out of memory — a cardinality explosion takes out
+  the app it was meant to be observing.
+
+The shape is deliberately close to what a Prometheus exporter emits, so pointing this at a
+real monitoring system later is a formatter rather than re-instrumenting the app.
+
+---
 
 ## Deploying to Vercel
 

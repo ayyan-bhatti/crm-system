@@ -3,6 +3,7 @@ const ApiError = require('../utils/ApiError');
 const asyncHandler = require('../utils/asyncHandler');
 const { verifyToken } = require('../utils/token');
 const { ACCESS_COOKIE } = require('../utils/cookies');
+const { currentContext } = require('../config/logger');
 
 /**
  * Authentication middleware.
@@ -85,6 +86,18 @@ const protect = asyncHandler(async (req, res, next) => {
 
   req.user = user;
   req.authVia = authVia;
+
+  /*
+   * Every log line for the rest of this request now carries who made it.
+   *
+   * Set here rather than in the request logger because that runs before
+   * authentication — this is the first point at which the caller is known, and
+   * mutating the existing context means lines already written keep their id
+   * while everything after also gets the user.
+   */
+  const context = currentContext();
+  if (context) context.userId = user._id.toString();
+
   return next();
 });
 

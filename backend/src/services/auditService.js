@@ -1,4 +1,7 @@
 const AuditLog = require('../models/AuditLog');
+const { componentLogger } = require('../config/logger');
+
+const log = componentLogger('audit');
 
 /**
  * Writing audit entries.
@@ -140,13 +143,7 @@ async function recordAudit(req, { action, entity, entityId, label, before, after
   } catch (err) {
     // A gap in the trail is bad; refusing the user's write because of one is
     // worse. Logged loudly so the gap is at least known about.
-    console.error(
-      '[audit] Failed to record %s of %s %s: %s',
-      action,
-      entity,
-      entityId,
-      err.message
-    );
+    log.error({ err, action, entity, entityId }, 'failed to record an audit entry');
   }
 }
 

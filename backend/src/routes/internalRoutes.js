@@ -1,0 +1,43 @@
+const express = require('express');
+const asyncHandler = require('../utils/asyncHandler');
+const { protect } = require('../middleware/auth');
+const { requireRole } = require('../middleware/roles');
+const { ROLES } = require('../config/constants');
+const metrics = require('../services/metrics');
+
+const router = express.Router();
+
+/*
+ * Internal operational endpoints. Admin only, for the whole router.
+ *
+ * WHY ADMIN RATHER THAN AN IP ALLOW-LIST
+ *
+ * An allow-list is the usual answer for an internal endpoint, and it does not
+ * work on a serverless platform: the app sees the edge network's addresses, not
+ * a stable office IP, so the list would either be wrong or so broad as to be
+ * meaningless. The app already has a strong notion of "administrator", enforced
+ * by the same middleware as everything else, so reusing it is both simpler and
+ * harder to get wrong than a second, weaker mechanism.
+ *
+ * What is behind this matters: route-level latency and error rates describe the
+ * shape of the system, and AI spend is commercial information.
+ */
+router.use(protect, requireRole(ROLES.ADMIN));
+
+/**
+ * GET /api/internal/metrics
+ *
+ * Request counts, error rates and latency per route.
+ *
+ * Note the `scope` field in the response: on a serverless deployment these are
+ * one instance's numbers since it woke up, not the whole deployment's. See the
+ * note at the top of services/metrics.js for why that is the right trade.
+ */
+router.get(
+  '/metrics',
+  asyncHandler(async (req, res) => {
+    res.json({ success: true, data: metrics.snapshot() });
+  })
+);
+
+module.exports = router;

@@ -1,4 +1,6 @@
-const env = require('../config/env');
+const { componentLogger } = require('../config/logger');
+
+const log = componentLogger('ai-search');
 const aiClient = require('./aiClient');
 const { extractJson, parseAndValidate } = require('./aiJson');
 const {
@@ -249,9 +251,7 @@ async function translateQuery(query) {
   try {
     text = await callModel(query);
   } catch (err) {
-    if (!env.isTest) {
-      console.warn(`[ai-search] model call failed, using keyword fallback: ${err.message}`);
-    }
+    log.warn({ err }, 'model call failed — falling back to keyword search');
     return { mode: 'fallback', filter: null, reason: `AI request failed: ${err.message}` };
   }
 

@@ -1,5 +1,8 @@
 const crypto = require('crypto');
 const RefreshToken = require('../models/RefreshToken');
+const { componentLogger } = require('../config/logger');
+
+const log = componentLogger('auth');
 const ApiError = require('../utils/ApiError');
 const {
   signAccessToken,
@@ -89,9 +92,14 @@ async function rotateSession(presentedToken, req) {
 
   if (record.revokedAt) {
     await revokeFamily(record.family, 'refresh token reuse detected');
-    console.warn(
-      `[auth] Refresh token reuse detected for user ${record.user?._id ?? 'unknown'} ` +
-        `(family ${record.family}). Entire session family revoked.`
+    /*
+     * Worth an alert in a real deployment: either a token was stolen, or a
+     * client is refreshing concurrently and has a bug. Both are investigable
+     * from the user and family recorded here.
+     */
+    log.warn(
+      { userId: record.user?._id?.toString(), family: record.family },
+      'refresh token reuse detected — the entire session family was revoked'
     );
     throw ApiError.unauthorized('Session expired. Please sign in again.');
   }

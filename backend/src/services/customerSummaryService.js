@@ -1,4 +1,6 @@
-const env = require('../config/env');
+const { componentLogger } = require('../config/logger');
+
+const log = componentLogger('ai-summary');
 const aiClient = require('./aiClient');
 const { parseAndValidate, string, enumValue } = require('./aiJson');
 const { TREND_WINDOW_DAYS } = require('./customerMetrics');
@@ -196,9 +198,7 @@ async function generateSummary(customer, metrics, health = null) {
   try {
     text = await callModel(customer, metrics, health);
   } catch (err) {
-    if (!env.isTest) {
-      console.warn(`[ai-summary] model call failed, using template: ${err.message}`);
-    }
+    log.warn({ err }, 'model call failed — falling back to the templated summary');
     return { mode: 'fallback', reason: `AI request failed: ${err.message}` };
   }
 

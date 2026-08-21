@@ -8,6 +8,9 @@ const app = require('./app');
 const env = require('./config/env');
 const { connectDB } = require('./config/db');
 const { syncIndexesOnBoot } = require('./config/indexes');
+const { componentLogger } = require('./config/logger');
+
+const log = componentLogger('server');
 
 async function start() {
   // env.js records configuration problems instead of exiting, because exiting
@@ -15,7 +18,10 @@ async function start() {
   // A long-running server has no such constraint, so it fails fast here — the
   // errors were already printed in detail by config/env.js.
   if (!env.isConfigValid) {
-    console.error('[server] Refusing to start with an invalid configuration (see above).');
+    log.fatal(
+      { configErrors: env.configErrors },
+      'refusing to start with an invalid configuration'
+    );
     process.exit(1);
   }
 
@@ -26,7 +32,7 @@ async function start() {
   try {
     await connectDB();
   } catch (err) {
-    console.error(`[db] MongoDB connection failed: ${err.message}`);
+    log.fatal({ err }, 'MongoDB connection failed');
     process.exit(1);
   }
 
@@ -41,7 +47,7 @@ async function start() {
   await syncIndexesOnBoot();
 
   const server = app.listen(env.port, () => {
-    console.log(`[server] SimpleCRM API listening on http://localhost:${env.port} (${env.nodeEnv})`);
+    log.info({ port: env.port, environment: env.nodeEnv }, 'SimpleCRM API listening');
   });
 
   /**
@@ -50,7 +56,7 @@ async function start() {
    * process manager restart cleanly.
    */
   process.on('unhandledRejection', (err) => {
-    console.error('[server] Unhandled rejection — shutting down:', err);
+    log.fatal({ err }, 'unhandled rejection — shutting down');
     server.close(() => process.exit(1));
   });
 

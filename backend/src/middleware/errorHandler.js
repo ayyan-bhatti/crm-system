@@ -1,4 +1,7 @@
 const env = require('../config/env');
+const { componentLogger, currentContext } = require('../config/logger');
+
+const log = componentLogger('error');
 const ApiError = require('../utils/ApiError');
 
 /** Catch-all for URLs that matched no route. Runs after every router. */
@@ -65,32 +68,29 @@ function errorHandler(err, req, res, next) {
   }
 
   // --- Log every server-side failure, in full --------------------------------
-  if (statusCode >= 500 && !env.isTest) {
-    console.error(
-      [
-        '',
-        '='.repeat(72),
-        `[error] ${statusCode} ${req.method} ${req.originalUrl}`,
-        `  name    : ${err.name || 'Error'}`,
-        `  message : ${err.message}`,
-        err.code ? `  code    : ${err.code}` : null,
-        // An unexpected error is a bug; an operational one is a rule the
-        // client broke or a dependency that is down. Worth distinguishing at
-        // a glance when scanning logs.
-        `  kind    : ${err.isOperational ? 'operational' : 'UNEXPECTED (likely a bug)'}`,
-        '  stack   :',
-        String(err.stack || '(no stack)')
-          .split('\n')
-          .map((line) => `    ${line.trim()}`)
-          .join('\n'),
-        // Mongoose and node-fetch style errors nest the real reason here.
-        err.cause ? `  cause   : ${err.cause.message || err.cause}` : null,
-        env.isConfigValid ? null : `  config  : ${env.configErrors.join(' | ')}`,
-        '='.repeat(72),
-        '',
-      ]
-        .filter(Boolean)
-        .join('\n')
+  /*
+   * Structured, not a formatted block of text.
+   *
+   * The old version printed a boxed, indented report that read nicely in a
+   * terminal and could not be searched, filtered or alerted on. `err` is passed
+   * as a field so pino serialises the name, message and stack itself, and the
+   * request id from the async context is attached automatically — so this line
+   * and every other line for the same request share one searchable key.
+   */
+  if (statusCode >= 500) {
+    log.error(
+      {
+        err,
+        req: { method: req.method, url: req.originalUrl, ip: req.ip },
+        res: { statusCode },
+        // An unexpected error is a bug; an operational one is a rule the client
+        // broke or a dependency that is down. Worth distinguishing when
+        // deciding whether an alert should wake somebody.
+        kind: err.isOperational ? 'operational' : 'unexpected',
+        ...(err.code ? { code: err.code } : {}),
+        ...(env.isConfigValid ? {} : { configErrors: env.configErrors }),
+      },
+      err.message
     );
   }
 
@@ -101,10 +101,23 @@ function errorHandler(err, req, res, next) {
     message = 'Internal server error';
   }
 
+  /*
+   * The request id goes back to the client on every error.
+   *
+   * This is what makes the logging useful to a real person: a user reports
+   * "it said something went wrong, reference a1b2c3d4" and that string finds
+   * every log line for their request, across every module. Without it, support
+   * starts from a timestamp and a guess.
+   *
+   * It reveals nothing — it is a random id we generated for this one request.
+   */
+  const requestId = currentContext()?.requestId;
+
   res.status(statusCode).json({
     success: false,
     message,
     ...(details ? { details } : {}),
+    ...(requestId ? { requestId } : {}),
     // Stack traces are useful while developing, never in production.
     ...(env.isProduction || env.isTest ? {} : { stack: err.stack }),
   });

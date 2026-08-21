@@ -1,4 +1,7 @@
 const env = require('../config/env');
+const { componentLogger } = require('../config/logger');
+
+const log = componentLogger('mail');
 
 /**
  * Sending mail, through whichever transport is configured.
@@ -51,27 +54,28 @@ async function sendMail({ to, subject, text }) {
 
     return sendViaConsole({ to, subject, text });
   } catch (err) {
-    console.error(`[mail] Delivery failed via ${transport}: ${err.message}`);
+    log.error({ err, transport }, 'mail delivery failed');
     return { delivered: false, transport };
   }
 }
 
 function sendViaConsole({ to, subject, text }) {
   if (env.isProduction) {
-    console.warn(
-      '[mail] MAIL_TRANSPORT is not configured, so this message is only being written to ' +
-        'the log. In production that means a reset link is sitting in your log output. ' +
-        'Set MAIL_TRANSPORT=webhook and MAIL_WEBHOOK_URL to deliver it properly.'
+    log.warn(
+      'MAIL_TRANSPORT is not configured, so this message is only written to the log. In ' +
+        'production that means a reset link is sitting in your log output. Set ' +
+        'MAIL_TRANSPORT=webhook and MAIL_WEBHOOK_URL to deliver it properly.'
     );
   }
 
-  if (!env.isTest) {
-    console.log(
-      ['', '='.repeat(72), `[mail] To: ${to}`, `[mail] Subject: ${subject}`, '', text, '='.repeat(72), ''].join(
-        '\n'
-      )
-    );
-  }
+  /*
+   * The body is logged with the message as a field.
+   *
+   * It contains a one-time link, which is the entire point of the console
+   * transport — a developer needs to click it — and also the reason the
+   * production warning above exists.
+   */
+  log.info({ to, subject, body: text }, 'mail (console transport)');
 
   return { delivered: true, transport: 'console' };
 }

@@ -1,5 +1,8 @@
 const Anthropic = require('@anthropic-ai/sdk');
 const env = require('../config/env');
+const { componentLogger } = require('../config/logger');
+
+const log = componentLogger('ai');
 
 /**
  * The single Anthropic client, and everything that makes calling it safe.
@@ -127,22 +130,26 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
  * attempts it needed.
  */
 function logUsage({ feature, model, usage, durationMs, attempts, ok, error }) {
-  if (env.isTest) return;
+  const inputTokens = usage?.input_tokens ?? 0;
+  const outputTokens = usage?.output_tokens ?? 0;
 
-  const input = usage?.input_tokens ?? 0;
-  const output = usage?.output_tokens ?? 0;
-
-  console.info(
-    '[ai-usage] %s model=%s in=%d out=%d total=%d duration=%dms attempts=%d result=%s%s',
-    feature,
-    model,
-    input,
-    output,
-    input + output,
-    durationMs,
-    attempts,
-    ok ? 'ok' : 'failed',
-    error ? ` error=${error}` : ''
+  /*
+   * Structured, because these are the numbers a cost question is asked of.
+   * "What did the summary feature cost last week" is a sum over a field, not a
+   * regex over a sentence. aiUsageService persists the same figures for
+   * querying; this line is for the log stream.
+   */
+  log[ok ? 'info' : 'warn'](
+    {
+      feature,
+      model,
+      tokens: { input: inputTokens, output: outputTokens, total: inputTokens + outputTokens },
+      durationMs: Math.round(durationMs),
+      attempts,
+      outcome: ok ? 'ok' : 'failed',
+      ...(error ? { error } : {}),
+    },
+    'AI request'
   );
 }
 

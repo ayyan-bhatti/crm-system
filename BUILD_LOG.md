@@ -1632,3 +1632,64 @@ would be an admin** — so the role they may grant is capped, in the API (403) a
   password they chose four seconds ago, having already proved control of the mailbox.
 
 37 new backend tests, 8 new frontend tests.
+
+
+## 2. Observability
+
+### Structured logging replaces console
+
+Every line is now JSON with a level, timestamp, request id and context. Prose is readable by
+a person watching a terminal and useless to everything else — and on a hosted platform nobody
+watches a terminal. "Show me every 5xx on /api/orders for user X in the last hour" is a query
+against fields and a regex guessing game against sentences.
+
+**Three places still use console deliberately.** `config/env.js` cannot require the logger
+because the logger reads it for its level — a circular dependency whose failure mode is the
+worst kind, where the config error you are reporting becomes an unrelated module-load crash.
+The CLI scripts print prose for a human. Both are documented in place.
+
+Secrets are redacted centrally rather than per call site. The logger is silent in tests: the
+suite deliberately exercises failure paths, and hundreds of lines of expected errors make a
+real failure impossible to spot.
+
+morgan was removed rather than kept alongside — it cannot carry the request id, the user or
+the route pattern, and running both would mean two lines per request saying the same thing
+in two formats.
+
+### Request ids
+
+Every response carries `X-Request-Id` and **every error repeats it in the body**. That is
+what makes logging useful to a real person: a user reports "it said c1f4a9b2" and that
+string finds every line for their request, across every module.
+
+An incoming id is **forwarded, not replaced** — the platform uses it in its own logs, and a
+fresh one would break the chain exactly where cross-system correlation matters. It is
+validated first, because a header is user input and an unvalidated one lands in every log
+line, which is how log injection works.
+
+The id reaches code five calls deep via `AsyncLocalStorage` rather than being passed as an
+argument. Threading `req` through every service purely so it could log would distort every
+signature in the codebase for one cross-cutting concern.
+
+### Metrics
+
+`GET /api/internal/metrics`, admin only: request counts, error rates and latency buckets per
+route.
+
+**In memory, unlike the rate limiter — and the distinction is the interesting part.** A rate
+limiter is a *control*: wrong counters mean a wrong limit, which is why it moved to MongoDB.
+Metrics are an *observation*: a per-instance view is still a true sample, and writing to the
+database on every request to improve it would mean the measurement changing the thing being
+measured. The response states its own `scope` and `instanceId` rather than letting a reader
+mistake one instance for the deployment.
+
+**Admin rather than an IP allow-list**, because on serverless the app sees the edge
+network's addresses, not a stable office IP — the list would be wrong or meaninglessly broad.
+
+Latency is bucketed (keeping raw durations grows without bound, and the real question is
+"how many took over a second?") and route labels are capped, because metrics keyed on
+something unbounded — a 404 for every URL a scanner tries — grow until the process dies,
+taking out the app they were meant to observe. Routes are keyed on the **pattern**, so
+`/api/customers/:id` is one series rather than one per customer.
+
+18 new tests.

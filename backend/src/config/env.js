@@ -6,6 +6,17 @@
  *   - defaults live next to the value they belong to
  *   - misconfiguration is reported in one place, loudly, with the fix attached
  *
+ * WHY THIS FILE STILL USES console AND NOT THE STRUCTURED LOGGER
+ *
+ * config/logger reads this module to decide its level and whether to pretty
+ * print, so requiring it here would be a circular dependency — and the failure
+ * it would cause is the worst possible one: the config error you are trying to
+ * report becomes an unrelated module-load crash. Configuration problems are
+ * reported before any logger exists, so console is the only thing guaranteed to
+ * work. The same reasoning applies to the CLI scripts (seed, syncIndexes,
+ * pruneAuditLog), where the output is prose for a human at a terminal rather
+ * than records for a log platform.
+ *
  * IMPORTANT — this module must never call process.exit().
  *
  * It used to. On a long-running server that is a reasonable fail-fast, but on
@@ -92,6 +103,14 @@ const env = {
   mailTransport: process.env.MAIL_TRANSPORT || 'console',
   mailWebhookUrl: process.env.MAIL_WEBHOOK_URL || '',
   mailFrom: process.env.MAIL_FROM || 'SimpleCRM <no-reply@simplecrm.local>',
+
+  /**
+   * Log verbosity: fatal | error | warn | info | debug | trace.
+   *
+   * `info` in production is the right default — one line per request plus
+   * anything notable. `debug` locally when chasing something.
+   */
+  logLevel: process.env.LOG_LEVEL || (process.env.NODE_ENV === 'production' ? 'info' : 'debug'),
 
   anthropicApiKey: process.env.ANTHROPIC_API_KEY || '',
   anthropicModel: process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-6',

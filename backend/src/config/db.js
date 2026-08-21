@@ -24,6 +24,9 @@
  */
 const mongoose = require('mongoose');
 const env = require('./env');
+const { componentLogger } = require('./logger');
+
+const log = componentLogger('db');
 
 // Return an error instead of hanging for 30s when the DB is unreachable.
 mongoose.set('strictQuery', true);
@@ -52,9 +55,10 @@ async function connectDB() {
         maxPoolSize: env.isProduction ? 5 : 10,
       })
       .then((conn) => {
-        if (!env.isTest) {
-          console.log(`[db] MongoDB connected: ${conn.connection.host}/${conn.connection.name}`);
-        }
+        log.info(
+          { host: conn.connection.host, database: conn.connection.name },
+          'MongoDB connected'
+        );
         return conn.connection;
       })
       .catch((err) => {
