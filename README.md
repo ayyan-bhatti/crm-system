@@ -788,6 +788,41 @@ UI can label it honestly. A generated sentence and a templated one look identica
 
 ### AI cost tracking and caching
 
+### Is the AI actually running?
+
+`GET /api/internal/ai-status` — **admin only** — answers the question this project got
+wrong for a long time.
+
+Every AI feature here degrades gracefully: no key, a network blip, an unparseable reply, and
+it falls back to something that still answers. That is the right behaviour, and it has one bad
+consequence — **a degraded feature looks exactly like a working one**. `ANTHROPIC_API_KEY`
+was never set on the deployment, so AI search had been running a plain keyword search behind a
+label that said AI. Nothing errored. Every response was a 200. The only evidence anywhere was
+a `mode` field on individual responses.
+
+So configuration is now reported as a fact rather than inferred from behaviour:
+
+```json
+{
+  "configured": false,
+  "keyPresent": false,
+  "mode": "fallback",
+  "model": "claude-sonnet-4-6",
+  "recent": { "days": 7, "calls": 0, "succeeded": 0, "failed": 0, "cached": 0 },
+  "summary": "ANTHROPIC_API_KEY is not set. Every AI feature is falling back to its non-AI path — AI search is running a plain keyword search."
+}
+```
+
+`configured` and `recent` answer **two different questions** — "is the key present" and "is it
+actually succeeding" — and a deployment can be wrong in either direction independently. A valid
+key that has run out of credit reports `configured: true` next to a wall of failures. Cache
+hits are excluded from the success count, because counting them would make a wholly broken key
+look healthy for as long as the cache stayed warm.
+
+Backed by two things that need no one to go looking: a **startup warning** when the key is
+missing in production, and an **admin-only notice on the search box itself**, which is where
+someone actually notices. The key is never returned, in any form.
+
 `GET /api/internal/ai-usage?days=30` — **admin only** — reports what the AI features cost.
 
 ```json

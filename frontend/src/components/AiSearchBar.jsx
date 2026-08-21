@@ -1,8 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { aiSearchApi } from '../api/resources';
+import { aiSearchApi, internalApi } from '../api/resources';
 import { errorMessage } from '../api/client';
 import { Card, ErrorBanner, Spinner, StatusBadge, EmptyState } from './common';
+import { useAuth } from '../context/AuthContext';
+import { ROLES } from '../constants';
 import { btnPrimary, input, money, formatDate, link } from '../ui';
 
 /**
@@ -94,7 +96,70 @@ export default function AiSearchBar() {
         <ErrorBanner message={error} onDismiss={() => setError('')} />
         {result && <SearchResults result={result} />}
       </div>
+
+      <AiConfigNotice />
     </Card>
+  );
+}
+
+/**
+ * Tells an admin when the AI is not actually running.
+ *
+ * WHY THIS IS ON SCREEN AND NOT JUST IN A LOG.
+ *
+ * Every AI feature degrades to a working non-AI path, which is the right
+ * behaviour and makes the failure invisible: with no API key this search box
+ * ran a plain keyword search, returned results, and said "AI search" above
+ * them. Nothing was red. The deployment had been in that state indefinitely
+ * because nothing ever said so.
+ *
+ * The per-search badge already reports the mode of one search. This reports the
+ * state of the SYSTEM, and says how to fix it — the difference between "this
+ * search fell back" and "every search will fall back until someone sets a
+ * variable".
+ *
+ * Admin only, because it is the admin who can act on it, and a sales rep being
+ * told about an unset environment variable is noise they cannot do anything
+ * with. The endpoint is admin-only too, so this does not even ask.
+ */
+function AiConfigNotice() {
+  const { user } = useAuth();
+  const [status, setStatus] = useState(null);
+
+  const isAdmin = user?.role === ROLES.ADMIN;
+
+  useEffect(() => {
+    if (!isAdmin) return undefined;
+
+    let cancelled = false;
+
+    // A failure here is silent on purpose: this is a diagnostic, and a broken
+    // diagnostic must not put an error banner on a working search box.
+    internalApi
+      .aiStatus()
+      .then((data) => {
+        if (!cancelled) setStatus(data);
+      })
+      .catch(() => {});
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isAdmin]);
+
+  // Nothing to say when it is working — a green "all fine" badge on every
+  // screen is how people learn to stop reading badges.
+  if (!isAdmin || !status || status.configured) return null;
+
+  return (
+    <div className="mt-4 rounded-lg border border-warning/40 bg-warning-wash px-4 py-3">
+      <p className="text-sm font-medium text-warning-ink">AI is not configured</p>
+      <p className="mt-1 text-sm text-ink-2">{status.summary}</p>
+      <p className="mt-2 text-xs text-muted">
+        Set <code>ANTHROPIC_API_KEY</code> in the deployment&rsquo;s environment variables to
+        enable it. Until then this box runs a keyword search.
+      </p>
+    </div>
   );
 }
 

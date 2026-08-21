@@ -4,6 +4,7 @@ const { protect } = require('../middleware/auth');
 const { requireRole } = require('../middleware/roles');
 const { ROLES } = require('../config/constants');
 const metrics = require('../services/metrics');
+const { getAiStatus } = require('../services/aiStatus');
 const { getUsageSummary } = require('../services/aiUsageService');
 
 const router = express.Router();
@@ -56,6 +57,28 @@ router.get(
     const days = Math.min(Math.max(1, parseInt(req.query.days, 10) || 30), 365);
 
     res.json({ success: true, data: await getUsageSummary(days) });
+  })
+);
+
+/**
+ * GET /api/internal/ai-status
+ *
+ * Whether the AI is configured and actually succeeding.
+ *
+ * This endpoint exists because of a real failure: ANTHROPIC_API_KEY was never
+ * set, so every AI feature had been silently running its non-AI fallback. It
+ * broke nothing and showed nothing — AI search returned results, they were
+ * just keyword results behind a label that said otherwise. The only evidence
+ * was a `mode` field on individual responses.
+ *
+ * Admin-only like the rest of this router. It reports nothing secret (never the
+ * key, or any part of it) but it does describe the deployment's internals, and
+ * an unauthenticated "is your AI down" probe is a gift to nobody useful.
+ */
+router.get(
+  '/ai-status',
+  asyncHandler(async (req, res) => {
+    res.json({ success: true, data: await getAiStatus() });
   })
 );
 

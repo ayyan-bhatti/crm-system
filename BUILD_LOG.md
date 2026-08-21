@@ -1992,4 +1992,72 @@ nothing asserted what happened to a browser on any other origin.
 
 ---
 
-**Final totals: 636 backend + 94 frontend + 11 end-to-end**, lint clean on both packages.
+## Item 1 + 6: the AI was never running
+
+Reported as "AI search is not answering questions correctly". It was not mistranslating
+anything. **`ANTHROPIC_API_KEY` was never set**, so `aiClient` never constructed a client,
+`isConfigured()` returned false, and `translateQuery` returned a fallback before a prompt was
+ever built. Every AI search that has ever run on this deployment was a keyword search.
+
+The audit found the surrounding machinery was already right — the endpoint returns
+`mode: 'ai' | 'fallback'` with a `reason`, and the frontend already renders the interpreted
+filter in a collapsible block. The feature was not missing. It was switched off, and nothing
+said so.
+
+### Why nobody noticed for so long
+
+Every AI feature in this codebase degrades gracefully. That is a deliberate design decision
+and I would make it again — an AI outage should not take down a CRM. But it has a
+consequence that had not been paid for: **a degraded feature is indistinguishable from a
+working one**. Results appeared. Nothing was red. Every response was a 200.
+
+So graceful degradation now comes with an obligation to say it is degrading, in three places
+that do not require anyone to go looking:
+
+- `GET /api/internal/ai-status` (admin only) — the state of the integration on demand.
+- A **startup warning** in production when the key is missing.
+- An **admin-only notice on the search box**, which is where someone actually notices.
+
+`configured` and the recent outcome mix are reported separately, because "is the key present"
+and "is it succeeding" are different questions with completely different fixes — a valid key
+out of credit reports `configured: true` and a wall of failures, and a single "AI unavailable"
+would send someone to check the wrong thing. Cache hits are excluded from the success count:
+counting them would make a wholly broken key look healthy for as long as the cache stayed
+warm. The key is never returned, and a test asserts that.
+
+The notice says nothing when the AI is working. A green badge on every screen is how people
+learn to stop reading badges.
+
+### Verifying the translation without a key
+
+I could not run the queries against the real model — that needs a live key. What I could do is
+run everything downstream of it, which is where a prompt/validator drift would actually show
+up. `aiQueryShapes.test.js` starts from raw model REPLY TEXT and runs the real path:
+
+```
+text -> extractJson -> validateFilter -> runFilter -> rows
+```
+
+The existing tests stub `translateQuery` and hand the endpoint a filter that is already valid.
+That tests the plumbing after translation and cannot catch a reply in the exact format the
+prompt asks for that the validator then rejects. All three brief queries now have regression
+tests at that level, verified against seeded data:
+
+| Question | Filter produced | Returned |
+| --- | --- | --- |
+| customers in Karachi with no orders in 30 days | `city contains` + `orderActivity {none, 30}` | the dormant one only |
+| products running low on stock | `special.lowStock` | at-or-below threshold only |
+| orders over $500 last week | `total gt 500` **and** `createdAt withinDays 7` | both conditions applied |
+
+### One real flaw found on the way
+
+`aiSearchService` hardcoded `direction: 'desc'` for every entity's default sort. Correct for a
+date — newest first — and wrong for products, whose default sort field is `name`: the
+catalogue came back Z-to-A. The direction is now declared next to the field in
+`filterSchema.js`, because the sensible default depends on what the field means.
+
+**27 new backend tests, 4 new frontend tests.**
+
+---
+
+**Final totals: 663 backend + 98 frontend + 11 end-to-end**, lint clean on both packages.

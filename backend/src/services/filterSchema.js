@@ -46,7 +46,14 @@ const ENTITIES = {
     },
     // Keyword fallback searches these when the AI path is unavailable.
     keywordFields: ['name', 'email', 'company', 'city', 'notes'],
+    /*
+     * The direction is declared alongside the field because the sensible
+     * default depends on what the field MEANS, and a single hardcoded 'desc'
+     * got products wrong: newest-first is right for a date, and Z-to-A is not
+     * right for a name.
+     */
     defaultSort: 'createdAt',
+    defaultSortDirection: 'desc',
   },
 
   product: {
@@ -61,7 +68,9 @@ const ENTITIES = {
       createdAt: { type: 'date' },
     },
     keywordFields: ['name', 'sku', 'category'],
+    // Alphabetical. A product catalogue read Z-to-A helps nobody.
     defaultSort: 'name',
+    defaultSortDirection: 'asc',
   },
 
   order: {
@@ -74,6 +83,7 @@ const ENTITIES = {
     },
     keywordFields: [],
     defaultSort: 'createdAt',
+    defaultSortDirection: 'desc',
   },
 };
 

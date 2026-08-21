@@ -3,7 +3,7 @@ import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import AiSearchBar from './AiSearchBar';
 import { renderWithProviders, fakeUser, apiError } from '../test/utils';
-import { authApi, aiSearchApi } from '../api/resources';
+import { authApi, aiSearchApi, internalApi } from '../api/resources';
 
 /**
  * Natural-language search.
@@ -19,7 +19,11 @@ import { authApi, aiSearchApi } from '../api/resources';
 vi.mock('../api/resources', () => ({
   authApi: { login: vi.fn(), register: vi.fn(), logout: vi.fn(), me: vi.fn() },
   aiSearchApi: { search: vi.fn() },
+  internalApi: { aiStatus: vi.fn() },
 }));
+
+/** The status probe fires on mount for admins; default it for every test. */
+const CONFIGURED = { configured: true, keyPresent: true, mode: 'ai', summary: 'AI is configured and working.' };
 
 const aiResult = {
   success: true,
@@ -179,5 +183,75 @@ describe('AiSearchBar', () => {
     await user.click(screen.getByText(/customers in Karachi with no orders/i));
 
     await waitFor(() => expect(aiSearchApi.search).toHaveBeenCalled());
+  });
+});
+
+/**
+ * The admin-only "AI is not configured" notice.
+ *
+ * This exists because of a real production failure: ANTHROPIC_API_KEY was never
+ * set, so this box ran a plain keyword search, returned results, and said "AI
+ * search" above them. Nothing was red and nothing said otherwise, so the
+ * deployment stayed in that state indefinitely.
+ *
+ * The per-search badge reports what ONE search did. This reports what the
+ * system will keep doing until someone acts.
+ */
+describe('AI configuration notice', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    aiSearchApi.search.mockResolvedValue(aiResult);
+  });
+
+  const renderAs = (role) => {
+    authApi.me.mockResolvedValue(fakeUser({ role }));
+    return renderWithProviders(<AiSearchBar />, { guarded: true });
+  };
+
+  it('warns an admin when the key is not configured', async () => {
+    internalApi.aiStatus.mockResolvedValue({
+      configured: false,
+      keyPresent: false,
+      mode: 'fallback',
+      summary: 'ANTHROPIC_API_KEY is not set. Every AI feature is falling back.',
+    });
+    renderAs('admin');
+
+    expect(await screen.findByText(/ai is not configured/i)).toBeInTheDocument();
+    // Named twice on purpose: once in the summary, once as the literal
+    // variable to set. Both are useful, so assert on the count rather than
+    // pretending only one exists.
+    expect(screen.getAllByText(/ANTHROPIC_API_KEY/).length).toBeGreaterThan(0);
+  });
+
+  /** A green "all fine" badge on every screen is how people stop reading badges. */
+  it('says nothing when the AI is working', async () => {
+    internalApi.aiStatus.mockResolvedValue(CONFIGURED);
+    renderAs('admin');
+
+    await waitFor(() => expect(internalApi.aiStatus).toHaveBeenCalled());
+    expect(screen.queryByText(/ai is not configured/i)).not.toBeInTheDocument();
+  });
+
+  /**
+   * A sales rep cannot set an environment variable, and the endpoint is
+   * admin-only anyway — asking would be a guaranteed 403 on every dashboard.
+   */
+  it('does not probe or warn for a non-admin', async () => {
+    internalApi.aiStatus.mockResolvedValue({ configured: false, summary: 'not set' });
+    renderAs('sales_rep');
+
+    expect(await screen.findByPlaceholderText(/customers in Karachi/i)).toBeInTheDocument();
+    expect(internalApi.aiStatus).not.toHaveBeenCalled();
+    expect(screen.queryByText(/ai is not configured/i)).not.toBeInTheDocument();
+  });
+
+  /** A broken diagnostic must not put an error banner on a working search box. */
+  it('stays silent when the status probe itself fails', async () => {
+    internalApi.aiStatus.mockRejectedValue(new Error('boom'));
+    renderAs('admin');
+
+    expect(await screen.findByPlaceholderText(/customers in Karachi/i)).toBeInTheDocument();
+    expect(screen.queryByText(/ai is not configured/i)).not.toBeInTheDocument();
   });
 });

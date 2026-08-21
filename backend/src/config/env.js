@@ -288,6 +288,31 @@ if (env.isTest) {
     );
   }
 
+  // --- ANTHROPIC_API_KEY (a warning, not an error) -----------------------
+  /*
+   * Deliberately not fatal. Every AI feature has a working non-AI path, so a
+   * missing key degrades the product rather than breaking it, and refusing to
+   * boot would be the wrong trade for a CRM whose core is not the AI.
+   *
+   * It is warned about LOUDLY because the failure is invisible otherwise. This
+   * key was missing in production and nothing said so: AI search returned
+   * keyword results behind a label that said AI, the summary card rendered its
+   * deterministic fallback, and every response was a 200. The only evidence was
+   * a `mode` field nobody was reading. A degraded feature that looks identical
+   * to a working one is the kind of bug that survives for months.
+   *
+   * GET /api/internal/ai-status reports the same thing at any time, for when
+   * nobody is watching the boot logs — which, on serverless, is everybody.
+   */
+  if (env.isProduction && !env.anthropicApiKey) {
+    console.warn(
+      '[config] ANTHROPIC_API_KEY is not set. The app will run, but every AI ' +
+        'feature is falling back to its non-AI path: AI search is a plain ' +
+        'keyword search, and customer summaries are generated from the figures ' +
+        'rather than written. Check GET /api/internal/ai-status to confirm.'
+    );
+  }
+
   // --- CLIENT_ORIGIN (a warning, not an error) ---------------------------
   // Not fatal: when the frontend and API share an origin (which they do behind
   // the Vercel rewrites) the browser sends no Origin header and CORS never

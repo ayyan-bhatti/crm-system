@@ -142,3 +142,17 @@ export const auditApi = {
 export const aiSearchApi = {
   search: (query, entity) => client.post('/ai-search', { query, entity }).then((r) => r.data),
 };
+
+// --- internals (admin only) -------------------------------------------------
+export const internalApi = {
+  /**
+   * Whether the AI is configured and succeeding.
+   *
+   * Worth having a UI caller for, because the failure it reports is invisible
+   * by design: every AI feature falls back to a working non-AI path, so a
+   * missing key produces results that look fine and are not what they claim.
+   */
+  aiStatus: () => client.get('/internal/ai-status').then((r) => r.data.data),
+  metrics: () => client.get('/internal/metrics').then((r) => r.data.data),
+  aiUsage: (days) => client.get('/internal/ai-usage', { params: { days } }).then((r) => r.data.data),
+};

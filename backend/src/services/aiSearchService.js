@@ -198,7 +198,10 @@ function validateFilter(raw) {
   }
 
   // Sort must name a real field on this entity, else fall back to the default.
-  let sort = { field: schema.defaultSort, direction: 'desc' };
+  let sort = {
+    field: schema.defaultSort,
+    direction: schema.defaultSortDirection || 'desc',
+  };
   if (raw.sort && Object.prototype.hasOwnProperty.call(schema.fields, raw.sort.field)) {
     sort = {
       field: raw.sort.field,
