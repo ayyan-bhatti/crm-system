@@ -4,6 +4,7 @@ import { productsApi } from '../../api/resources';
 import { errorMessage } from '../../api/client';
 import useFetch from '../../hooks/useFetch';
 import { Card, ErrorBanner, Field, PageHeader, Spinner } from '../../components/common';
+import { useToast } from '../../components/Toast';
 import { btnPrimary, btnSecondary } from '../../ui';
 
 /**
@@ -15,6 +16,9 @@ export default function ProductForm() {
   const { id } = useParams();
   const isEdit = Boolean(id);
   const navigate = useNavigate();
+  // Saving navigates to the product's page, so the confirmation has to outlive
+  // this component — the same reason customers and orders use a toast.
+  const toast = useToast();
 
   const [form, setForm] = useState({
     name: '',
@@ -27,7 +31,18 @@ export default function ProductForm() {
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  const { data: existing, loading } = useFetch(() => (isEdit ? productsApi.get(id) : null), [id]);
+  /*
+   * `loadError` is destructured deliberately, the same as in CustomerForm.
+   *
+   * Dropping it renders an EMPTY form when the record could not be loaded, and
+   * pressing "Save changes" then PATCHes the product with blank fields — a
+   * failure to READ turning into data loss on WRITE.
+   */
+  const {
+    data: existing,
+    loading,
+    error: loadError,
+  } = useFetch(() => (isEdit ? productsApi.get(id) : null), [id]);
 
   useEffect(() => {
     if (!existing) return;
@@ -63,6 +78,7 @@ export default function ProductForm() {
       const saved = isEdit
         ? await productsApi.update(id, payload)
         : await productsApi.create(payload);
+      toast.success(isEdit ? 'Changes saved.' : `${saved.name} added.`);
       navigate(`/products/${saved._id}`, { replace: true });
     } catch (err) {
       setError(errorMessage(err, 'Could not save product'));
@@ -71,6 +87,17 @@ export default function ProductForm() {
   }
 
   if (isEdit && loading) return <Spinner full />;
+
+  // A record that could not be loaded gets the error and nothing else. Showing
+  // the form would invite the user to save over a record we never read.
+  if (isEdit && loadError) {
+    return (
+      <div className="mx-auto max-w-2xl">
+        <PageHeader title="Edit product" />
+        <ErrorBanner message={loadError} />
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto max-w-2xl">

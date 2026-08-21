@@ -4,6 +4,7 @@ import { productsApi } from '../../api/resources';
 import { errorMessage } from '../../api/client';
 import useFetch from '../../hooks/useFetch';
 import { Card, ErrorBanner, PageHeader, Spinner } from '../../components/common';
+import { useToast } from '../../components/Toast';
 import { RoleGate } from '../../components/ProtectedRoute';
 import { PRODUCT_WRITE_ROLES } from '../../constants';
 import { btnDanger, btnPrimary, formatDate, money } from '../../ui';
@@ -11,7 +12,9 @@ import { btnDanger, btnPrimary, formatDate, money } from '../../ui';
 export default function ProductDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const [actionError, setActionError] = useState('');
+  // Deleting navigates back to the list, so a banner rendered here would vanish
+  // with the component and the user would arrive with no confirmation at all.
+  const toast = useToast();
   const [deleting, setDeleting] = useState(false);
 
   const { data: product, loading, error } = useFetch(() => productsApi.get(id), [id]);
@@ -20,13 +23,13 @@ export default function ProductDetail() {
     if (!window.confirm('Delete this product? This cannot be undone.')) return;
 
     setDeleting(true);
-    setActionError('');
 
     try {
       await productsApi.remove(id);
+      toast.success(`${product?.name || 'Product'} deleted.`);
       navigate('/products', { replace: true });
     } catch (err) {
-      setActionError(errorMessage(err, 'Could not delete product'));
+      toast.error(errorMessage(err, 'Could not delete product'));
       setDeleting(false);
     }
   }
@@ -59,7 +62,6 @@ export default function ProductDetail() {
         }
       />
 
-      <ErrorBanner message={actionError} onDismiss={() => setActionError('')} />
 
       {product.isLowStock && (
         <div className="rounded-md border border-critical/25 bg-critical-wash px-4 py-3 text-sm text-critical-ink">

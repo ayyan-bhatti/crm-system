@@ -4,6 +4,7 @@ import { customersApi, ordersApi, productsApi } from '../../api/resources';
 import { errorMessage } from '../../api/client';
 import useFetch from '../../hooks/useFetch';
 import { Card, ErrorBanner, Field, PageHeader, Spinner } from '../../components/common';
+import { useToast } from '../../components/Toast';
 import SearchSelect from '../../components/SearchSelect';
 import { btnPrimary, btnSecondary, input, money } from '../../ui';
 
@@ -20,6 +21,8 @@ import { btnPrimary, btnSecondary, input, money } from '../../ui';
  */
 export default function OrderForm() {
   const navigate = useNavigate();
+  // Creating navigates to the new order, so the confirmation outlives this page.
+  const toast = useToast();
   const [searchParams] = useSearchParams();
 
   // Pre-selected when arriving from a customer's page.
@@ -120,6 +123,7 @@ export default function OrderForm() {
           quantity: Number(line.quantity),
         })),
       });
+      toast.success('Order created.');
       navigate(`/orders/${order._id}`, { replace: true });
     } catch (err) {
       setError(errorMessage(err, 'Could not create order'));

@@ -49,6 +49,7 @@ const OrderForm = lazy(() => import('./pages/orders/OrderForm'));
 
 const UserList = lazy(() => import('./pages/users/UserList'));
 const AuditLog = lazy(() => import('./pages/AuditLog'));
+const Account = lazy(() => import('./pages/Account'));
 
 export default function App() {
   return (
@@ -84,6 +85,9 @@ export default function App() {
                   }
                 >
                   <Route index element={<Dashboard />} />
+
+              {/* Every signed-in user has one, whatever their role. */}
+              <Route path="account" element={<Account />} />
 
                   <Route path="customers">
                     <Route index element={<CustomerList />} />

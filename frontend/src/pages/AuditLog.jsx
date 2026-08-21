@@ -3,11 +3,11 @@ import { auditApi } from '../api/resources';
 import useFetch from '../hooks/useFetch';
 import {
   Card,
-  EmptyState,
   ErrorBanner,
+  ListEmptyState,
   PageHeader,
   Pagination,
-  Spinner,
+  TableSkeleton,
 } from '../components/common';
 import { formatDate, humanize, input, td, th } from '../ui';
 
@@ -163,13 +163,25 @@ export default function AuditLog() {
 
       <Card>
         {loading ? (
-          <div className="py-14">
-            <Spinner full />
-          </div>
+          // A skeleton shaped like the table, matching the other three lists —
+          // the rows land in place instead of the layout jumping.
+          <TableSkeleton rows={6} columns={5} />
         ) : !data?.data?.length ? (
-          <EmptyState
-            title="No activity recorded"
-            hint="Changes to customers, products, orders and users will appear here."
+          /*
+           * Filter-aware, like the other lists. This page HAS entity and action
+           * filters, so a flat "no activity recorded" would tell an admin the
+           * log is empty when they have simply narrowed it to a type nothing
+           * has been written to yet.
+           */
+          <ListEmptyState
+            filtered={Boolean(entity || action)}
+            entity="audit entries"
+            onClear={() => {
+              setEntity('');
+              setAction('');
+              setPage(1);
+              setExpanded(null);
+            }}
           />
         ) : (
           <div className="overflow-x-auto">

@@ -102,6 +102,16 @@ export default function DashboardLayout() {
               <p className="truncate text-xs text-muted">{humanize(user.role)}</p>
             </div>
           </div>
+
+          {/* The account page holds the change-password form. Reachable from
+              the identity block, which is where people look for it. */}
+          <NavLink
+            to="/account"
+            className="mt-1 block w-full rounded-lg px-3 py-2 text-left text-sm font-medium text-ink-2 transition-colors hover:bg-neutral-wash hover:text-ink"
+          >
+            Your account
+          </NavLink>
+
           <button
             type="button"
             onClick={handleLogout}
@@ -119,9 +129,13 @@ export default function DashboardLayout() {
         <header className="flex h-16 items-center justify-between gap-4 border-b border-hairline bg-surface px-5 sm:hidden">
           <span className="text-[15px] font-semibold tracking-tight text-ink">SimpleCRM</span>
           <div className="flex items-center gap-3">
-            <span className="flex h-8 w-8 items-center justify-center rounded-full bg-brand-wash text-xs font-semibold text-brand-ink">
+            <NavLink
+              to="/account"
+              className="flex h-8 w-8 items-center justify-center rounded-full bg-brand-wash text-xs font-semibold text-brand-ink"
+              aria-label="Your account"
+            >
               {initials}
-            </span>
+            </NavLink>
             <button
               type="button"
               onClick={handleLogout}
