@@ -31,6 +31,14 @@ export const authApi = {
     client.post('/auth/forgot-password', { email }).then((r) => r.data),
 
   resetPassword: (payload) => client.post('/auth/reset-password', payload).then((r) => r.data),
+
+  /*
+   * Invitations. `getInvite` is what lets the accept page greet the invitee by
+   * name and show the role, rather than asking for a password in an anonymous
+   * box reached from an email link — which is indistinguishable from phishing.
+   */
+  getInvite: (token) => client.get(`/auth/invite/${token}`).then((r) => r.data.data),
+  acceptInvite: (payload) => client.post('/auth/accept-invite', payload).then((r) => r.data),
 };
 
 // --- customers --------------------------------------------------------------
@@ -108,6 +116,13 @@ export const usersApi = {
   assignable: () => client.get('/users/assignable').then((r) => r.data.data),
   // Admin only.
   list: (params) => client.get('/users', { params }).then((r) => r.data),
+
+  /** Admin or manager. Creates a pending account and emails an invite link. */
+  invite: (payload) => client.post('/users/invite', payload).then((r) => r.data),
+
+  /** Admin only. `status` is 'active' or 'deactivated'. */
+  setStatus: (id, status) =>
+    client.patch(`/users/${id}/status`, { status }).then((r) => r.data.data),
   create: (payload) => client.post('/users', payload).then((r) => r.data.data),
   update: (id, payload) => client.patch(`/users/${id}`, payload).then((r) => r.data.data),
   remove: (id) => client.delete(`/users/${id}`).then((r) => r.data),

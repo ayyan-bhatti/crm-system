@@ -1,7 +1,8 @@
 const User = require('../models/User');
 const ApiError = require('../utils/ApiError');
 const asyncHandler = require('../utils/asyncHandler');
-const { ROLES } = require('../config/constants');
+const { ROLES, USER_STATUS } = require('../config/constants');
+const inviteService = require('../services/inviteService');
 const {
   issueSession,
   rotateSession,
@@ -61,13 +62,35 @@ const register = asyncHandler(async (req, res) => {
     throw ApiError.conflict('An account with that email already exists');
   }
 
+  /*
+   * PUBLIC REGISTRATION IS NOW ADMIN BOOTSTRAP ONLY.
+   *
+   * The original rule was "the first account becomes admin, everyone after is
+   * a sales rep". The bootstrap half is genuinely needed — a fresh install has
+   * no admin, so somebody has to be able to create the first one — but the
+   * second half meant anyone who could reach this endpoint could give
+   * themselves an account on an internal CRM.
+   *
+   * So the first registration still works exactly as before, and every later
+   * one is refused and pointed at the invite flow. Keeping the bootstrap rather
+   * than deleting the route means a fresh deployment still has a way in without
+   * a seed script or a database console.
+   */
   const isFirstUser = (await User.estimatedDocumentCount()) === 0;
+
+  if (!isFirstUser) {
+    throw ApiError.forbidden(
+      'Public registration is closed. SimpleCRM accounts are created by invitation — ' +
+        'ask an administrator to invite you.'
+    );
+  }
 
   const user = await User.create({
     name,
     email,
     password,
-    role: isFirstUser ? ROLES.ADMIN : ROLES.SALES_REP,
+    role: ROLES.ADMIN,
+    status: USER_STATUS.ACTIVE,
   });
 
   const session = await issueSession(user, req);
@@ -127,6 +150,25 @@ const login = asyncHandler(async (req, res) => {
     // handled by the per-IP limiter instead.
     if (user) await user.registerFailedLogin();
     throw ApiError.unauthorized('Invalid email or password');
+  }
+
+  /*
+   * The password was right, but the account cannot be used.
+   *
+   * Checked AFTER the password on purpose. Answering "your account is
+   * deactivated" to anyone who types the address would confirm the account
+   * exists — the same enumeration leak the identical-error rule above prevents.
+   * Requiring the correct password first means only the genuine owner sees
+   * this, and they need it: "invalid email or password" would send an
+   * offboarded employee off to reset a password that was never the problem.
+   */
+  if (!user.canSignIn()) {
+    const message =
+      user.status === USER_STATUS.PENDING
+        ? 'This account has not been activated yet. Please use the invitation link you were sent.'
+        : 'Your account has been deactivated. Please contact an administrator.';
+
+    throw ApiError.forbidden(message);
   }
 
   await user.clearFailedLogins();
@@ -318,6 +360,83 @@ const resetPassword = asyncHandler(async (req, res) => {
   });
 });
 
+/**
+ * GET /api/auth/invite/:token
+ *
+ * What the accept-invite page loads before showing its form: who the invite is
+ * for and which role it grants, so the invitee can see what they are accepting
+ * rather than typing a password into an anonymous box.
+ *
+ * Public by necessity — the whole point is that the recipient has no account
+ * yet. The token IS the credential, and it reveals only what the email that
+ * carried it already said.
+ */
+const getInvite = asyncHandler(async (req, res) => {
+  const preview = await inviteService.peek(req.params.token);
+
+  if (!preview.ok) {
+    throw ApiError.badRequest(
+      'This invitation is not valid, has expired, or has already been used.'
+    );
+  }
+
+  res.json({
+    success: true,
+    data: {
+      name: preview.user.name,
+      email: preview.user.email,
+      role: preview.user.role,
+    },
+  });
+});
+
+/**
+ * POST /api/auth/accept-invite
+ *
+ * Sets the password and activates the account. Rate limited on the route for
+ * the same reason as password reset: it accepts a token, so it is somewhere to
+ * guess at them.
+ */
+const acceptInvite = asyncHandler(async (req, res) => {
+  const { token, password } = req.body;
+
+  if (!token || !password) {
+    throw ApiError.badRequest('An invitation token and a password are required');
+  }
+
+  // Validated before the token is consumed — an invite is single use, so a
+  // rejected password would otherwise burn it.
+  const preview = await inviteService.peek(token);
+  if (preview.ok) {
+    await assertStrongPassword(password, {
+      name: preview.user.name,
+      email: preview.user.email,
+    });
+  }
+
+  const result = await inviteService.acceptInvite(token, password);
+
+  if (!result.ok) {
+    const messages = {
+      expired: 'This invitation has expired. Ask an administrator to send a new one.',
+      used: 'This invitation has already been used. Try signing in instead.',
+      deactivated: 'This account has been deactivated. Please contact an administrator.',
+      invalid: 'This invitation is not valid. Ask an administrator to send a new one.',
+    };
+    throw ApiError.badRequest(messages[result.reason] || messages.invalid);
+  }
+
+  /*
+   * Signed in immediately on success.
+   *
+   * The alternative — "your account is ready, now go and log in" — asks someone
+   * to type the password they set four seconds ago, for no security gain: they
+   * have just proved control of the mailbox AND chosen the credential.
+   */
+  const session = await issueSession(result.user, req);
+  sendSession(res, { user: result.user, ...session }, 201);
+});
+
 /** GET /api/auth/me — the currently authenticated user, for session restore. */
 const getMe = asyncHandler(async (req, res) => {
   res.json({ success: true, data: { user: req.user } });
@@ -331,5 +450,7 @@ module.exports = {
   changePassword,
   forgotPassword,
   resetPassword,
+  getInvite,
+  acceptInvite,
   getMe,
 };

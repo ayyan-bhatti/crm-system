@@ -32,8 +32,28 @@ describe('Authentication', () => {
       expect(user.password).toMatch(/^\$2[aby]\$/); // bcrypt hash prefix
     });
 
-    it('makes the first account an admin and later ones sales reps', async () => {
+    /**
+     * Public registration is now ADMIN BOOTSTRAP ONLY.
+     *
+     * The old rule was "first account becomes admin, everyone after is a sales
+     * rep". The bootstrap half is still needed — a fresh install has no admin,
+     * so somebody has to be able to create the first one — but the second half
+     * meant anyone who could reach this endpoint could give themselves an
+     * account on an internal CRM. Everyone after the first arrives by
+     * invitation instead.
+     */
+    it('makes the first account an admin', async () => {
       const first = await api()
+        .post('/api/auth/register')
+        .send({ name: 'First', email: 'first@example.com', password: 'Karachi-Ledger-72' });
+
+      expect(first.status).toBe(201);
+      expect(first.body.data.user.role).toBe('admin');
+      expect(first.body.data.user.status).toBe('active');
+    });
+
+    it('refuses every registration after the first', async () => {
+      await api()
         .post('/api/auth/register')
         .send({ name: 'First', email: 'first@example.com', password: 'Karachi-Ledger-72' });
 
@@ -41,26 +61,36 @@ describe('Authentication', () => {
         .post('/api/auth/register')
         .send({ name: 'Second', email: 'second@example.com', password: 'Karachi-Ledger-72' });
 
-      expect(first.body.data.user.role).toBe('admin');
-      expect(second.body.data.user.role).toBe('sales_rep');
+      expect(second.status).toBe(403);
+      expect(second.body.message).toMatch(/invitation/i);
     });
 
-    it('ignores a role supplied in the request body', async () => {
+    it('creates no account when registration is refused', async () => {
       await api()
         .post('/api/auth/register')
         .send({ name: 'First', email: 'first@example.com', password: 'Karachi-Ledger-72' });
 
-      // Someone trying to grant themselves admin on sign-up.
-      const res = await api()
+      await api()
         .post('/api/auth/register')
-        .send({
-          name: 'Sneaky',
-          email: 'sneaky@example.com',
-          password: 'Karachi-Ledger-72',
-          role: 'admin',
-        });
+        .send({ name: 'Second', email: 'second@example.com', password: 'Karachi-Ledger-72' });
 
-      expect(res.body.data.user.role).toBe('sales_rep');
+      expect(await User.countDocuments({})).toBe(1);
+    });
+
+    /**
+     * The bootstrap account's role is decided by the server, not the request.
+     * It happens to be admin, but a `role` in the body must never be what
+     * decides that — otherwise the rule is "whatever the first caller asks for".
+     */
+    it('ignores a role supplied in the request body', async () => {
+      const res = await api().post('/api/auth/register').send({
+        name: 'First',
+        email: 'first@example.com',
+        password: 'Karachi-Ledger-72',
+        role: 'sales_rep',
+      });
+
+      expect(res.body.data.user.role).toBe('admin');
     });
 
     it('rejects a duplicate email with 409', async () => {

@@ -54,6 +54,21 @@ export function AuthProvider({ children }) {
    */
   useEffect(() => onSessionExpired(() => setUser(null)), []);
 
+  /**
+   * Re-read the session from the server.
+   *
+   * Needed when something OUTSIDE this context has changed the cookies — the
+   * accept-invite flow is signed in by the API as part of accepting, so the
+   * session exists but this tab does not know it yet. Without this the user
+   * would be bounced to /login by the route guard immediately after
+   * successfully activating their account.
+   */
+  const refresh = useCallback(async () => {
+    const nextUser = await authApi.me();
+    setUser(nextUser);
+    return nextUser;
+  }, []);
+
   const logout = useCallback(async () => {
     try {
       // Server-side revocation matters more than the local state change: it is
@@ -86,11 +101,12 @@ export function AuthProvider({ children }) {
         }),
 
       logout,
+      refresh,
 
       /** `hasRole('admin', 'manager')` — used by RoleGate and the nav. */
       hasRole: (...roles) => Boolean(user) && roles.includes(user.role),
     }),
-    [user, loading, logout]
+    [user, loading, logout, refresh]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

@@ -11,6 +11,7 @@ import Login from './pages/Login';
 import Register from './pages/Register';
 import ForgotPassword from './pages/ForgotPassword';
 import ResetPassword from './pages/ResetPassword';
+import AcceptInvite from './pages/AcceptInvite';
 
 import { PRODUCT_WRITE_ROLES, ROLES } from './constants';
 
@@ -75,6 +76,9 @@ export default function App() {
                     last person who should wait for a chunk to download. */}
                 <Route path="/forgot-password" element={<ForgotPassword />} />
                 <Route path="/reset-password" element={<ResetPassword />} />
+                {/* Public: the invitee has no account to authenticate with
+                    until they have been through this page. */}
+                <Route path="/accept-invite" element={<AcceptInvite />} />
 
                 {/* --- Authenticated ---------------------------------------- */}
                 <Route

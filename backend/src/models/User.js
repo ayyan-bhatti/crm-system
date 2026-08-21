@@ -1,6 +1,6 @@
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
-const { ROLES, ROLE_VALUES } = require('../config/constants');
+const { ROLES, ROLE_VALUES, USER_STATUS, USER_STATUS_VALUES } = require('../config/constants');
 
 const SALT_ROUNDS = 10;
 
@@ -21,7 +21,17 @@ const userSchema = new mongoose.Schema({
   },
   password: {
     type: String,
-    required: [true, 'Password is required'],
+    /*
+     * NOT required, because an invited user exists before they have one.
+     *
+     * The invite flow creates the account in `pending` with no password at all,
+     * and the accept-invite step sets it. A required field would force a
+     * placeholder value here — and a placeholder password is a real password
+     * until someone proves otherwise, which is exactly the kind of thing that
+     * turns into an incident. `select: false` plus the login guard below means
+     * an account with no password simply cannot authenticate.
+     */
+    required: false,
     // Backstop for documents created directly through the model (the seed
     // script, test factories). The real policy — length, blocklist, and not
     // being derived from the account — is enforced at the API boundary in
@@ -72,6 +82,32 @@ const userSchema = new mongoose.Schema({
     select: false,
   },
 
+  /**
+   * Account lifecycle — see USER_STATUS in config/constants.
+   *
+   * Enforced in three places, because any one of them alone leaves a hole:
+   *   login       a deactivated or pending account cannot obtain a session
+   *   protect     an EXISTING session stops working on the next request, so
+   *               deactivating someone takes effect immediately rather than
+   *               whenever their token happens to expire
+   *   the UI      hides the controls, which is courtesy rather than security
+   */
+  status: {
+    type: String,
+    enum: {
+      values: USER_STATUS_VALUES,
+      message: `Status must be one of: ${USER_STATUS_VALUES.join(', ')}`,
+    },
+    default: USER_STATUS.ACTIVE,
+  },
+
+  /** Who invited this user, for the pending-invite list. */
+  invitedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    default: null,
+  },
+
   createdAt: {
     type: Date,
     default: Date.now,
@@ -85,13 +121,23 @@ const userSchema = new mongoose.Schema({
  * already-hashed password (which would lock the account out).
  */
 userSchema.pre('save', async function hashPassword(next) {
-  if (!this.isModified('password')) return next();
+  // A pending invite has no password yet, and hashing `undefined` would throw.
+  if (!this.isModified('password') || !this.password) return next();
   this.password = await bcrypt.hash(this.password, SALT_ROUNDS);
   return next();
 });
 
 /** Compare a plaintext login attempt against the stored hash. */
 userSchema.methods.comparePassword = function comparePassword(candidate) {
+  /*
+   * An account with no password can never match one.
+   *
+   * bcrypt.compare(x, undefined) rejects rather than returning false, which
+   * would surface as a 500 on a perfectly ordinary login attempt against a
+   * pending invite. Answering `false` is both correct and the same answer a
+   * wrong password gives, so it reveals nothing about the account's state.
+   */
+  if (!this.password) return Promise.resolve(false);
   return bcrypt.compare(candidate, this.password);
 };
 
@@ -120,6 +166,11 @@ userSchema.methods.comparePassword = function comparePassword(candidate) {
 const LOCKOUT_THRESHOLD = 5;
 const LOCKOUT_BASE_MS = 60 * 1000;
 const LOCKOUT_MAX_MS = 15 * 60 * 1000;
+
+/** Can this account be used to sign in at all? */
+userSchema.methods.canSignIn = function canSignIn() {
+  return this.status === USER_STATUS.ACTIVE;
+};
 
 /** True while the account is inside a lockout window. */
 userSchema.methods.isLocked = function isLocked() {

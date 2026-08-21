@@ -227,6 +227,44 @@ immediately, instead of whenever the old token happens to expire.
   refreshes present an already-consumed token and trip reuse detection against the real
   user.
 
+### Account lifecycle
+
+Users are **invited**, not self-registered. Public `/register` creates only the very first
+account on an empty database (the admin bootstrap); everything after arrives by invitation.
+
+```
+Admin or manager invites (email + role)
+        |  account created as `pending`, with no password
+Invitee receives a single-use link (7-day expiry)
+        |  they choose their own password
+Account becomes `active`, and they are signed in
+```
+
+| status | can sign in? | meaning |
+| --- | :---: | --- |
+| `pending` | no | invited, has not set a password yet |
+| `active` | yes | normal |
+| `deactivated` | no | offboarded — **existing sessions stop working on the next request** |
+
+The invited account holds **no password at all**, so it cannot authenticate even though the
+record exists. The password is set by the invitee through the link, which means it is never
+transmitted and never known to the admin who invited them. This replaced a form where an
+admin typed a password and told the new hire what it was.
+
+**Deactivation is enforced in `protect`, not just at login.** Checking only at login would
+leave an offboarded employee working until their access token expired — up to fifteen
+minutes of continued access after someone pressed the button. Deactivating also revokes
+their refresh token, so the session cannot be resurrected.
+
+Deactivation rather than deletion is the offboarding action: deleting the account would
+orphan every customer and order that references it, and the audit trail would lose the name
+behind past actions.
+
+**A manager may invite but may not grant `admin`** — a manager who could mint an admin
+account would be one.
+
+---
+
 ### Role matrix
 
 | Capability | admin | manager | sales_rep |
@@ -439,13 +477,15 @@ Every **state-changing** request authenticated by cookie must also send `X-CSRF-
 
 | Method | Path | Access | Description |
 | --- | --- | --- | --- |
-| `POST` | `/auth/register` | public | Create an account. First account ⇒ admin, later ⇒ sales_rep. Sets session cookies; returns `{ user, token }`. Rate limited: 5/hour per IP |
+| `POST` | `/auth/register` | public | **Admin bootstrap only.** Creates the very first account on an empty database as the admin; every later call is refused with a pointer to the invite flow. Rate limited: 5/hour per IP |
 | `POST` | `/auth/login` | public | Sets session cookies; returns `{ user, token }`. Rate limited: 10/15min per IP, plus per-account lockout |
 | `POST` | `/auth/refresh` | refresh cookie | Rotates the session and reissues both cookies |
 | `POST` | `/auth/logout` | any | Clears the cookies **and revokes the refresh token**. Always `200` |
 | `POST` | `/auth/change-password` | any | Requires the current password. Revokes every *other* session. Rate limited: 5/hour |
 | `POST` | `/auth/forgot-password` | public | Emails a reset link. **Always answers identically**, whether or not the address has an account. Rate limited: 5/hour |
 | `POST` | `/auth/reset-password` | reset token | Redeems a link. Single use, 30-minute expiry, revokes **every** session |
+| `GET` | `/auth/invite/:token` | invite token | Who an invitation is for and which role it grants, so the accept page can identify the invitee before asking for a password |
+| `POST` | `/auth/accept-invite` | invite token | Sets the password, activates the account, and signs the user in |
 | `GET` | `/auth/me` | any | The signed-in user — used to restore a session after a page refresh |
 
 The refresh token is **never** in a response body; it exists only as a cookie.
@@ -456,7 +496,9 @@ The refresh token is **never** in a response body; it exists only as a cookie.
 | --- | --- | --- | --- |
 | `GET` | `/users/assignable` | any | Trimmed list (id, name, email, role) for dropdowns |
 | `GET` | `/users` | admin | Filters: `?role=` `?search=` |
-| `POST` | `/users` | admin | Create a user **with a chosen role** |
+| `POST` | `/users` | admin | Create a user directly, with a password. Retained for scripts; the UI uses the invite flow |
+| `POST` | `/users/invite` | admin, **manager** | Creates a pending account and emails a single-use link. A manager may not grant `admin` |
+| `PATCH` | `/users/:id/status` | admin | `active` / `deactivated`. Revokes their sessions immediately |
 | `GET` | `/users/:id` | admin | Single user |
 | `PATCH` | `/users/:id` | admin | Update name / email / role / password |
 | `DELETE` | `/users/:id` | admin | Blocks self-deletion (`400`) |

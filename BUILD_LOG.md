@@ -1533,3 +1533,102 @@ and continues — missing indexes make the app slow, refusing to start makes it 
 - **The keyword fallback matches terms, not meaning**, and its stop-word list is English-only.
 
 **Totals: 492 backend + 73 frontend + 11 end-to-end tests**, lint clean on both packages.
+
+---
+
+# Round 4 — invitations, observability, AI cost controls
+
+## Fixing what a frontend-wiring audit found
+
+Before adding anything new, four things the audit turned up:
+
+- **`change-password` had no caller.** The endpoint was built, tested and documented, and
+  nothing in the UI reached it. There is now an `/account` page with the form, linked from
+  the sidebar identity block and the mobile avatar.
+- **Toast coverage was inconsistent** — customers, orders and users had it; products did
+  not, and order creation had none. Product create/edit/delete and order create now raise
+  one. Product delete previously navigated away on success with *no confirmation at all*.
+- **`ProductForm` had the same ignored-load-error bug** already fixed in `CustomerForm`:
+  a record that failed to load rendered an empty form, and Save would PATCH the blanks over
+  it — a failed read becoming data loss on write.
+- **The audit page** used a flat empty state despite having filters (so narrowing to a type
+  with no writes said "no activity recorded"), and a spinner where the other lists use a
+  skeleton.
+
+## 1. Invite-based user management
+
+### Why open registration had to go
+
+`POST /api/auth/register` let anyone who could reach it create an account on an internal
+CRM. The `sales_rep` default limited the blast radius but did not stop the account existing
+— and a sales rep can see customers.
+
+**Public registration is now admin bootstrap only.** The first registration on an empty
+database still works exactly as before and becomes the admin; every later one is refused
+with a pointer to the invite flow. Keeping the bootstrap rather than deleting the route
+means a fresh deployment still has a way in without a seed script or a database console.
+
+### The account exists before the password does
+
+An invite creates the user immediately in `pending` **with no password field at all**.
+
+That is the part worth explaining. The account exists — so it appears in the admin's list,
+holds the role that was chosen, and reserves the email address — but cannot authenticate,
+because `comparePassword` returns false for an account with no password and `login` refuses
+a non-active status. The invitee sets the password themselves through a single-use link, so
+it is never transmitted, never known to the admin, and never needs a "change this on first
+login" convention that everybody ignores.
+
+This replaced a form where an admin typed a password and presumably told the new hire what
+it was.
+
+### `status: pending | active | deactivated`, enforced in three places
+
+| where | what it stops |
+| --- | --- |
+| `login` | a pending or deactivated account obtaining a session |
+| **`protect`** | an **existing** session continuing to work |
+| the UI | offering controls that would be refused (courtesy, not security) |
+
+The middle one is the one that matters. Checking only at login would leave an offboarded
+employee working normally until their access token expired — **up to fifteen minutes of
+continued access to the customer list after someone pressed "deactivate"**. Because
+`protect` reloads the user on every request, it takes effect on their very next one. A test
+asserts exactly that: a session that works, a deactivation, and the same session dead on the
+next call with no new login involved.
+
+Deactivating also revokes the refresh token, so the session cannot be resurrected.
+
+**Deactivation rather than deletion** is the offboarding action: deleting the account would
+orphan every customer and order referencing it as `createdBy`, and the audit trail would
+lose the name behind past actions. Deletion stays available for a record created by mistake.
+
+### Managers may invite; they may not mint an admin
+
+Managers run teams and know when someone joins, so requiring an admin for every hire makes
+the admin a bottleneck on onboarding. But **a manager who could create an admin account
+would be an admin** — so the role they may grant is capped, in the API (403) and in the UI
+(the option is not offered).
+
+### Smaller decisions
+
+- **Login reports deactivation only after the correct password.** Answering "your account is
+  deactivated" to anyone who types the address would confirm the account exists — the same
+  enumeration leak the identical-error rule prevents. Requiring the password first means
+  only the genuine owner sees it, and they need it: "invalid email or password" would send
+  an offboarded employee off to reset a password that was never the problem.
+- **Re-inviting a pending user re-sends** rather than erroring, because that is the common
+  case (the first invite went to spam, or predated their start date), and it invalidates the
+  earlier link so two working invites never sit in two inboxes.
+- **Invites last 7 days**, against 30 minutes for a password reset — the recipient may be on
+  holiday and did not ask for it. The longer window is why everything else is tight: hashed,
+  single use, invalidated on re-send.
+- **The accept page identifies the invitee before asking for a password.** An anonymous
+  "choose a password" box reached from an email link is indistinguishable from a phishing
+  page; what makes it legitimate is that it already knows who you are and what you were
+  offered. It also reports an expired invite on arrival, not after someone has typed a
+  password twice.
+- **Accepting signs you in immediately.** "Now go and log in" asks someone to retype the
+  password they chose four seconds ago, having already proved control of the mailbox.
+
+37 new backend tests, 8 new frontend tests.

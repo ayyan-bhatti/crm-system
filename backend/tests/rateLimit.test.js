@@ -93,7 +93,17 @@ describe('Per-IP rate limiting', () => {
   });
 
   describe('POST /api/auth/register', () => {
-    it('caps how many accounts one address can create', async () => {
+    /**
+     * The limiter still guards this endpoint even though registration itself is
+     * now bootstrap-only.
+     *
+     * Attempts 2-5 are refused by the controller (403 — registration is closed)
+     * while the limiter counts them, and the sixth is refused by the LIMITER
+     * before the controller ever runs. That ordering is the thing being tested:
+     * a limiter that only counted successful requests would let someone hammer
+     * a closed endpoint forever.
+     */
+    it('caps how many registration attempts one address can make', async () => {
       let last;
       for (let i = 0; i < 6; i += 1) {
         last = await api()
@@ -102,9 +112,8 @@ describe('Per-IP rate limiting', () => {
       }
 
       expect(last.status).toBe(429);
-      // The sixth account must not exist — the limiter has to run before the
-      // handler, not merely change the response after the write.
-      expect(await User.countDocuments({})).toBe(5);
+      // Only the bootstrap admin was ever created.
+      expect(await User.countDocuments({})).toBe(1);
     });
   });
 });

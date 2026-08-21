@@ -2,7 +2,9 @@ const User = require('../models/User');
 const ApiError = require('../utils/ApiError');
 const asyncHandler = require('../utils/asyncHandler');
 const { recordAudit } = require('../services/auditService');
-const { ROLE_VALUES } = require('../config/constants');
+const inviteService = require('../services/inviteService');
+const { revokeAllForUser } = require('../services/sessionService');
+const { ROLE_VALUES, ROLES, USER_STATUS } = require('../config/constants');
 
 /**
  * User management. Every route in this controller is admin-only — that
@@ -139,8 +141,127 @@ function escapeRegex(str) {
   return String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+
+/**
+ * POST /api/users/invite — admin and manager.
+ *
+ * Creates the account in `pending` with no password and emails a single-use
+ * link. See services/inviteService for why the account exists before the
+ * password does.
+ *
+ * MANAGERS MAY INVITE, BUT NOT AS ADMIN.
+ *
+ * Managers run teams and are the people who actually know when someone joins,
+ * so requiring an admin for every hire makes the admin a bottleneck on
+ * onboarding. Letting a manager mint an admin, though, would be a privilege
+ * escalation dressed up as a convenience feature — a manager who can create an
+ * admin account is an admin. So the role they may grant is capped.
+ */
+const inviteUserHandler = asyncHandler(async (req, res) => {
+  const { name, email, role } = req.body;
+
+  if (role && !ROLE_VALUES.includes(role)) {
+    throw ApiError.badRequest(`Role must be one of: ${ROLE_VALUES.join(', ')}`);
+  }
+
+  if (role === ROLES.ADMIN && req.user.role !== ROLES.ADMIN) {
+    throw ApiError.forbidden('Only an administrator can invite another administrator');
+  }
+
+  const { user, resent } = await inviteService.inviteUser(
+    { name, email, role: role || ROLES.SALES_REP },
+    req.user
+  );
+
+  await recordAudit(req, {
+    action: resent ? 'update' : 'create',
+    entity: 'user',
+    entityId: user._id,
+    label: user.name,
+    after: user,
+  });
+
+  res.status(resent ? 200 : 201).json({
+    success: true,
+    message: resent
+      ? 'A fresh invitation has been sent, and any earlier link no longer works.'
+      : 'Invitation sent.',
+    data: user,
+  });
+});
+
+/**
+ * PATCH /api/users/:id/status — admin only.
+ *
+ * Deactivate or reactivate an account. A separate endpoint from the general
+ * update because it is a different kind of action with different consequences:
+ * changing a name is cosmetic, while deactivating cuts off access mid-session.
+ * Keeping it separate also keeps the audit entries legible — "status:
+ * active -> deactivated" rather than a general update that happens to include
+ * a status field.
+ */
+const setUserStatus = asyncHandler(async (req, res) => {
+  const { status } = req.body;
+
+  if (![USER_STATUS.ACTIVE, USER_STATUS.DEACTIVATED].includes(status)) {
+    throw ApiError.badRequest('Status must be either active or deactivated');
+  }
+
+  /*
+   * Locking yourself out is the classic own-goal here, and on a single-admin
+   * install it is unrecoverable through the UI.
+   */
+  if (req.params.id === req.user._id.toString()) {
+    throw ApiError.badRequest('You cannot change your own account status');
+  }
+
+  const user = await User.findById(req.params.id);
+  if (!user) throw ApiError.notFound('User not found');
+
+  /*
+   * A pending invite cannot be "activated" from here — that would create an
+   * account with no password that is nonetheless allowed to sign in, except it
+   * still could not, because there is nothing to sign in with. Refusing is
+   * clearer than a state that looks active and behaves otherwise.
+   */
+  if (user.status === USER_STATUS.PENDING && status === USER_STATUS.ACTIVE) {
+    throw ApiError.badRequest(
+      'This user has not accepted their invitation yet. Re-send the invitation instead.'
+    );
+  }
+
+  const before = user.toObject();
+  user.status = status;
+  await user.save();
+
+  /*
+   * Deactivating revokes every session immediately.
+   *
+   * `protect` already refuses a deactivated user on their next request, so this
+   * is belt and braces — but it is the difference between "cannot make new
+   * requests" and "is signed out", and it invalidates the refresh token so the
+   * session cannot be resurrected.
+   */
+  if (status === USER_STATUS.DEACTIVATED) {
+    await revokeAllForUser(user._id, 'account deactivated');
+  }
+
+  await recordAudit(req, {
+    action: 'update',
+    entity: 'user',
+    entityId: user._id,
+    label: user.name,
+    before,
+    after: user,
+  });
+
+  res.json({ success: true, data: user });
+});
+
 module.exports = {
   listUsers,
+  inviteUser: inviteUserHandler,
+  setUserStatus,
   listAssignableUsers,
   getUser,
   createUser,

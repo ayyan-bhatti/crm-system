@@ -73,6 +73,9 @@ export const STATUS_STYLES = {
   pending: 'bg-warning-wash text-warning-ink',
   completed: 'bg-good-wash text-good-ink',
   cancelled: 'bg-critical-wash text-critical-ink',
+  // Account status. `active` and `pending` are already defined above and mean
+  // the same thing here — a healthy account and one waiting on something.
+  deactivated: 'bg-critical-wash text-critical-ink',
   // Role
   admin: 'bg-brand-wash text-brand-ink',
   manager: 'bg-brand-wash text-brand-ink',

@@ -12,7 +12,7 @@ import {
   StatusBadge,
 } from '../../components/common';
 import { useAuth } from '../../context/AuthContext';
-import { ROLE_VALUES } from '../../constants';
+import { ROLE_VALUES, ROLES } from '../../constants';
 import { btnPrimary, formatDate, humanize, input, td, th } from '../../ui';
 
 /**
@@ -40,6 +40,48 @@ export default function UserList() {
     }
   }
 
+  /**
+   * Deactivate or reactivate.
+   *
+   * Deactivation is the offboarding action, not deletion: deleting the account
+   * would orphan every customer and order that references it as `createdBy`,
+   * and the audit trail would lose the name behind past actions. It also takes
+   * effect immediately — the API revokes their sessions and `protect` refuses
+   * their next request.
+   */
+  async function setStatus(id, name, status) {
+    const deactivating = status === 'deactivated';
+
+    if (
+      deactivating &&
+      !window.confirm(
+        `Deactivate ${name}? They will be signed out immediately and cannot sign in again ` +
+          'until reactivated.'
+      )
+    ) {
+      return;
+    }
+
+    try {
+      await usersApi.setStatus(id, status);
+      toast.success(deactivating ? `${name} deactivated.` : `${name} reactivated.`);
+      reload();
+    } catch (err) {
+      toast.error(errorMessage(err, 'Could not change the account status'));
+    }
+  }
+
+  /** Send a fresh invitation to someone who has not accepted yet. */
+  async function resendInvite(user) {
+    try {
+      await usersApi.invite({ name: user.name, email: user.email, role: user.role });
+      toast.success(`A new invitation has been sent to ${user.email}.`);
+      reload();
+    } catch (err) {
+      toast.error(errorMessage(err, 'Could not re-send the invitation'));
+    }
+  }
+
   async function removeUser(id, name) {
     if (!window.confirm(`Delete ${name}? This cannot be undone.`)) return;
 
@@ -56,10 +98,10 @@ export default function UserList() {
     <div>
       <PageHeader
         title="Users"
-        subtitle="Manage who can access SimpleCRM and what they can do."
+        subtitle="Invite colleagues, manage their roles, and deactivate people who have left."
         action={
           <button type="button" className={btnPrimary} onClick={() => setShowForm((v) => !v)}>
-            {showForm ? 'Close' : 'New user'}
+            {showForm ? 'Close' : 'Invite user'}
           </button>
         }
       />
@@ -70,10 +112,10 @@ export default function UserList() {
       <ErrorBanner message={error} />
 
       {showForm && (
-        <NewUserForm
-          onCreated={(created) => {
+        <InviteUserForm
+          onInvited={(message) => {
             setShowForm(false);
-            toast.success(`${created?.name || 'User'} created.`);
+            toast.success(message);
             reload();
           }}
           onError={(message) => toast.error(message)}
@@ -91,6 +133,7 @@ export default function UserList() {
                   <th className={th}>Name</th>
                   <th className={th}>Email</th>
                   <th className={th}>Role</th>
+                  <th className={th}>Status</th>
                   <th className={th}>Joined</th>
                   <th className={`${th} text-right`}>Actions</th>
                 </tr>
@@ -128,16 +171,57 @@ export default function UserList() {
                           </select>
                         )}
                       </td>
+                      <td className={td}>
+                        {/*
+                          Pending means invited but not yet activated — the
+                          account exists and holds its role, but has no password
+                          and cannot sign in. Showing it here is what makes an
+                          un-accepted invite visible rather than a mystery.
+                        */}
+                        <StatusBadge value={user.status} />
+                      </td>
                       <td className={td}>{formatDate(user.createdAt)}</td>
                       <td className={`${td} text-right`}>
                         {!isSelf && (
-                          <button
-                            type="button"
-                            className="text-sm font-medium text-critical-ink hover:underline"
-                            onClick={() => removeUser(user._id, user.name)}
-                          >
-                            Delete
-                          </button>
+                          <div className="flex items-center justify-end gap-3">
+                            {user.status === 'pending' && (
+                              <button
+                                type="button"
+                                className="text-sm font-medium text-brand hover:underline"
+                                onClick={() => resendInvite(user)}
+                              >
+                                Re-send invite
+                              </button>
+                            )}
+
+                            {user.status === 'active' && (
+                              <button
+                                type="button"
+                                className="text-sm font-medium text-ink-2 hover:underline"
+                                onClick={() => setStatus(user._id, user.name, 'deactivated')}
+                              >
+                                Deactivate
+                              </button>
+                            )}
+
+                            {user.status === 'deactivated' && (
+                              <button
+                                type="button"
+                                className="text-sm font-medium text-brand hover:underline"
+                                onClick={() => setStatus(user._id, user.name, 'active')}
+                              >
+                                Reactivate
+                              </button>
+                            )}
+
+                            <button
+                              type="button"
+                              className="text-sm font-medium text-critical-ink hover:underline"
+                              onClick={() => removeUser(user._id, user.name)}
+                            >
+                              Delete
+                            </button>
+                          </div>
                         )}
                       </td>
                     </tr>
@@ -153,20 +237,42 @@ export default function UserList() {
 }
 
 /** Inline create form. Unlike public registration, an admin picks the role. */
-function NewUserForm({ onCreated, onError }) {
-  const [form, setForm] = useState({ name: '', email: '', password: '', role: 'sales_rep' });
+/**
+ * Invite a colleague.
+ *
+ * NO PASSWORD FIELD, AND THAT IS THE POINT.
+ *
+ * This replaced a form where the admin typed a password and presumably told the
+ * new hire what it was. That pattern has the admin knowing someone else's
+ * credential, the password travelling through whatever channel they used to
+ * pass it on, and — in practice — nobody ever changing it. Here the invitee
+ * sets their own through a single-use link, so it is never transmitted and
+ * never known to anyone else.
+ */
+function InviteUserForm({ onInvited, onError }) {
+  const { user: currentUser } = useAuth();
+  const [form, setForm] = useState({ name: '', email: '', role: 'sales_rep' });
   const [submitting, setSubmitting] = useState(false);
+
+  /*
+   * A manager may invite, but not as an admin — the API enforces this and
+   * returns 403. Hiding the option too means they are not offered a choice that
+   * will be refused.
+   */
+  const assignableRoles = ROLE_VALUES.filter(
+    (role) => role !== ROLES.ADMIN || currentUser.role === ROLES.ADMIN
+  );
 
   async function handleSubmit(event) {
     event.preventDefault();
     setSubmitting(true);
 
     try {
-      // Pass the created user back so the confirmation can name them.
-      const created = await usersApi.create(form);
-      onCreated(created);
+      const result = await usersApi.invite(form);
+      onInvited(result.message || `Invitation sent to ${form.email}.`);
+      setForm({ name: '', email: '', role: 'sales_rep' });
     } catch (err) {
-      onError(errorMessage(err, 'Could not create the user'));
+      onError(errorMessage(err, 'Could not send the invitation'));
     } finally {
       setSubmitting(false);
     }
@@ -174,7 +280,13 @@ function NewUserForm({ onCreated, onError }) {
 
   return (
     <Card className="mb-4 p-5">
-      <form onSubmit={handleSubmit} className="grid gap-4 sm:grid-cols-4">
+      <h2 className="mb-1 text-base font-semibold text-ink">Invite a colleague</h2>
+      <p className="mb-4 text-sm text-ink-2">
+        They will receive a link to choose their own password. The invitation expires in 7
+        days.
+      </p>
+
+      <form onSubmit={handleSubmit} className="grid gap-4 sm:grid-cols-3">
         <Field
           label="Name"
           required
@@ -188,21 +300,13 @@ function NewUserForm({ onCreated, onError }) {
           value={form.email}
           onChange={(e) => setForm({ ...form, email: e.target.value })}
         />
-        <Field
-          label="Password"
-          type="password"
-          required
-          minLength={8}
-          value={form.password}
-          onChange={(e) => setForm({ ...form, password: e.target.value })}
-        />
         <Field label="Role">
           <select
             className={input}
             value={form.role}
             onChange={(e) => setForm({ ...form, role: e.target.value })}
           >
-            {ROLE_VALUES.map((role) => (
+            {assignableRoles.map((role) => (
               <option key={role} value={role}>
                 {humanize(role)}
               </option>
@@ -210,9 +314,9 @@ function NewUserForm({ onCreated, onError }) {
           </select>
         </Field>
 
-        <div className="sm:col-span-4">
+        <div className="sm:col-span-3">
           <button type="submit" className={btnPrimary} disabled={submitting}>
-            {submitting ? <Spinner /> : 'Create user'}
+            {submitting ? <Spinner /> : 'Send invitation'}
           </button>
         </div>
       </form>

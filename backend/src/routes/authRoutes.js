@@ -7,6 +7,8 @@ const {
   changePassword,
   forgotPassword,
   resetPassword,
+  getInvite,
+  acceptInvite,
   getMe,
 } = require('../controllers/authController');
 const { protect } = require('../middleware/auth');
@@ -50,6 +52,18 @@ router.post('/logout', logout);
  */
 router.post('/forgot-password', passwordResetLimiter, forgotPassword);
 router.post('/reset-password', passwordResetLimiter, resetPassword);
+
+/*
+ * Accepting an invitation. Public for the same reason the reset routes are:
+ * the recipient has no account to authenticate with yet, and the token in the
+ * link is the credential.
+ *
+ * Rate limited because both accept a token, which makes them somewhere to guess
+ * at one — 32 random bytes are not guessable, but the limit costs nothing and
+ * removes the question.
+ */
+router.get('/invite/:token', passwordResetLimiter, getInvite);
+router.post('/accept-invite', passwordResetLimiter, acceptInvite);
 
 // Authenticated
 router.get('/me', protect, getMe);

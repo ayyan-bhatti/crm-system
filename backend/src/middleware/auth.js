@@ -64,6 +64,25 @@ const protect = asyncHandler(async (req, res, next) => {
     throw ApiError.unauthorized('Not authenticated: user no longer exists');
   }
 
+  /*
+   * A deactivated account's EXISTING sessions stop working here.
+   *
+   * Checking only at login would leave an offboarded employee signed in until
+   * their access token expired — up to fifteen minutes of continued access to
+   * the customer list after someone pressed "deactivate", which is exactly the
+   * window that matters. Because `protect` reloads the user on every request,
+   * this takes effect on their very next one.
+   *
+   * `pending` is included for completeness: such an account has no password and
+   * cannot obtain a token in the first place, so reaching here would mean
+   * something else had already gone wrong.
+   */
+  if (!user.canSignIn()) {
+    throw ApiError.unauthorized(
+      'Your account is no longer active. Please contact an administrator.'
+    );
+  }
+
   req.user = user;
   req.authVia = authVia;
   return next();

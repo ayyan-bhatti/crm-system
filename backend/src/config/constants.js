@@ -11,6 +11,25 @@ const ROLES = {
   SALES_REP: 'sales_rep',
 };
 
+/**
+ * Account lifecycle.
+ *
+ *   pending      invited, but has not set a password yet. Cannot sign in.
+ *   active       normal.
+ *   deactivated  an offboarded employee. Cannot sign in, and existing sessions
+ *                stop working on their next request — see middleware/auth.
+ *
+ * Deactivation rather than deletion is the default for a departing colleague:
+ * deleting the account would orphan every customer and order that references
+ * it as `createdBy`, and the audit trail would lose the name behind past
+ * actions. Deletion stays available for a record created by mistake.
+ */
+const USER_STATUS = {
+  PENDING: 'pending',
+  ACTIVE: 'active',
+  DEACTIVATED: 'deactivated',
+};
+
 const CUSTOMER_STATUS = {
   LEAD: 'lead',
   ACTIVE: 'active',
@@ -29,6 +48,8 @@ const DEFAULT_LOW_STOCK_THRESHOLD = 10;
 module.exports = {
   ROLES,
   ROLE_VALUES: Object.values(ROLES),
+  USER_STATUS,
+  USER_STATUS_VALUES: Object.values(USER_STATUS),
   CUSTOMER_STATUS,
   CUSTOMER_STATUS_VALUES: Object.values(CUSTOMER_STATUS),
   ORDER_STATUS,
