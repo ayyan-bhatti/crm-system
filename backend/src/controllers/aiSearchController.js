@@ -49,7 +49,16 @@ const aiSearch = asyncHandler(async (req, res) => {
     product: {}, // products have no per-user ownership
   };
 
-  const translation = await aiSearchService.translateQuery(query.trim());
+  /*
+   * The caller is passed through for two reasons: usage rows attribute spend to
+   * a user, and the response cache is keyed per user — two people asking the
+   * same question are entitled to different answers, since a sales rep sees
+   * only their own customers.
+   */
+  const translation = await aiSearchService.translateQuery(query.trim(), {
+    userId: req.user?._id?.toString() ?? null,
+    entity: req.body.entity ?? null,
+  });
 
   // --- Fallback: keyword search ---------------------------------------------
   if (translation.mode === 'fallback') {

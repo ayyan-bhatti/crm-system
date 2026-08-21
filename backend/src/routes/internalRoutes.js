@@ -4,6 +4,7 @@ const { protect } = require('../middleware/auth');
 const { requireRole } = require('../middleware/roles');
 const { ROLES } = require('../config/constants');
 const metrics = require('../services/metrics');
+const { getUsageSummary } = require('../services/aiUsageService');
 
 const router = express.Router();
 
@@ -37,6 +38,24 @@ router.get(
   '/metrics',
   asyncHandler(async (req, res) => {
     res.json({ success: true, data: metrics.snapshot() });
+  })
+);
+
+/**
+ * GET /api/internal/ai-usage?days=30
+ *
+ * What the AI features have cost: calls, tokens each way, estimated spend, the
+ * cache hit rate, and a per-feature breakdown with a monthly projection.
+ *
+ * Admin only because AI spend is commercial information, and because a
+ * per-feature cost breakdown says a good deal about how the product is used.
+ */
+router.get(
+  '/ai-usage',
+  asyncHandler(async (req, res) => {
+    const days = Math.min(Math.max(1, parseInt(req.query.days, 10) || 30), 365);
+
+    res.json({ success: true, data: await getUsageSummary(days) });
   })
 );
 

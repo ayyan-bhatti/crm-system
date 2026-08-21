@@ -170,9 +170,10 @@ function validateSummary(raw) {
   };
 }
 
-function callModel(customer, metrics, health) {
+function callModel(customer, metrics, health, userId) {
   return aiClient.complete({
     feature: 'customer-summary',
+    userId,
     system: buildSystemPrompt(),
     user: buildUserMessage(customer, metrics, health),
     // Small: the reply is a handful of sentences. A generous cap here would
@@ -189,14 +190,14 @@ function callModel(customer, metrics, health) {
  * to render, because the figures are correct either way and a summary screen
  * that errors out is worse than one with plain wording.
  */
-async function generateSummary(customer, metrics, health = null) {
+async function generateSummary(customer, metrics, health = null, userId = null) {
   if (!aiClient.isConfigured()) {
     return { mode: 'fallback', reason: 'ANTHROPIC_API_KEY is not configured' };
   }
 
   let text;
   try {
-    text = await callModel(customer, metrics, health);
+    text = await callModel(customer, metrics, health, userId);
   } catch (err) {
     log.warn({ err }, 'model call failed — falling back to the templated summary');
     return { mode: 'fallback', reason: `AI request failed: ${err.message}` };

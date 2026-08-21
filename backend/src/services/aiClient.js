@@ -1,6 +1,7 @@
 const Anthropic = require('@anthropic-ai/sdk');
 const env = require('../config/env');
 const { componentLogger } = require('../config/logger');
+const aiUsageService = require('./aiUsageService');
 
 const log = componentLogger('ai');
 
@@ -154,6 +155,23 @@ function logUsage({ feature, model, usage, durationMs, attempts, ok, error }) {
 }
 
 /**
+ * Persist the same figures the log line carries.
+ *
+ * Two destinations for one event, deliberately. The log answers "what happened
+ * just now"; the collection answers "what did we spend last month, and on
+ * what" — an aggregation over a time range, which a log platform can only do
+ * with a query language and a long enough retention window.
+ *
+ * Never awaited by the caller and never able to fail a request: recording what
+ * something cost must not break the thing the user asked for.
+ */
+function persistUsage(fields) {
+  aiUsageService.recordUsage(fields).catch(() => {
+    // recordUsage already logs its own failures.
+  });
+}
+
+/**
  * Call the model with timeouts, retries and usage logging.
  *
  * Throws on failure — the caller decides what its degraded behaviour is. See
@@ -166,7 +184,29 @@ function logUsage({ feature, model, usage, durationMs, attempts, ok, error }) {
  * @param {number} options.maxTokens cap on the reply
  * @returns {Promise<string>} the reply's text blocks, joined
  */
-async function complete({ feature, system, user, maxTokens = 1024 }) {
+async function complete({ feature, system, user, maxTokens = 1024, userId = null }) {
+  /*
+   * The prompt ceiling, enforced BEFORE the call.
+   *
+   * Part of the input is user-supplied — a search box, a customer's free-text
+   * notes — so without a limit someone pasting a document turns into a large
+   * and entirely pointless bill. Refusing here costs nothing; discovering it on
+   * an invoice costs the invoice.
+   *
+   * Truncating instead would be worse than refusing: a silently shortened
+   * prompt produces a confidently wrong answer, and nobody would know why.
+   */
+  const promptChars = String(system).length + String(user).length;
+  if (promptChars > env.aiMaxPromptChars) {
+    log.warn(
+      { feature, promptChars, limit: env.aiMaxPromptChars },
+      'prompt exceeds the configured size limit — refusing to send it'
+    );
+    throw new Error(
+      `Prompt is ${promptChars} characters, over the ${env.aiMaxPromptChars} limit`
+    );
+  }
+
   if (!anthropic) {
     throw new Error('ANTHROPIC_API_KEY is not configured');
   }
@@ -186,13 +226,26 @@ async function complete({ feature, system, user, maxTokens = 1024 }) {
         messages: [{ role: 'user', content: user }],
       });
 
+      const durationMs = Date.now() - startedAt;
+
       logUsage({
         feature,
         model: env.anthropicModel,
         usage: response.usage,
-        durationMs: Date.now() - startedAt,
+        durationMs,
         attempts: attempt,
         ok: true,
+      });
+
+      persistUsage({
+        feature,
+        model: env.anthropicModel,
+        inputTokens: response.usage?.input_tokens ?? 0,
+        outputTokens: response.usage?.output_tokens ?? 0,
+        durationMs,
+        attempts: attempt,
+        outcome: 'ok',
+        userId,
       });
 
       // `content` is a list of blocks; join every text block rather than
@@ -211,14 +264,30 @@ async function complete({ feature, system, user, maxTokens = 1024 }) {
     }
   }
 
+  const failedAfterMs = Date.now() - startedAt;
+
   logUsage({
     feature,
     model: env.anthropicModel,
     usage: null,
-    durationMs: Date.now() - startedAt,
+    durationMs: failedAfterMs,
     attempts: MAX_ATTEMPTS,
     ok: false,
     error: lastError?.message,
+  });
+
+  /*
+   * A failed call is recorded too. It cost time and, for anything that failed
+   * after the model started responding, may have cost money — and a feature
+   * that fails often is exactly what a usage report should surface.
+   */
+  persistUsage({
+    feature,
+    model: env.anthropicModel,
+    durationMs: failedAfterMs,
+    attempts: MAX_ATTEMPTS,
+    outcome: 'failed',
+    userId,
   });
 
   throw lastError;

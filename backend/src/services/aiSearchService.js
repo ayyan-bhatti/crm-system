@@ -1,7 +1,10 @@
 const { componentLogger } = require('../config/logger');
 
 const log = componentLogger('ai-search');
+const env = require('../config/env');
 const aiClient = require('./aiClient');
+const aiCache = require('./aiCache');
+const aiUsageService = require('./aiUsageService');
 const { extractJson, parseAndValidate } = require('./aiJson');
 const {
   ENTITIES,
@@ -220,11 +223,12 @@ function validateFilter(raw) {
  * No assistant-message prefill: it is rejected on this model family, so the JSON
  * is coaxed out with the system prompt plus defensive parsing instead.
  */
-function callModel(query) {
+function callModel(query, userId) {
   return aiClient.complete({
     feature: 'ai-search',
     system: buildSystemPrompt(),
     user: query,
+    userId,
     // Small: the answer is one short JSON filter object. A generous cap would
     // only ever pay for output nobody reads.
     maxTokens: 1024,
@@ -242,14 +246,40 @@ function callModel(query) {
  * mode — no API key, network error, rate limit, unparseable reply, filter that
  * fails validation — collapses into the same graceful fallback signal.
  */
-async function translateQuery(query) {
+async function translateQuery(query, { userId = null, entity = null } = {}) {
   if (!aiClient.isConfigured()) {
     return { mode: 'fallback', filter: null, reason: 'ANTHROPIC_API_KEY is not configured' };
   }
 
+  /*
+   * A repeated question inside the cache window skips the call entirely.
+   *
+   * Safe because what is cached is the FILTER, not the results: it is re-run
+   * against the live database on every hit, so nothing stale is ever shown.
+   * The key is scoped per user — two people asking the same question are
+   * entitled to different answers, since a sales rep sees only their own
+   * customers. See services/aiCache.
+   */
+  const descriptor = { feature: 'ai-search', query, entity, userId };
+  const cached = aiCache.get(descriptor);
+
+  if (cached) {
+    // Counted so the cache proves its worth rather than being assumed to work.
+    aiUsageService
+      .recordUsage({
+        feature: 'ai-search',
+        model: env.anthropicModel,
+        outcome: 'cached',
+        userId,
+      })
+      .catch(() => {});
+
+    return { ...cached, cached: true };
+  }
+
   let text;
   try {
-    text = await callModel(query);
+    text = await callModel(query, userId);
   } catch (err) {
     log.warn({ err }, 'model call failed — falling back to keyword search');
     return { mode: 'fallback', filter: null, reason: `AI request failed: ${err.message}` };
@@ -263,7 +293,13 @@ async function translateQuery(query) {
     return { mode: 'fallback', filter: null, reason: result.reason };
   }
 
-  return { mode: 'ai', filter: result.value };
+  const translated = { mode: 'ai', filter: result.value };
+
+  // Only successful translations are cached. Caching a fallback would keep the
+  // feature degraded for five minutes after a single blip.
+  aiCache.set(descriptor, translated);
+
+  return translated;
 }
 
 module.exports = {

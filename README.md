@@ -109,6 +109,8 @@ Once signed in, try the search box on the dashboard:
 | `MAIL_WEBHOOK_URL` | no | — | Required when `MAIL_TRANSPORT=webhook` |
 | `MAIL_FROM` | no | `SimpleCRM <no-reply@simplecrm.local>` | Sender shown on outgoing mail |
 | `LOG_LEVEL` | no | `info` in production, `debug` otherwise | `fatal` · `error` · `warn` · `info` · `debug` · `trace` |
+| `AI_CACHE_DISABLED` | no | — | `true` turns off the 5-minute AI search response cache |
+| `AI_MAX_PROMPT_CHARS` | no | `8000` | Prompts above this are refused before the call is made |
 | `ANTHROPIC_API_KEY` | no | — | Blank ⇒ AI search falls back to keyword search |
 | `ANTHROPIC_MODEL` | no | `claude-sonnet-4-6` | Model used to translate queries |
 
@@ -716,6 +718,83 @@ showing one attempt.
 Both AI features **degrade rather than fail**: if the model is unavailable the summary is
 written from the same figures by a template, and the response says `mode: "fallback"` so the
 UI can label it honestly. A generated sentence and a templated one look identical on screen.
+
+---
+
+### AI cost tracking and caching
+
+`GET /api/internal/ai-usage?days=30` — **admin only** — reports what the AI features cost.
+
+```json
+{ "windowDays": 30,
+  "pricing": { "note": "Estimated from published per-token rates…", "checkedOn": "2026-08-21" },
+  "totals": { "calls": 431, "billableCalls": 366, "cacheHits": 65,
+              "cacheHitRate": 0.1508, "inputTokens": 412000, "outputTokens": 78000,
+              "estimatedCostUsd": 2.406, "averageDurationMs": 940 },
+  "projectedMonthlyUsd": 2.406,
+  "byFeature": [ { "feature": "customer-summary", "calls": 240, "estimatedCostUsd": 1.61 },
+                 { "feature": "ai-search", "calls": 191, "estimatedCostUsd": 0.79 } ] }
+```
+
+**Why a collection when the same figures are already in the logs.** A log line answers
+*"what happened just now"* and is excellent at it. It is poor at *"what did we spend last
+month, and on which feature"* — an aggregation over a time range, which needs either a log
+platform with a query language and a long retention window, or a table. The table is cheaper
+here and survives log rotation.
+
+**What is deliberately not stored: the prompt or the response.** Prompts contain customer
+names, notes and order history; keeping a second copy in a collection nobody thinks of as
+customer data is how data ends up somewhere it should not be. The token counts are all the
+cost question needs.
+
+**Cost is estimated and stored per call, not computed on read**, because prices change —
+recomputing last quarter at today's rates would quietly rewrite history. The rate table
+carries the date it was checked, so a stale figure is visible rather than assumed current.
+It is an estimate from published per-token rates: it does not know about caching discounts,
+batch pricing, or the plan the account is on. Good enough for *"is this feature worth what it
+costs"*, not for reconciling an invoice.
+
+Usage rows expire after 90 days. Unlike the audit trail — which has no TTL because deleting
+evidence is the failure mode — this is operational cost data, and nobody investigates an
+incident by reading token counts from last year.
+
+#### Response caching
+
+Identical AI **search** requests are served from a 5-minute in-memory cache.
+
+**It is safe because what is cached is the FILTER, not the results.** The AI call translates
+a question into a query; the query is re-run against the live database on every hit, so
+nothing stale is ever shown. What could go stale is the translation, and only if the schema
+changed mid-session.
+
+**Keyed per user**, which is the part that matters: a sales rep sees only their own
+customers, so serving them an admin's cached results would leak exactly the records the
+permission model exists to hide. The question is hashed rather than stored, so a customer
+name does not sit in a map that ends up in a heap dump.
+
+**The customer summary is deliberately not cached.** It includes figures that move whenever
+an order is placed, and showing a rep a revenue number minutes out of date — on the screen
+they opened to check it — is a different and worse risk than re-translating a query. Search
+caches a translation; a summary would cache an answer.
+
+**In memory, like the metrics and unlike the rate limiter.** A cache is an optimisation, not
+a control: a per-instance cache still avoids most duplicate calls, and a miss costs exactly
+what the call cost before. A shared cache would add a read and a write to every AI request
+to save a fraction more — paying latency on all of them to save money on some.
+
+Only *successful* translations are cached; caching a fallback would keep the feature degraded
+for five minutes after a single blip. Entries are capped, because a cache keyed on user input
+with no limit is a memory leak with extra steps.
+
+#### Prompt size limit
+
+`AI_MAX_PROMPT_CHARS` (default 8000, roughly 2000 tokens) is enforced **before** the request
+leaves the server. Part of every prompt is user-supplied — a search box, a customer's
+free-text notes — so without a ceiling someone pasting a document becomes a large and
+entirely pointless bill.
+
+Oversized prompts are **refused, not truncated**: a silently shortened prompt produces a
+confidently wrong answer and nobody would know why.
 
 ---
 

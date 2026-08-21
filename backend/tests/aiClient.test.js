@@ -161,3 +161,35 @@ describe('an AI outage degrades rather than breaks', () => {
     expect(res.body.success !== undefined).toBe(true);
   });
 });
+
+
+describe('the prompt size ceiling', () => {
+  const env = require('../src/config/env');
+  const aiClient = require('../src/services/aiClient');
+
+  /**
+   * Part of every prompt is user-supplied — a search box, a customer's free-text
+   * notes — so without a ceiling somebody pasting a document becomes a large and
+   * entirely pointless bill. Refusing costs nothing; finding out on an invoice
+   * costs the invoice.
+   */
+  it('refuses a prompt larger than the configured limit', async () => {
+    await expect(
+      aiClient.complete({
+        feature: 'test',
+        system: 'x'.repeat(env.aiMaxPromptChars),
+        user: 'y'.repeat(env.aiMaxPromptChars),
+        maxTokens: 10,
+      })
+    ).rejects.toThrow(/over the .* limit/i);
+  });
+
+  /**
+   * REFUSED, not truncated. A silently shortened prompt produces a confidently
+   * wrong answer and nobody would know why.
+   */
+  it('has a limit large enough for any real question and far smaller than a document', () => {
+    expect(env.aiMaxPromptChars).toBeGreaterThan(2000);
+    expect(env.aiMaxPromptChars).toBeLessThan(100000);
+  });
+});

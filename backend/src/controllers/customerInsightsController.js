@@ -49,7 +49,12 @@ const getCustomerSummary = asyncHandler(async (req, res) => {
 
   // Called through the module object rather than a destructured reference so
   // the test suite can stub it, exactly as the AI search tests do.
-  const generated = await customerSummaryService.generateSummary(customer, metrics, health);
+  const generated = await customerSummaryService.generateSummary(
+    customer,
+    metrics,
+    health,
+    req.user?._id?.toString() ?? null
+  );
 
   const summary =
     generated.mode === 'ai'

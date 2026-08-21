@@ -1693,3 +1693,54 @@ taking out the app they were meant to observe. Routes are keyed on the **pattern
 `/api/customers/:id` is one series rather than one per customer.
 
 18 new tests.
+
+
+## 3. AI cost and reliability — the remaining pieces
+
+Retries, structured-output validation and rate limiting were already in place. Three things
+were missing.
+
+### Token usage tracking
+
+AiUsageLog records one row per call — feature, model, tokens each way, estimated cost,
+duration, outcome, user. GET /api/internal/ai-usage aggregates it, admin only.
+
+**Why a collection when the same figures are already logged.** The log answers "what
+happened just now"; it is poor at "what did we spend last month, on which feature", which is
+an aggregation over a range. A table is cheaper than a log platform with a query language and
+a long retention window, and it survives log rotation.
+
+**The prompt and response are deliberately not stored.** Prompts contain customer names,
+notes and order history, and a second copy in a collection nobody thinks of as customer data
+is how data ends up where it should not be. Token counts are all the cost question needs.
+
+**Cost is stored per call, not computed on read**, because prices change and recomputing last
+quarter at today rates would quietly rewrite history. The rate table carries the date it was
+checked. Rows expire after 90 days — unlike the audit trail this is operational data.
+
+### Response caching
+
+Identical AI **search** requests hit a 5-minute in-memory cache.
+
+**Safe because what is cached is the FILTER, not the results.** The translation is re-run
+against the live database on every hit. **Keyed per user**, which is the part that matters: a
+sales rep sees only their own customers, so serving them an admin cached results would leak
+exactly what the permission model hides.
+
+**The summary is deliberately not cached** — it contains figures that move whenever an order
+is placed, and a stale revenue number on the screen someone opened to check it is worse than
+re-translating a query.
+
+**In memory, like the metrics and unlike the rate limiter.** A cache is an optimisation, not
+a control. Only successful translations are cached; caching a fallback would keep the feature
+degraded for five minutes after one blip.
+
+### Prompt size limit
+
+AI_MAX_PROMPT_CHARS (8000, about 2000 tokens), enforced before the request leaves the server.
+Part of every prompt is user-supplied, so without a ceiling a pasted document becomes a
+pointless bill. **Refused, not truncated** — a silently shortened prompt produces a
+confidently wrong answer nobody can explain. Checked before the API-key check, because input
+validation should not depend on whether a dependency is configured.
+
+26 new tests.

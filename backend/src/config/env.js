@@ -153,6 +153,32 @@ env.breachCheckEnabled = !env.isTest && process.env.BREACH_CHECK_DISABLED !== 't
  * a background job, so a deletion is an operational act with a log line.
  */
 env.auditRetentionDays = Number(process.env.AUDIT_RETENTION_DAYS) || null;
+
+/**
+ * Cache identical AI requests for a few minutes. On by default.
+ *
+ * Off in tests, where a cached response from a previous test would make the
+ * next one assert against a stale stub — a cache is exactly the kind of shared
+ * state that turns an independent test into an order-dependent one.
+ */
+env.aiCacheEnabled = !env.isTest && process.env.AI_CACHE_DISABLED !== 'true';
+
+/** Persist AI token usage. Tests opt in per file; see services/aiUsageService. */
+env.aiUsageTrackingInTests = false;
+
+/**
+ * Hard ceiling on the characters sent as a prompt.
+ *
+ * Tokens are billed, and the input is partly user-supplied — a pasted document
+ * in the search box would otherwise become a large, and entirely pointless,
+ * bill. Characters rather than tokens because the limit has to be enforced
+ * BEFORE the call, and counting tokens locally would mean shipping a tokeniser
+ * to approximate a number the API will compute anyway.
+ *
+ * Roughly 4 characters per token, so 8000 is about 2000 tokens — far more than
+ * any legitimate question and far less than a document.
+ */
+env.aiMaxPromptChars = Number(process.env.AI_MAX_PROMPT_CHARS) || 8000;
 /** True on Vercel (and most FaaS platforms), which set this automatically. */
 env.isServerless = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
 
