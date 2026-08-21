@@ -98,7 +98,7 @@ async function inviteUser({ name, email, role }, invitedBy) {
 
   const link = `${env.appUrl}/accept-invite?token=${token}`;
 
-  await mailer.sendMail({
+  const delivery = await mailer.sendMail({
     to: user.email,
     subject: 'You have been invited to SimpleCRM',
     text:
@@ -111,7 +111,23 @@ async function inviteUser({ name, email, role }, invitedBy) {
       `be used until someone sets a password through this link.`,
   });
 
-  return { user, resent: Boolean(existing) };
+  /*
+   * WHETHER THE INVITEE ACTUALLY RECEIVED ANYTHING.
+   *
+   * The console transport reports `delivered: true`, which is honest about what
+   * it did — it wrote the message somewhere real — but it is not the same thing
+   * as mail arriving in someone's inbox. The caller needs to tell those apart,
+   * because it previously did not: the endpoint answered "Invitation sent" on a
+   * deployment with no mail provider configured, so the admin had every reason
+   * to believe an email was on its way and the invitee waited for one that was
+   * never going to come.
+   *
+   * `emailed` is therefore the narrower claim: a transport that leaves the
+   * building said it succeeded.
+   */
+  const emailed = delivery.delivered && delivery.transport !== 'console';
+
+  return { user, resent: Boolean(existing), emailed, transport: delivery.transport, link };
 }
 
 /**

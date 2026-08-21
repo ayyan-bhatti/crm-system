@@ -142,6 +142,99 @@ describe('Invitations', () => {
       expect((await invite({ email: 'a@b.co' })).status).toBe(400);
       expect((await invite({ name: 'No Email' })).status).toBe(400);
     });
+
+    /**
+     * The invite link is withheld when the invitee genuinely received one.
+     * Their inbox should be the only place it exists — there is no reason for
+     * a second copy to travel back to the admin's browser.
+     */
+    it('does not return the link when mail actually went out', async () => {
+      const res = await invite(NEW_HIRE);
+
+      expect(res.body.meta).toMatchObject({ emailed: true });
+      expect(res.body.meta.inviteLink).toBeUndefined();
+      expect(res.body.message).toMatch(/emailed/i);
+    });
+  });
+
+  /**
+   * WHAT THIS DESCRIBE BLOCK IS ACTUALLY ABOUT.
+   *
+   * With no mail provider configured — which is the state of any deployment
+   * that has not bought one — the console transport writes the invite to the
+   * log and nowhere else. The endpoint still answered "Invitation sent", so the
+   * feature looked like it worked and did not: the admin waited for a delivery
+   * that never happened, the invitee never got an email, and the only copy of
+   * the link was in a log neither of them reads.
+   *
+   * So the response now says what actually happened, and hands the link back so
+   * the admin can pass it on themselves.
+   */
+  describe('when no mail transport is configured', () => {
+    beforeEach(() => {
+      mailer.sendMail = async (message) => {
+        sent.push(message);
+        return { delivered: true, transport: 'console' };
+      };
+    });
+
+    it('returns the invite link so the admin can share it', async () => {
+      const res = await invite(NEW_HIRE);
+
+      expect(res.status).toBe(201);
+      expect(res.body.meta.emailed).toBe(false);
+      expect(res.body.meta.inviteLink).toMatch(/\/accept-invite\?token=[a-f0-9]{64}$/);
+    });
+
+    /** Saying "sent" when nothing was sent is the bug being fixed. */
+    it('does not claim an email was sent', async () => {
+      const res = await invite(NEW_HIRE);
+
+      expect(res.body.message).not.toMatch(/emailed/i);
+      expect(res.body.message).toMatch(/no email was sent/i);
+    });
+
+    /** A link that cannot be redeemed would be worse than no link. */
+    it('returns a link that actually works', async () => {
+      const res = await invite(NEW_HIRE);
+      const token = res.body.meta.inviteLink.match(/token=([a-f0-9]+)/)[1];
+
+      const accepted = await api()
+        .post('/api/auth/accept-invite')
+        .send({ token, password: 'Karachi-Ledger-72' });
+
+      expect(accepted.status).toBe(201);
+
+      const login = await api()
+        .post('/api/auth/login')
+        .send({ email: NEW_HIRE.email, password: 'Karachi-Ledger-72' });
+
+      expect(login.status).toBe(200);
+    });
+
+    it('returns a fresh link on a re-invite, and the message says so', async () => {
+      const first = await invite(NEW_HIRE);
+      const second = await invite(NEW_HIRE);
+
+      expect(second.status).toBe(200);
+      expect(second.body.meta.inviteLink).toBeDefined();
+      expect(second.body.meta.inviteLink).not.toBe(first.body.meta.inviteLink);
+      expect(second.body.message).toMatch(/no longer works/i);
+    });
+
+    /**
+     * A failed webhook is the same situation as no transport at all: nothing
+     * reached the invitee, so the admin needs the link.
+     */
+    it('returns the link when delivery failed outright', async () => {
+      mailer.sendMail = async () => ({ delivered: false, transport: 'webhook' });
+
+      const res = await invite(NEW_HIRE);
+
+      expect(res.status).toBe(201);
+      expect(res.body.meta.emailed).toBe(false);
+      expect(res.body.meta.inviteLink).toBeDefined();
+    });
   });
 
   describe('who may invite', () => {

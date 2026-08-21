@@ -168,7 +168,7 @@ const inviteUserHandler = asyncHandler(async (req, res) => {
     throw ApiError.forbidden('Only an administrator can invite another administrator');
   }
 
-  const { user, resent } = await inviteService.inviteUser(
+  const { user, resent, emailed, link } = await inviteService.inviteUser(
     { name, email, role: role || ROLES.SALES_REP },
     req.user
   );
@@ -181,12 +181,48 @@ const inviteUserHandler = asyncHandler(async (req, res) => {
     after: user,
   });
 
+  /*
+   * WHY THE LINK COMES BACK IN THE RESPONSE WHEN NO EMAIL WAS SENT.
+   *
+   * With no mail provider configured, the invite link only ever reached the
+   * server log. The endpoint still answered "Invitation sent", so the feature
+   * looked like it worked and simply did not — the admin waited, the invitee
+   * waited, and the only copy of the link was in a log neither of them reads.
+   *
+   * The alternative to handing it back is refusing to invite at all without a
+   * transport, which makes a working feature unusable on any deployment that
+   * has not bought an email provider yet.
+   *
+   * It is safe HERE and would not be safe anywhere else in this codebase. The
+   * recipient is the manager or admin who just issued this invite, one call
+   * after passing `protect` and `requireManagerOrAdmin`. They chose the address
+   * and the role, they can re-issue the invite at will, and they can already
+   * deactivate the account outright. Handing them the link grants them nothing
+   * they did not already have.
+   *
+   * The password-reset flow deliberately does NOT do this, and the difference
+   * is the point: there the requester is an anonymous member of the public
+   * claiming to own an address, so returning the token would let anyone take
+   * over any account by typing in an email.
+   *
+   * When mail genuinely went out, the link is withheld. The invitee's inbox
+   * should be the only place it exists.
+   */
+  const deliveredElsewhere = emailed;
+
   res.status(resent ? 200 : 201).json({
     success: true,
-    message: resent
-      ? 'A fresh invitation has been sent, and any earlier link no longer works.'
-      : 'Invitation sent.',
+    message: deliveredElsewhere
+      ? resent
+        ? 'A fresh invitation has been emailed, and any earlier link no longer works.'
+        : 'Invitation emailed.'
+      : resent
+        ? 'A fresh invite link has been created, and any earlier link no longer works. ' +
+          'No email was sent — share the link below with them directly.'
+        : 'Invite link created. No email was sent, because this deployment has no mail ' +
+          'transport configured — share the link below with them directly.',
     data: user,
+    meta: { emailed: deliveredElsewhere, ...(deliveredElsewhere ? {} : { inviteLink: link }) },
   });
 });
 

@@ -26,6 +26,16 @@ export default function UserList() {
   const toast = useToast();
   const [showForm, setShowForm] = useState(false);
 
+  /*
+   * The invite link, when the server could not email it.
+   *
+   * Held in page state rather than shown in a toast, deliberately. A toast
+   * disappears after a few seconds, and this is a long single-use URL the admin
+   * has to copy and pass on — losing it means re-issuing the invite. It stays
+   * until dismissed.
+   */
+  const [pendingLink, setPendingLink] = useState(null);
+
   const { data, loading, error, reload } = useFetch(() => usersApi.list(), []);
 
   async function changeRole(id, role) {
@@ -71,12 +81,37 @@ export default function UserList() {
     }
   }
 
+  /**
+   * What to do with an invite response, whether it came from the form or the
+   * re-send button.
+   *
+   * The server tells us whether an email actually left the building. When it
+   * did not — which is every deployment without a mail transport configured —
+   * it hands back the link instead of pretending, and the admin sends it on
+   * themselves.
+   */
+  function handleInviteResult(result, email) {
+    const link = result?.meta?.inviteLink;
+
+    if (link) {
+      setPendingLink({ email, link });
+    } else {
+      setPendingLink(null);
+      toast.success(result?.message || `Invitation sent to ${email}.`);
+    }
+
+    reload();
+  }
+
   /** Send a fresh invitation to someone who has not accepted yet. */
   async function resendInvite(user) {
     try {
-      await usersApi.invite({ name: user.name, email: user.email, role: user.role });
-      toast.success(`A new invitation has been sent to ${user.email}.`);
-      reload();
+      const result = await usersApi.invite({
+        name: user.name,
+        email: user.email,
+        role: user.role,
+      });
+      handleInviteResult(result, user.email);
     } catch (err) {
       toast.error(errorMessage(err, 'Could not re-send the invitation'));
     }
@@ -113,12 +148,19 @@ export default function UserList() {
 
       {showForm && (
         <InviteUserForm
-          onInvited={(message) => {
+          onInvited={(result, email) => {
             setShowForm(false);
-            toast.success(message);
-            reload();
+            handleInviteResult(result, email);
           }}
           onError={(message) => toast.error(message)}
+        />
+      )}
+
+      {pendingLink && (
+        <InviteLinkPanel
+          email={pendingLink.email}
+          link={pendingLink.link}
+          onDismiss={() => setPendingLink(null)}
         />
       )}
 
@@ -238,6 +280,85 @@ export default function UserList() {
 
 /** Inline create form. Unlike public registration, an admin picks the role. */
 /**
+ * The invite link, when the server had no way to email it.
+ *
+ * WHY THIS SCREEN SHOWS A LINK AT ALL.
+ *
+ * With no mail transport configured the invite only ever reached the server
+ * log, while the UI cheerfully reported that an invitation had been sent. The
+ * feature looked like it worked and did not — the admin waited, the invitee
+ * waited, and the one copy of the link sat somewhere neither of them looks.
+ *
+ * Showing it is safe here specifically because of who is looking: the admin or
+ * manager who just issued this invite, who chose the address and the role and
+ * can re-issue or revoke it at will. It tells them nothing they did not already
+ * control. The password-reset flow deliberately does NOT do this, because there
+ * the requester is an anonymous member of the public claiming to own an inbox.
+ *
+ * It is a warning rather than a success, because something IS misconfigured and
+ * an admin who never notices will keep hand-delivering links forever.
+ */
+function InviteLinkPanel({ email, link, onDismiss }) {
+  const [copied, setCopied] = useState(false);
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(link);
+      setCopied(true);
+      // Reverts so the button can be used again, and so a stale "Copied"
+      // does not imply the clipboard still holds this particular link.
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard access can be refused, and over plain HTTP the API is not
+      // there at all. The input below is selectable, so there is always a way
+      // to get the link out — no error needs raising.
+      setCopied(false);
+    }
+  }
+
+  return (
+    <Card className="mb-4 border-warning/40 p-5">
+      <h2 className="text-base font-semibold text-ink">
+        Invite created — no email was sent
+      </h2>
+      <p className="mt-1 text-sm text-ink-2">
+        This deployment has no mail transport configured, so nothing was delivered to{' '}
+        <span className="font-medium text-ink">{email}</span>. Send them this link yourself. It
+        works once and expires in 7 days.
+      </p>
+
+      <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+        {/*
+          Read-only rather than disabled: a disabled input cannot be selected,
+          which would remove the fallback for anyone whose browser refuses
+          clipboard access.
+        */}
+        <input
+          type="text"
+          readOnly
+          value={link}
+          aria-label="Invitation link"
+          onFocus={(e) => e.target.select()}
+          className={`${input} font-mono text-xs`}
+        />
+        <button type="button" onClick={copy} className={`${btnPrimary} shrink-0`}>
+          {copied ? 'Copied' : 'Copy link'}
+        </button>
+      </div>
+
+      <p className="mt-3 text-xs text-muted">
+        To have SimpleCRM email invitations itself, set <code>MAIL_TRANSPORT</code>,{' '}
+        <code>MAIL_WEBHOOK_URL</code> and <code>MAIL_WEBHOOK_AUTH</code> — see the README.
+      </p>
+
+      <button type="button" onClick={onDismiss} className="mt-3 text-sm text-muted underline">
+        Dismiss
+      </button>
+    </Card>
+  );
+}
+
+/**
  * Invite a colleague.
  *
  * NO PASSWORD FIELD, AND THAT IS THE POINT.
@@ -269,7 +390,7 @@ function InviteUserForm({ onInvited, onError }) {
 
     try {
       const result = await usersApi.invite(form);
-      onInvited(result.message || `Invitation sent to ${form.email}.`);
+      onInvited(result, form.email);
       setForm({ name: '', email: '', role: 'sales_rep' });
     } catch (err) {
       onError(errorMessage(err, 'Could not send the invitation'));
@@ -282,8 +403,9 @@ function InviteUserForm({ onInvited, onError }) {
     <Card className="mb-4 p-5">
       <h2 className="mb-1 text-base font-semibold text-ink">Invite a colleague</h2>
       <p className="mb-4 text-sm text-ink-2">
-        They will receive a link to choose their own password. The invitation expires in 7
-        days.
+        They choose their own password through a single-use link, which expires in 7 days. If
+        this deployment has no mail transport configured, the link is shown here for you to
+        send on yourself.
       </p>
 
       <form onSubmit={handleSubmit} className="grid gap-4 sm:grid-cols-3">
