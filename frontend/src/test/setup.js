@@ -1,6 +1,21 @@
 import '@testing-library/jest-dom/vitest';
-import { cleanup } from '@testing-library/react';
+import { cleanup, configure } from '@testing-library/react';
 import { afterEach, vi } from 'vitest';
+
+/*
+ * Testing Library's default async timeout is 1000ms, which is generous on an
+ * idle machine and not generous at all on a busy one. Two tests failed
+ * intermittently for that reason alone — a render that normally takes 40ms
+ * takes rather longer when the whole suite is competing for the same cores,
+ * and the assertion had nothing wrong with it.
+ *
+ * Raised rather than patched per test, because the fix belongs to the class of
+ * problem and not to the two tests that happened to surface it. This costs
+ * nothing when things pass: `waitFor` polls until the condition holds and
+ * returns immediately, so a higher ceiling only changes how long a genuine
+ * failure takes to be reported.
+ */
+configure({ asyncUtilTimeout: 5000 });
 
 /**
  * Test environment setup, run before every test file.

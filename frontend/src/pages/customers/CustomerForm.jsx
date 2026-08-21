@@ -3,10 +3,10 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { customersApi, usersApi } from '../../api/resources';
 import { errorMessage } from '../../api/client';
 import useFetch from '../../hooks/useFetch';
+import usePermissions from '../../hooks/usePermissions';
 import { useToast } from '../../components/Toast';
 import { Card, ErrorBanner, Field, PageHeader, Spinner } from '../../components/common';
-import { useAuth } from '../../context/AuthContext';
-import { CUSTOMER_STATUSES, FULL_ACCESS_ROLES } from '../../constants';
+import { CUSTOMER_STATUSES } from '../../constants';
 import { btnPrimary, btnSecondary, input } from '../../ui';
 
 /**
@@ -20,7 +20,7 @@ export default function CustomerForm() {
   const { id } = useParams();
   const isEdit = Boolean(id);
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { can } = usePermissions();
 
   const [form, setForm] = useState({
     name: '',
@@ -77,8 +77,9 @@ export default function CustomerForm() {
 
   // Only managers and admins may reassign, matching the API rule — a sales rep
   // sending `assignedTo` gets a 403, so the control is hidden rather than
-  // offered and then rejected.
-  const canReassign = FULL_ACCESS_ROLES.includes(user.role);
+  // offered and then rejected. The rule itself lives in hooks/usePermissions,
+  // so it cannot drift from the same rule applied on other screens.
+  const canReassign = can.reassignRecords;
 
   function update(field, value) {
     setForm((prev) => ({ ...prev, [field]: value }));

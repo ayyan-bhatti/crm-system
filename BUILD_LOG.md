@@ -2060,4 +2060,65 @@ catalogue came back Z-to-A. The direction is now declared next to the field in
 
 ---
 
-**Final totals: 663 backend + 98 frontend + 11 end-to-end**, lint clean on both packages.
+## Item 3: one permission table instead of thirteen role checks
+
+The audit found the frontend was not ungated — it was INCONSISTENTLY gated, which is worse,
+because the parts that were done right made it look finished. Thirteen role checks across the
+whole app, spelled three different ways. The gaps were exactly where you would predict: the
+screens written last, `CustomerDetail` and `OrderDetail`, had no checks at all.
+
+### Naming the action, not the role
+
+`usePermissions.js` is now a single table of ACTION to allowed roles, consumed as a hook or as
+`<Can do="manageProducts">`. The old role-list gate is deleted rather than kept alongside it,
+because two mechanisms is the problem restated.
+
+The distinction matters more than it looks. A component asking for a role list has restated
+the policy locally, so changing who may reassign a record means finding every site and editing
+them all the same way. Naming the action means one edit, in one file, that cannot be applied
+inconsistently. It also makes "what can a manager see?" a table you read rather than a grep
+you interpret.
+
+Each entry names the backend rule it mirrors, so the table shadows the server rather than
+inventing policy. That mattered immediately: I had assumed a sales rep should not see a
+Delete button on a customer, checked, and found the API deliberately allows it — a rep owns
+their own records. Mirroring reality beat implementing my assumption.
+
+An unknown action throws in development instead of returning false. A typo would otherwise
+hide the control from everyone including the admin, and look exactly like a deliberate rule
+— failing invisibly, in the direction hardest to notice.
+
+### What actually changed for a sales rep
+
+The genuine find was on the customer list: reps were shown an "assigned to" filter, which can
+only ever be a no-op for someone who sees only their own records — and populating it meant
+**every rep fetching the name of every other rep** to fill a dropdown that does nothing. The
+column is hidden too; it only ever showed them their own name.
+
+### The tests are role-by-role on the same screen
+
+Asserting per-page would have passed on the pages that had checks and never been written for
+the pages that did not. Rendering the SAME screen as each role is what makes an omission
+visible: an ungated control appears for all three, and the difference the test demands does
+not materialise.
+
+### And a flaky suite, found while running it
+
+Running the frontend suite repeatedly to check my work, it failed about one run in five,
+always in a different file, always a timing-sensitive assertion. Two causes:
+
+- **Memory pressure.** Vitest defaults to one worker per core; twelve cores meant eleven jsdom
+  environments at once on a machine with 2.6 GB free. Capped at four — which also halved the
+  wall-clock, because the machine had been thrashing.
+- **An ordering assumption in one of my own new tests.** It asserted a fetch had happened
+  because a control depending on the same permission was on screen. The control renders from
+  the permission; the fetch happens in an effect. True until the machine is busy.
+
+A flaky suite is worse than a slow one: people learn to re-run it rather than read it, and a
+real regression gets re-run away with the noise. Six consecutive clean runs now.
+
+**28 new frontend tests.**
+
+---
+
+**Final totals: 663 backend + 126 frontend + 11 end-to-end**, lint clean on both packages.

@@ -5,8 +5,7 @@ import { errorMessage } from '../../api/client';
 import useFetch from '../../hooks/useFetch';
 import { Card, ErrorBanner, PageHeader, Spinner } from '../../components/common';
 import { useToast } from '../../components/Toast';
-import { RoleGate } from '../../components/ProtectedRoute';
-import { PRODUCT_WRITE_ROLES } from '../../constants';
+import Can from '../../components/Can';
 import { btnDanger, btnPrimary, formatDate, money } from '../../ui';
 
 export default function ProductDetail() {
@@ -44,7 +43,7 @@ export default function ProductDetail() {
         title={product.name}
         subtitle={product.sku}
         action={
-          <RoleGate roles={PRODUCT_WRITE_ROLES}>
+          <Can do="manageProducts">
             <div className="flex gap-2">
               <Link to={`/products/${product._id}/edit`} className={btnPrimary}>
                 Edit
@@ -58,7 +57,7 @@ export default function ProductDetail() {
                 {deleting ? <Spinner /> : 'Delete'}
               </button>
             </div>
-          </RoleGate>
+          </Can>
         }
       />
 

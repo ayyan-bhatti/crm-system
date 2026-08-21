@@ -247,6 +247,48 @@ immediately, instead of whenever the old token happens to expire.
   refreshes present an already-consumed token and trip reuse detection against the real
   user.
 
+### Role-based UI
+
+Authorisation is enforced by the API. The frontend's job is a different one: not to OFFER
+actions that will be refused, so a user never learns to read a 403 as normal.
+
+That logic lives in exactly one place, `frontend/src/hooks/usePermissions.js`, as a table
+mapping an ACTION to the roles allowed to perform it:
+
+| Action | admin | manager | sales rep |
+| --- | :---: | :---: | :---: |
+| `viewAllRecords` — every customer and order, not only their own | yes | yes | no |
+| `reassignRecords` — hand a record to a different rep | yes | yes | no |
+| `manageProducts` — create, edit, delete | yes | yes | no (read-only) |
+| `inviteUsers` | yes | yes | no |
+| `manageUsers` — roles, deactivation, deletion | yes | no | no |
+| `approveAccounts` | yes | no | no |
+| `viewAuditLog` | yes | no | no |
+| `viewInternals` — metrics, AI status, AI spend | yes | no | no |
+
+Consumed as a hook (`const { can } = usePermissions()`) or as a wrapper:
+
+```jsx
+<Can do="manageProducts">
+  <Link to="/products/new">New product</Link>
+</Can>
+```
+
+**Permissions are named by action, not by role.** `<Can do="reassignRecords">` rather than a
+component taking a role list, which is what this replaced. The difference is not cosmetic:
+with a role list, every call site restates the policy, so changing who may do something means
+finding and editing all of them consistently. It was not being done consistently — the app
+had the same rule spelled three different ways, and the customer and order detail pages had
+no checks at all.
+
+Each entry names the server-side rule it mirrors, so a drift between the two is visible in
+the table rather than discovered by a user hitting a wall. An unknown action throws in
+development rather than quietly denying: a misspelling would otherwise hide the control from
+everyone, admin included, and look exactly like a deliberate rule.
+
+**None of this is a security boundary.** A hidden button is hidden from someone using the app,
+not from someone using curl. The API enforces every rule independently.
+
 ### Account lifecycle
 
 There are two ways to get an account, and which of them is available is a deployment

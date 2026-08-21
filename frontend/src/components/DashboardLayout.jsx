@@ -1,6 +1,6 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { ROLES } from '../constants';
+import usePermissions from '../hooks/usePermissions';
 import { humanize } from '../ui';
 
 /**
@@ -31,8 +31,11 @@ const NAV_ITEMS = [
   { to: '/customers', label: 'Customers', icon: 'customers' },
   { to: '/products', label: 'Products', icon: 'products' },
   { to: '/orders', label: 'Orders', icon: 'orders' },
-  { to: '/users', label: 'Users', icon: 'users', roles: [ROLES.ADMIN] },
-  { to: '/audit', label: 'Audit log', icon: 'audit', roles: [ROLES.ADMIN] },
+  // `requires` names an ACTION, not a role. See hooks/usePermissions for why:
+  // the role list is an implementation detail of the permission, and repeating
+  // it here is how the app ended up with the same policy spelled three ways.
+  { to: '/users', label: 'Users', icon: 'users', requires: 'manageUsers' },
+  { to: '/audit', label: 'Audit log', icon: 'audit', requires: 'viewAuditLog' },
 ];
 
 function NavIcon({ name }) {
@@ -45,6 +48,7 @@ function NavIcon({ name }) {
 
 export default function DashboardLayout() {
   const { user, logout } = useAuth();
+  const { can } = usePermissions();
   const navigate = useNavigate();
 
   // Awaited so the navigation happens after the server has revoked the refresh
@@ -54,7 +58,7 @@ export default function DashboardLayout() {
     navigate('/login', { replace: true });
   }
 
-  const visibleItems = NAV_ITEMS.filter((item) => !item.roles || item.roles.includes(user.role));
+  const visibleItems = NAV_ITEMS.filter((item) => !item.requires || can[item.requires]);
 
   const navClass = ({ isActive }) =>
     `flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${

@@ -39,6 +39,26 @@ export default defineConfig({
      * component tests the isolation difference does not matter.
      */
     pool: 'threads',
+
+    /*
+     * Capped concurrency, deliberately below the core count.
+     *
+     * Vitest defaults to roughly one worker per core, and each worker builds
+     * its own jsdom. On a twelve-core machine that is eleven DOM environments
+     * at once, which is fine until memory is tight — and then it is not a
+     * slowdown, it is intermittent FAILURES. Timing-sensitive assertions
+     * started losing races that have nothing to do with the code under test,
+     * roughly one full run in five, always in a different file.
+     *
+     * A flaky suite is worse than a slow one: people learn to re-run it instead
+     * of reading it, and a real regression gets re-run away with the noise. Four
+     * is comfortably stable here and costs a few seconds. CI runners have two to
+     * four cores anyway, so this gives up nothing there.
+     */
+    poolOptions: {
+      threads: { maxThreads: 4, minThreads: 1 },
+    },
+
     globals: true,
     setupFiles: './src/test/setup.js',
     css: false,

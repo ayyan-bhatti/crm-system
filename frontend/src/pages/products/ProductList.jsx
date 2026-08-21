@@ -10,14 +10,13 @@ import {
   PageHeader,
   Pagination,
 } from '../../components/common';
-import { RoleGate } from '../../components/ProtectedRoute';
-import { PRODUCT_WRITE_ROLES } from '../../constants';
+import Can from '../../components/Can';
 import { btnPrimary, input, link, money, td, th } from '../../ui';
 
 /**
  * Product list with category, low-stock and text filters.
  *
- * The "New product" button is wrapped in a RoleGate: sales reps have read-only
+ * The "New product" button is wrapped in <Can do="manageProducts">: sales reps have read-only
  * access to products, so offering them a button the API would reject with a 403
  * would just be a trap.
  */
@@ -64,11 +63,11 @@ export default function ProductList() {
         title="Products"
         subtitle="Inventory and stock levels."
         action={
-          <RoleGate roles={PRODUCT_WRITE_ROLES}>
+          <Can do="manageProducts">
             <Link to="/products/new" className={btnPrimary}>
               New product
             </Link>
-          </RoleGate>
+          </Can>
         }
       />
 

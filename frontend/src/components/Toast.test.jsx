@@ -30,7 +30,13 @@ function Harness() {
       </button>
       {/* An explicit short duration, so the expiry can be observed without
           faking timers — see the note on the test that uses it. */}
-      <button type="button" onClick={() => toast.success('Briefly here', { duration: 50 })}>
+      {/*
+        Long enough that the "it appeared" assertion cannot lose a race with the
+        dismissal, short enough that the test stays quick. At 50ms the toast
+        could be gone before the assertion ran, on a loaded machine, and the
+        test failed for a reason that had nothing to do with the behaviour.
+      */}
+      <button type="button" onClick={() => toast.success('Briefly here', { duration: 600 })}>
         raise brief
       </button>
     </>

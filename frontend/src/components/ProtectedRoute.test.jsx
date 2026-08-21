@@ -1,7 +1,8 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { screen } from '@testing-library/react';
 import { Route, Routes } from 'react-router-dom';
-import ProtectedRoute, { RoleGate } from './ProtectedRoute';
+import ProtectedRoute from './ProtectedRoute';
+import Can from './Can';
 import { renderWithProviders, fakeUser, apiError } from '../test/utils';
 import { authApi } from '../api/resources';
 
@@ -112,28 +113,36 @@ describe('ProtectedRoute', () => {
   });
 });
 
-describe('RoleGate', () => {
+/**
+ * <Can> replaced <RoleGate>, which took a ROLE LIST.
+ *
+ * The difference is not cosmetic: with a role list, every call site restated
+ * the policy, so changing who may do something meant finding and editing all of
+ * them consistently — which is how the customer and order detail pages ended up
+ * with no checks at all. Naming the ACTION puts the policy in one table.
+ */
+describe('Can', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('shows its children to an allowed role', async () => {
+  it('shows its children to a role that has the permission', async () => {
     authApi.me.mockResolvedValue(fakeUser({ role: 'manager' }));
 
     renderWithProviders(
-      <RoleGate roles={['manager', 'admin']}>
+      <Can do="manageProducts">
         <button type="button">New product</button>
-      </RoleGate>
+      </Can>
     );
 
     expect(await screen.findByRole('button', { name: /new product/i })).toBeInTheDocument();
   });
 
-  it('hides them from everyone else', async () => {
+  it('hides them from a role that does not', async () => {
     authApi.me.mockResolvedValue(fakeUser({ role: 'sales_rep' }));
 
     renderWithProviders(
-      <RoleGate roles={['manager', 'admin']}>
+      <Can do="manageProducts">
         <button type="button">New product</button>
-      </RoleGate>
+      </Can>
     );
 
     // Wait for the session to resolve before asserting an absence, or the test
@@ -146,11 +155,50 @@ describe('RoleGate', () => {
     authApi.me.mockRejectedValue(apiError(401, 'Not authenticated'));
 
     const { container } = renderWithProviders(
-      <RoleGate roles={['admin']}>
+      <Can do="manageUsers">
         <button type="button">Delete everything</button>
-      </RoleGate>
+      </Can>
     );
 
     expect(container.textContent).toBe('');
+  });
+
+  /** The escape hatch, for when an unexplained absence is worse than a hole. */
+  it('renders the fallback instead of nothing when one is given', async () => {
+    authApi.me.mockResolvedValue(fakeUser({ role: 'sales_rep' }));
+
+    renderWithProviders(
+      <Can do="manageProducts" fallback={<p>Products are read-only for your role.</p>}>
+        <button type="button">New product</button>
+      </Can>
+    );
+
+    expect(await screen.findByText(/read-only for your role/i)).toBeInTheDocument();
+  });
+
+  /**
+   * A misspelled action would otherwise be silently falsy: the control
+   * disappears for everyone including the admin, and looks exactly like a
+   * deliberate rule. Loud in development is the right trade — the API still
+   * enforces the real permission, so a stray visible button is a far smaller
+   * problem than an invisible missing one.
+   */
+  it('throws on an unknown action rather than hiding silently', async () => {
+    authApi.me.mockResolvedValue(fakeUser({ role: 'admin' }));
+
+    // React logs the error it re-throws; silence it so the output stays readable.
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      expect(() =>
+        renderWithProviders(
+          <Can do="manageProdcuts">
+            <button type="button">Typo</button>
+          </Can>
+        )
+      ).toThrow(/not a known action/i);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

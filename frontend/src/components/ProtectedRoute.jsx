@@ -32,12 +32,11 @@ export default function ProtectedRoute({ children, roles }) {
   return children;
 }
 
-/**
- * Conditionally renders children based on role. Used for nav links and buttons
- * that only some roles should see (e.g. "New product" for managers/admins).
+/*
+ * `RoleGate` used to live here. It took a ROLE LIST, so every call site
+ * restated the policy and changing who may do something meant finding and
+ * editing all of them consistently — which is how the customer and order
+ * detail pages ended up with no checks at all. It is replaced by
+ * <Can do="action">, backed by the single permission table in
+ * hooks/usePermissions.js.
  */
-export function RoleGate({ roles, children, fallback = null }) {
-  const { user } = useAuth();
-  if (!user || !roles.includes(user.role)) return fallback;
-  return children;
-}

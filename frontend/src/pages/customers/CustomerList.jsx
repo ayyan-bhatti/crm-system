@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { customersApi, usersApi } from '../../api/resources';
 import useFetch, { useDebounced } from '../../hooks/useFetch';
+import usePermissions from '../../hooks/usePermissions';
+import Can from '../../components/Can';
 import {
   Card,
   ListEmptyState,
@@ -45,7 +47,20 @@ export default function CustomerList() {
   );
 
   // For the "assigned to" dropdown. Available to every role.
-  const { data: users } = useFetch(() => usersApi.assignable(), []);
+  const { can } = usePermissions();
+
+  /*
+   * The colleague list is fetched only for roles that can use it.
+   *
+   * A sales rep sees exactly their own customers, so an "assigned to" filter
+   * can only ever be a no-op for them — and populating it meant every rep
+   * pulling down the name of every other rep to fill a dropdown that does
+   * nothing. Not a serious leak, but there is no reason for it to happen.
+   */
+  const { data: users } = useFetch(
+    () => (can.viewAllRecords ? usersApi.assignable() : Promise.resolve([])),
+    [can.viewAllRecords]
+  );
 
   /*
    * Whether the empty result is empty BECAUSE of a filter.
@@ -113,18 +128,21 @@ export default function CustomerList() {
             ))}
           </select>
 
-          <select
-            className={input}
-            value={assignedTo}
-            onChange={(e) => setFilter('assignedTo', e.target.value)}
-          >
-            <option value="">Anyone</option>
-            {(users || []).map((user) => (
-              <option key={user._id} value={user._id}>
-                {user.name}
-              </option>
-            ))}
-          </select>
+          <Can do="viewAllRecords">
+            <select
+              className={input}
+              value={assignedTo}
+              onChange={(e) => setFilter('assignedTo', e.target.value)}
+              aria-label="Filter by assigned rep"
+            >
+              <option value="">Anyone</option>
+              {(users || []).map((user) => (
+                <option key={user._id} value={user._id}>
+                  {user.name}
+                </option>
+              ))}
+            </select>
+          </Can>
         </div>
 
         {/* --- Results --------------------------------------------------- */}
@@ -153,7 +171,8 @@ export default function CustomerList() {
                     <th className={th}>Company</th>
                     <th className={th}>City</th>
                     <th className={th}>Status</th>
-                    <th className={th}>Assigned to</th>
+                    {/* Always the rep themselves, so it says nothing to them. */}
+                    {can.viewAllRecords && <th className={th}>Assigned to</th>}
                     <th className={th}>Added</th>
                   </tr>
                 </thead>
@@ -171,7 +190,9 @@ export default function CustomerList() {
                       <td className={td}>
                         <StatusBadge value={customer.status} />
                       </td>
-                      <td className={td}>{customer.assignedTo?.name || 'Unassigned'}</td>
+                      {can.viewAllRecords && (
+                        <td className={td}>{customer.assignedTo?.name || 'Unassigned'}</td>
+                      )}
                       <td className={td}>{formatDate(customer.createdAt)}</td>
                     </tr>
                   ))}
