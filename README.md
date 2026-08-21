@@ -108,6 +108,7 @@ Once signed in, try the search box on the dashboard:
 | `MAIL_TRANSPORT` | no | `console` | `console` logs the message; `webhook` POSTs it to `MAIL_WEBHOOK_URL` |
 | `MAIL_WEBHOOK_URL` | no | — | Required when `MAIL_TRANSPORT=webhook` |
 | `MAIL_WEBHOOK_AUTH` | no | — | Sent verbatim as the `Authorization` header on that POST. Needed by every hosted provider |
+| `ALLOW_PUBLIC_SIGNUP` | no | `true` | `false` closes `/register` to everyone but the first account, so people arrive by invitation only |
 | `MAIL_FROM` | no | `SimpleCRM <no-reply@simplecrm.local>` | Sender shown on outgoing mail |
 | `LOG_LEVEL` | no | `info` in production, `debug` otherwise | `fatal` · `error` · `warn` · `info` · `debug` · `trace` |
 | `AI_CACHE_DISABLED` | no | — | `true` turns off the 5-minute AI search response cache |
@@ -234,8 +235,24 @@ immediately, instead of whenever the old token happens to expire.
 
 ### Account lifecycle
 
-Users are **invited**, not self-registered. Public `/register` creates only the very first
-account on an empty database (the admin bootstrap); everything after arrives by invitation.
+There are two ways to get an account, and which of them is available is a deployment
+decision — `ALLOW_PUBLIC_SIGNUP`, which defaults to **open**.
+
+| | who starts it | role granted | available when |
+| --- | --- | --- | --- |
+| **Sign-up** | the person themselves, at `/register` | `sales_rep` | `ALLOW_PUBLIC_SIGNUP` is not `false` |
+| **Invitation** | an admin or manager | whatever they choose | always |
+
+The very first account on an empty database is a special case that ignores the setting
+entirely: it is always allowed and always becomes the **admin**. A fresh install has nobody
+to send an invitation, so gating it would lock everyone out of a new deployment permanently.
+
+**Which to run.** Open sign-up means anyone who can reach the page gets an account and can
+read the customer list — the role granted is the least-privileged one, so they cannot
+administer anything, but a stranger reading the CRM is usually the part you minded about. A
+deployment holding real customer data on the public internet should set
+`ALLOW_PUBLIC_SIGNUP=false` and invite people instead. It is left open by default so that a
+freshly cloned or demoed instance works without configuration.
 
 ```
 Admin or manager invites (email + role)
@@ -244,6 +261,22 @@ Invitee receives a single-use link (7-day expiry)
         |  they choose their own password
 Account becomes `active`, and they are signed in
 ```
+
+**When there is no mail transport configured**, the invite endpoint returns the link in
+`meta.inviteLink` and the Users screen displays it with a copy button, rather than reporting
+"Invitation sent" for an email that was never sent. That was a real failure: the link reached
+the server log and nowhere else, so the admin waited for a delivery that was not coming and
+the invitee never received anything.
+
+Handing the link back is safe **here specifically**, and the reasoning is worth being explicit
+about because it does not generalise. The recipient is the manager or admin who just issued
+the invite, one call after `protect` and `requireManagerOrAdmin`: they chose the address and
+the role, they can re-issue the invite at will, and they can deactivate the account outright.
+They are given nothing they did not already control. The password-reset flow deliberately
+does **not** do this — there the requester is an anonymous member of the public claiming to
+own an address, and returning the token would let anyone take over any account by typing in
+an email. When mail genuinely goes out, the link is withheld and the invitee's inbox is the
+only place it exists.
 
 | status | can sign in? | meaning |
 | --- | :---: | --- |
@@ -499,7 +532,7 @@ Every **state-changing** request authenticated by cookie must also send `X-CSRF-
 
 | Method | Path | Access | Description |
 | --- | --- | --- | --- |
-| `POST` | `/auth/register` | public | **Admin bootstrap only.** Creates the very first account on an empty database as the admin; every later call is refused with a pointer to the invite flow. Rate limited: 5/hour per IP |
+| `POST` | `/auth/register` | public | Creates an account. The first on an empty database becomes the admin; later ones are `sales_rep`, and are refused with a pointer to the invite flow when `ALLOW_PUBLIC_SIGNUP=false`. The role is never read from the body. Rate limited: 5/hour per IP |
 | `POST` | `/auth/login` | public | Sets session cookies; returns `{ user, token }`. Rate limited: 10/15min per IP, plus per-account lockout |
 | `POST` | `/auth/refresh` | refresh cookie | Rotates the session and reissues both cookies |
 | `POST` | `/auth/logout` | any | Clears the cookies **and revokes the refresh token**. Always `200` |
@@ -1210,6 +1243,7 @@ without setting any of them. Add them when you want the behaviour they describe.
 | `COOKIE_SAME_SITE` | The API and frontend end up on genuinely different sites (`none` needs HTTPS) |
 | `APP_URL` | `CLIENT_ORIGIN` is a comma-separated list — password-reset and invite links need exactly one origin |
 | `MAIL_TRANSPORT` / `MAIL_WEBHOOK_URL` / `MAIL_WEBHOOK_AUTH` / `MAIL_FROM` | **Recommended in production.** The default `console` transport only writes reset and invite links to the log |
+| `ALLOW_PUBLIC_SIGNUP` | You want accounts to come only from invitations. Defaults to open |
 | `LOG_LEVEL` | Default is `info` in production |
 | `AUDIT_RETENTION_DAYS` | You want audit entries to become eligible for pruning. Unset means keep forever |
 | `BREACH_CHECK_DISABLED` | Outbound HTTPS is firewalled and the Have I Been Pwned lookup cannot reach the internet |
@@ -1324,7 +1358,7 @@ asserts the harness really is a replica set, for exactly that reason.
 
 | Suite | Covers |
 | --- | --- |
-| `auth.test.js` | Registration, the admin-bootstrap rule, role-in-body being ignored, bcrypt hashing, login, identical messages for wrong-password vs unknown-email |
+| `auth.test.js` | Registration with sign-up open and closed, the admin-bootstrap rule, role-in-body being ignored, bcrypt hashing, login, identical messages for wrong-password vs unknown-email |
 | `session.test.js` | Cookie flags (httpOnly, SameSite, Path), short access-token lifetime, refresh token absent from bodies and stored only hashed, rotation, replay rejection, family revocation on reuse, logout revoking a captured token |
 | `csrf.test.js` | The attack reproduced directly - session cookie, no header, must fail - plus every exemption |
 | `password.test.js` | The policy rules, registration and change-password enforcement, other sessions revoked on change, security headers |

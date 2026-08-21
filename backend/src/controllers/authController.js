@@ -12,6 +12,7 @@ const {
 const { setAuthCookies, clearAuthCookies, REFRESH_COOKIE } = require('../utils/cookies');
 const { assertStrongPassword } = require('../utils/passwordPolicy');
 const passwordResetService = require('../services/passwordResetService');
+const env = require('../config/env');
 
 /**
  * Send a freshly issued session to the client.
@@ -36,14 +37,20 @@ function sendSession(res, { user, accessToken, refreshToken }, statusCode = 200)
 /**
  * POST /api/auth/register
  *
- * Role assignment on public sign-up is deliberately NOT taken from the request
- * body — otherwise anyone could register themselves as an admin. Instead:
+ * Role assignment is deliberately NOT taken from the request body — otherwise
+ * anyone could register themselves as an admin. Instead:
  *
  *   - the very first user to register becomes the `admin` (bootstrapping a
  *     fresh install, so there is someone who can manage everyone else)
  *   - every later public registration is a `sales_rep`, the least-privileged role
  *
  * Admins promote users afterwards through PATCH /api/users/:id.
+ *
+ * Whether later registrations are accepted at all is ALLOW_PUBLIC_SIGNUP, which
+ * defaults to open. A deployment holding real customer data on the public
+ * internet should close it and use invitations instead; see config/env.js for
+ * the trade-off in full. The first-user bootstrap ignores the setting, because
+ * a new install has nobody to send an invitation.
  */
 const register = asyncHandler(async (req, res) => {
   const { name, email, password } = req.body;
@@ -63,33 +70,43 @@ const register = asyncHandler(async (req, res) => {
   }
 
   /*
-   * PUBLIC REGISTRATION IS NOW ADMIN BOOTSTRAP ONLY.
+   * TWO DIFFERENT THINGS HAPPEN HERE, AND ONLY ONE OF THEM IS OPTIONAL.
    *
-   * The original rule was "the first account becomes admin, everyone after is
-   * a sales rep". The bootstrap half is genuinely needed — a fresh install has
-   * no admin, so somebody has to be able to create the first one — but the
-   * second half meant anyone who could reach this endpoint could give
-   * themselves an account on an internal CRM.
-   *
-   * So the first registration still works exactly as before, and every later
-   * one is refused and pointed at the invite flow. Keeping the bootstrap rather
-   * than deleting the route means a fresh deployment still has a way in without
+   * The FIRST account on an empty install is always allowed, whatever the
+   * signup setting says, and becomes the admin. A fresh deployment has nobody
+   * to send an invitation, so if this were gated too, closing sign-up would
+   * lock everyone out of a new install permanently and the only way in would be
    * a seed script or a database console.
+   *
+   * EVERY LATER account depends on ALLOW_PUBLIC_SIGNUP, and gets the
+   * least-privileged role regardless. Open sign-up on a CRM means anyone who
+   * can reach the page can read the customer list, which is why an admin can
+   * shut it and invite people instead. See config/env.js for the trade-off.
+   *
+   * countDocuments, not estimatedDocumentCount: the estimate reads collection
+   * metadata that can be stale after an unclean shutdown, and this decides
+   * whether the caller is handed the admin role. A wrong answer here is an
+   * unintended administrator, which is not a risk worth the few milliseconds.
    */
-  const isFirstUser = (await User.estimatedDocumentCount()) === 0;
+  const isFirstUser = (await User.countDocuments({})) === 0;
 
-  if (!isFirstUser) {
+  if (!isFirstUser && !env.allowPublicSignup) {
     throw ApiError.forbidden(
-      'Public registration is closed. SimpleCRM accounts are created by invitation — ' +
-        'ask an administrator to invite you.'
+      'Public registration is closed on this deployment. SimpleCRM accounts are created ' +
+        'by invitation — ask an administrator to invite you.'
     );
   }
 
+  /*
+   * The role is assigned here rather than read from req.body. Taking it from
+   * the request would let anyone register themselves as an admin, which is the
+   * whole reason this is not a field.
+   */
   const user = await User.create({
     name,
     email,
     password,
-    role: ROLES.ADMIN,
+    role: isFirstUser ? ROLES.ADMIN : ROLES.SALES_REP,
     status: USER_STATUS.ACTIVE,
   });
 

@@ -1,5 +1,6 @@
 const { api, createRep } = require('./helpers');
 const User = require('../src/models/User');
+const env = require('../src/config/env');
 
 describe('Authentication', () => {
   describe('POST /api/auth/register', () => {
@@ -33,48 +34,102 @@ describe('Authentication', () => {
     });
 
     /**
-     * Public registration is now ADMIN BOOTSTRAP ONLY.
+     * TWO SEPARATE RULES, and the tests keep them separate because they fail
+     * for different reasons.
      *
-     * The old rule was "first account becomes admin, everyone after is a sales
-     * rep". The bootstrap half is still needed — a fresh install has no admin,
-     * so somebody has to be able to create the first one — but the second half
-     * meant anyone who could reach this endpoint could give themselves an
-     * account on an internal CRM. Everyone after the first arrives by
-     * invitation instead.
+     * The first account on an empty install is ALWAYS allowed and becomes the
+     * admin — a fresh deployment has nobody to send an invitation, so gating
+     * this would lock everyone out of a new install permanently.
+     *
+     * Every account after that depends on ALLOW_PUBLIC_SIGNUP, and is a sales
+     * rep either way. The role is never taken from the request.
      */
-    it('makes the first account an admin', async () => {
-      const first = await api()
+    const registerAs = (name, email) =>
+      api()
         .post('/api/auth/register')
-        .send({ name: 'First', email: 'first@example.com', password: 'Karachi-Ledger-72' });
+        .send({ name, email, password: 'Karachi-Ledger-72' });
+
+    it('makes the first account an admin', async () => {
+      const first = await registerAs('First', 'first@example.com');
 
       expect(first.status).toBe(201);
       expect(first.body.data.user.role).toBe('admin');
       expect(first.body.data.user.status).toBe('active');
     });
 
-    it('refuses every registration after the first', async () => {
-      await api()
-        .post('/api/auth/register')
-        .send({ name: 'First', email: 'first@example.com', password: 'Karachi-Ledger-72' });
+    describe('when public sign-up is open (the default)', () => {
+      it('accepts a registration after the first', async () => {
+        await registerAs('First', 'first@example.com');
 
-      const second = await api()
-        .post('/api/auth/register')
-        .send({ name: 'Second', email: 'second@example.com', password: 'Karachi-Ledger-72' });
+        const second = await registerAs('Second', 'second@example.com');
 
-      expect(second.status).toBe(403);
-      expect(second.body.message).toMatch(/invitation/i);
+        expect(second.status).toBe(201);
+        expect(second.body.data.user.status).toBe('active');
+      });
+
+      /**
+       * The blast radius of open sign-up. A stranger who signs up can read the
+       * CRM; they must not be able to administer it, so only the bootstrap
+       * account ever gets the admin role.
+       */
+      it('gives them the least-privileged role, not the bootstrap role', async () => {
+        await registerAs('First', 'first@example.com');
+
+        const second = await registerAs('Second', 'second@example.com');
+
+        expect(second.body.data.user.role).toBe('sales_rep');
+      });
+
+      it('lets them sign in immediately, with no invitation involved', async () => {
+        await registerAs('First', 'first@example.com');
+        await registerAs('Second', 'second@example.com');
+
+        const login = await api()
+          .post('/api/auth/login')
+          .send({ email: 'second@example.com', password: 'Karachi-Ledger-72' });
+
+        expect(login.status).toBe(200);
+        expect(login.body.data.user.email).toBe('second@example.com');
+      });
     });
 
-    it('creates no account when registration is refused', async () => {
-      await api()
-        .post('/api/auth/register')
-        .send({ name: 'First', email: 'first@example.com', password: 'Karachi-Ledger-72' });
+    describe('when public sign-up is closed', () => {
+      const realSetting = env.allowPublicSignup;
 
-      await api()
-        .post('/api/auth/register')
-        .send({ name: 'Second', email: 'second@example.com', password: 'Karachi-Ledger-72' });
+      beforeEach(() => {
+        env.allowPublicSignup = false;
+      });
 
-      expect(await User.countDocuments({})).toBe(1);
+      afterEach(() => {
+        env.allowPublicSignup = realSetting;
+      });
+
+      it('refuses every registration after the first', async () => {
+        await registerAs('First', 'first@example.com');
+
+        const second = await registerAs('Second', 'second@example.com');
+
+        expect(second.status).toBe(403);
+        expect(second.body.message).toMatch(/invitation/i);
+      });
+
+      it('creates no account when registration is refused', async () => {
+        await registerAs('First', 'first@example.com');
+        await registerAs('Second', 'second@example.com');
+
+        expect(await User.countDocuments({})).toBe(1);
+      });
+
+      /**
+       * The bootstrap exemption. Without it, a deployment that ships with
+       * sign-up closed has no way to create its first administrator at all.
+       */
+      it('still allows the very first account', async () => {
+        const first = await registerAs('First', 'first@example.com');
+
+        expect(first.status).toBe(201);
+        expect(first.body.data.user.role).toBe('admin');
+      });
     });
 
     /**

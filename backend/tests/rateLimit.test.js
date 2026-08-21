@@ -94,14 +94,12 @@ describe('Per-IP rate limiting', () => {
 
   describe('POST /api/auth/register', () => {
     /**
-     * The limiter still guards this endpoint even though registration itself is
-     * now bootstrap-only.
+     * The limiter runs BEFORE the controller, which is the thing being tested.
      *
-     * Attempts 2-5 are refused by the controller (403 — registration is closed)
-     * while the limiter counts them, and the sixth is refused by the LIMITER
-     * before the controller ever runs. That ordering is the thing being tested:
-     * a limiter that only counted successful requests would let someone hammer
-     * a closed endpoint forever.
+     * The first five attempts are allowed through and create accounts. The
+     * sixth is refused by the limiter and must therefore create nothing — so
+     * the account count is what proves the ordering. A limiter that ran after
+     * the handler, or one that only counted failures, would leave six.
      */
     it('caps how many registration attempts one address can make', async () => {
       let last;
@@ -112,8 +110,36 @@ describe('Per-IP rate limiting', () => {
       }
 
       expect(last.status).toBe(429);
-      // Only the bootstrap admin was ever created.
-      expect(await User.countDocuments({})).toBe(1);
+      // Five got through; the sixth never reached the controller.
+      expect(await User.countDocuments({})).toBe(5);
+    });
+
+    /**
+     * The same cap, with public sign-up closed. Attempts 2-5 are refused by the
+     * controller (403) while the limiter counts them anyway, and the sixth is
+     * refused by the limiter itself. Without that, a closed endpoint could be
+     * hammered forever for free.
+     */
+    it('counts attempts the controller refuses, when sign-up is closed', async () => {
+      const realSetting = env.allowPublicSignup;
+      env.allowPublicSignup = false;
+
+      try {
+        let last;
+        for (let i = 0; i < 6; i += 1) {
+          last = await api().post('/api/auth/register').send({
+            name: `User ${i}`,
+            email: `user${i}@example.com`,
+            password: 'Karachi-Ledger-72',
+          });
+        }
+
+        expect(last.status).toBe(429);
+        // Only the bootstrap admin was ever created.
+        expect(await User.countDocuments({})).toBe(1);
+      } finally {
+        env.allowPublicSignup = realSetting;
+      }
     });
   });
 });

@@ -1844,4 +1844,89 @@ unset, and the three failure paths all returning `{ delivered: false }` instead 
 
 ---
 
-**Final totals: 605 backend + 87 frontend + 11 end-to-end**, lint clean on both packages.
+## The invite feature that looked like it worked
+
+Reported as "I am not getting any invite on my email". The invite flow itself was fine —
+token, expiry, single use, pending account, all correct. The problem was the last step and
+the sentence the UI printed about it.
+
+With no mail transport configured, `sendMail` falls through to the console transport, which
+writes the message to the server log and reports `delivered: true`. That is honest about what
+it did, but the invite controller treated it as "an email is on its way" and answered
+**"Invitation sent."** So the admin waited for a delivery that was never coming, the invitee
+never received anything, and the only copy of a working single-use link was sitting in a log
+neither of them reads.
+
+Two things were wrong, and the second is the one that matters.
+
+**The response now says what actually happened.** `inviteUser` returns `emailed`, which is
+the narrower claim than `delivered`: a transport that leaves the building said it succeeded.
+The console transport does not qualify.
+
+**And when nothing was emailed, the link comes back in `meta.inviteLink`**, which the Users
+screen shows with a copy button. The alternative — refusing to invite at all without a mail
+provider — makes a finished feature unusable on any deployment that has not bought one yet.
+
+Returning a live credential in an API response deserves the argument in full, because it is
+exactly the kind of thing that is right once and wrong everywhere else. The recipient here is
+the manager or admin who just issued this invite, one call after `protect` and
+`requireManagerOrAdmin`. They chose the address and the role. They can re-issue it at will,
+and they can deactivate the account outright. Handing them the link grants them nothing they
+did not already have. The password-reset flow deliberately does **not** do this, and the
+difference is the whole point: there the requester is an anonymous member of the public
+claiming to own an address, so returning the token would let anyone take over any account by
+typing in an email. When mail genuinely goes out, the link is withheld — the invitee's inbox
+should be the only place it exists.
+
+The panel is styled as a warning rather than a success, because something *is* misconfigured
+and an admin who never notices will hand-deliver links forever. It also names the person the
+link is for, since a single-use credential pasted into the wrong chat window is an account
+handed to the wrong human. It sits on the page rather than in a toast: a toast disappears
+after a few seconds, and losing a link you have not copied yet means re-issuing the invite.
+
+**6 backend and 7 frontend tests**, including the one that would have caught this — a
+transport that reports `console` must not produce a message claiming an email was sent.
+
+---
+
+## Letting people sign themselves up again
+
+Public sign-up had been closed during the security work: the first account on an empty
+database became the admin, and every later `/register` was refused with a pointer to the
+invite flow. The reasoning was sound for an internal CRM — anyone who could reach the page
+could give themselves an account — but it is a deployment decision, not a property of the
+software, and it was hard-coded.
+
+So it is now `ALLOW_PUBLIC_SIGNUP`, defaulting to **open**, and the README states the
+trade-off rather than assuming an answer:
+
+- **Open** — anyone reaching the page gets an account. They are always a `sales_rep`, never
+  an admin, so the blast radius is "can read the CRM" rather than "can administer it". For a
+  deployment holding real customer data on the public internet, "can read the CRM" is usually
+  the part you minded about.
+- **Closed** — accounts exist only because an admin invited someone. What an internal tool
+  should run.
+
+The first-user bootstrap deliberately ignores the flag. A fresh install has nobody to send an
+invitation, so gating it too would mean a new deployment with sign-up closed has no way to
+create its first administrator at all, short of a seed script or a database console.
+
+One thing changed while I was in there. The bootstrap check was
+`estimatedDocumentCount() === 0`, which reads collection metadata that can be stale after an
+unclean shutdown. That was a narrow risk when it ran once on an empty database; now it runs
+on every sign-up and decides whether the caller is handed the **admin** role. A stale
+estimate there is an unintended administrator, so it is an exact `countDocuments` — a few
+milliseconds against a mis-issued admin account is not a close call.
+
+The `/register` page already existed in the frontend and already described this behaviour
+correctly; only the backend was refusing.
+
+**10 new backend tests** across both modes. One existing rate-limit test needed updating: it
+asserted that only one account existed after six registration attempts, which was really
+asserting the side effect of closed sign-up rather than the limiter. It now checks that five
+attempts succeed and the sixth creates nothing — which is what actually proves the limiter
+runs before the controller — and a second test covers the closed case it used to cover.
+
+---
+
+**Final totals: 616 backend + 94 frontend + 11 end-to-end**, lint clean on both packages.

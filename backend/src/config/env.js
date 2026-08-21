@@ -158,6 +158,31 @@ env.rateLimitEnabled = !env.isTest && process.env.RATE_LIMIT_DISABLED !== 'true'
 env.breachCheckEnabled = !env.isTest && process.env.BREACH_CHECK_DISABLED !== 'true';
 
 /**
+ * Whether anyone may create their own account at /register.
+ *
+ * ON by default, and this is a real trade-off rather than an oversight, so it
+ * is stated plainly:
+ *
+ *   Open  anyone who can reach the sign-up page gets an account, and the
+ *         customer list is behind a login rather than behind an invitation.
+ *         The role granted is always the least-privileged one, so the blast
+ *         radius is "can read the CRM", not "can administer it" — but a
+ *         stranger reading the CRM is usually the thing you minded about.
+ *   Shut  accounts exist only because an admin invited someone. Correct for an
+ *         internal tool whose users are employees, and the reason invites were
+ *         built in the first place.
+ *
+ * If this deployment is reachable from the public internet and holds real
+ * customer data, set ALLOW_PUBLIC_SIGNUP=false and invite people instead.
+ *
+ * Note what is NOT gated by this: the first-user bootstrap below. A fresh
+ * install has nobody to send an invitation, so the first account can always be
+ * created. Otherwise closing sign-up would lock everyone out of a new
+ * deployment permanently.
+ */
+env.allowPublicSignup = process.env.ALLOW_PUBLIC_SIGNUP !== 'false';
+
+/**
  * How long audit entries are kept, in days. Unset means keep them forever.
  *
  * Deliberately opt-in. An audit trail that expires on a schedule nobody
