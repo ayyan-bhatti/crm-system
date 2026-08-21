@@ -107,6 +107,7 @@ Once signed in, try the search box on the dashboard:
 | `APP_URL` | no | first `CLIENT_ORIGIN` | Public URL used to build password-reset links |
 | `MAIL_TRANSPORT` | no | `console` | `console` logs the message; `webhook` POSTs it to `MAIL_WEBHOOK_URL` |
 | `MAIL_WEBHOOK_URL` | no | — | Required when `MAIL_TRANSPORT=webhook` |
+| `MAIL_WEBHOOK_AUTH` | no | — | Sent verbatim as the `Authorization` header on that POST. Needed by every hosted provider |
 | `MAIL_FROM` | no | `SimpleCRM <no-reply@simplecrm.local>` | Sender shown on outgoing mail |
 | `LOG_LEVEL` | no | `info` in production, `debug` otherwise | `fatal` · `error` · `warn` · `info` · `debug` · `trace` |
 | `AI_CACHE_DISABLED` | no | — | `true` turns off the 5-minute AI search response cache |
@@ -419,8 +420,25 @@ decisions carry the security of the flow:
 
 Delivery is a seam, not an integration: `MAIL_TRANSPORT=console` (the default) writes the
 message and its link to the log so the flow works locally with nothing configured, and
-`webhook` POSTs it to `MAIL_WEBHOOK_URL`, which is enough to connect any provider or queue.
-Hard-wiring one vendor's SDK for a single email would be the wrong dependency.
+`webhook` POSTs `{ from, to, subject, text }` to `MAIL_WEBHOOK_URL` with `MAIL_WEBHOOK_AUTH`
+as the `Authorization` header. Hard-wiring one vendor's SDK for a single email would be the
+wrong dependency.
+
+That payload is deliberately the shape [Resend](https://resend.com)'s send endpoint already
+accepts, so the common case needs no relay in between:
+
+```bash
+MAIL_TRANSPORT=webhook
+MAIL_WEBHOOK_URL=https://api.resend.com/emails
+MAIL_WEBHOOK_AUTH=Bearer re_your_api_key
+MAIL_FROM=SimpleCRM <no-reply@a-domain-you-verified.com>
+```
+
+The auth header is not optional in practice. Without it the POST goes out anonymous, which
+only an endpoint you wrote yourself will accept — so before it existed, "point
+`MAIL_WEBHOOK_URL` at your provider" was quietly untrue and produced a 401 that surfaced as
+mail never arriving. A provider whose payload differs (Postmark wants `From`/`To`/`TextBody`)
+still needs a small relay, or one more branch in `services/mailer.js`.
 
 ### Security headers
 
@@ -1191,7 +1209,7 @@ without setting any of them. Add them when you want the behaviour they describe.
 | `ACCESS_TOKEN_TTL` / `REFRESH_TOKEN_TTL` | You want session lifetimes other than 15m / 7d |
 | `COOKIE_SAME_SITE` | The API and frontend end up on genuinely different sites (`none` needs HTTPS) |
 | `APP_URL` | `CLIENT_ORIGIN` is a comma-separated list — password-reset and invite links need exactly one origin |
-| `MAIL_TRANSPORT` / `MAIL_WEBHOOK_URL` / `MAIL_FROM` | **Recommended in production.** The default `console` transport only writes reset and invite links to the log |
+| `MAIL_TRANSPORT` / `MAIL_WEBHOOK_URL` / `MAIL_WEBHOOK_AUTH` / `MAIL_FROM` | **Recommended in production.** The default `console` transport only writes reset and invite links to the log |
 | `LOG_LEVEL` | Default is `info` in production |
 | `AUDIT_RETENTION_DAYS` | You want audit entries to become eligible for pruning. Unset means keep forever |
 | `BREACH_CHECK_DISABLED` | Outbound HTTPS is firewalled and the Have I Been Pwned lookup cannot reach the internet |
@@ -1221,11 +1239,51 @@ webhook. Declaring it means the platform is not choosing a version by guess.
 
 ```bash
 curl https://<your-app>/api/health     # 200 = configured and connected
-cd backend && npm run indexes          # once per deploy, against the production MONGO_URI
 ```
 
 `/api/health` reports which environment variables are missing by name, so a misconfiguration
 is readable over HTTP rather than being a blind 500.
+
+**Then two things, each done once.**
+
+**1. Sync the indexes**, against the production `MONGO_URI` — the one in the hosting
+provider's environment variables, not the one in your local `.env`:
+
+```bash
+cd backend
+MONGO_URI="mongodb+srv://..." npm run indexes
+```
+
+Safe to run against a live database: it creates and drops *indexes* and never reads, writes
+or deletes a document. It is not a no-op on an existing deployment either — Mongoose
+creates missing indexes on its own but never removes ones the schema has dropped, so a
+database deployed before this work is still carrying two unused text indexes and an
+`Order.createdAt` index that no longer satisfies the `_id`-tiebroken sort. Those are paid for
+on every write until this command removes them. Expect output like:
+
+```
+[indexes] Customer: dropped 1 index(es) no longer in the schema — name_text_email_text_...
+[indexes] Product:  dropped 1 index(es) no longer in the schema — name_text_sku_text_...
+[indexes] Synced 10 collections with their schemas.
+```
+
+**2. Configure a mail transport.** Until you do, password-reset and invite links are only
+written to the log — which is a working link sitting in your log output, readable by anyone
+with log access. Set all four (see [Forgot password](#forgot-password) for why the auth header
+matters):
+
+```
+MAIL_TRANSPORT=webhook
+MAIL_WEBHOOK_URL=https://api.resend.com/emails
+MAIL_WEBHOOK_AUTH=Bearer re_your_api_key
+MAIL_FROM=SimpleCRM <no-reply@a-domain-you-verified.com>
+```
+
+Setting `MAIL_TRANSPORT=webhook` **without** a URL is worse than leaving it alone: the send
+fails and the link goes nowhere, where the `console` default at least leaves it somewhere
+retrievable. Verify with a real password reset and check the mail arrives; a failure is
+logged with the provider's own error message, so a 422 tells you the `MAIL_FROM` domain is
+not verified rather than making you guess.
 
 ---
 
@@ -1375,9 +1433,10 @@ retention, and deterministic index building.
   behaviour so nobody later assumes it is indexed.
 - **Password-reset delivery needs a transport configured.** The flow itself is complete —
   tokens, expiry, single use, session revocation — but the default `console` transport only
-  writes the link to the log. A real deployment sets `MAIL_TRANSPORT=webhook` and points it
-  at a provider or a queue. Deliberately not hard-wired to one vendor's SDK for a single
-  email.
+  writes the link to the log. A real deployment sets `MAIL_TRANSPORT=webhook`,
+  `MAIL_WEBHOOK_URL` and `MAIL_WEBHOOK_AUTH` and points them at a provider or a queue — the
+  POST body matches Resend's send endpoint, so that case needs no relay. Deliberately not
+  hard-wired to one vendor's SDK for a single email.
 - **AI search reads one entity at a time.** A question spanning two entities ("customers
   and their overdue orders") returns whichever the model judged primary. Supporting joins
   would mean a query language rather than a filter object.

@@ -102,6 +102,19 @@ const env = {
   /** console (default) | webhook — see services/mailer.js. */
   mailTransport: process.env.MAIL_TRANSPORT || 'console',
   mailWebhookUrl: process.env.MAIL_WEBHOOK_URL || '',
+
+  /**
+   * Sent as the `Authorization` header on the webhook POST, verbatim.
+   *
+   * Verbatim, and not a bare key, because the scheme differs per provider:
+   * Resend and SendGrid want `Bearer <key>`, an internal relay might want
+   * `Basic <base64>`. Prefixing "Bearer " here would silently break the ones
+   * that do not use it, so the full header value is the setting.
+   *
+   * Optional. Left unset the POST goes out unauthenticated, which is correct
+   * for a relay on a private network and wrong for anything on the internet.
+   */
+  mailWebhookAuth: process.env.MAIL_WEBHOOK_AUTH || '',
   mailFrom: process.env.MAIL_FROM || 'SimpleCRM <no-reply@simplecrm.local>',
 
   /**

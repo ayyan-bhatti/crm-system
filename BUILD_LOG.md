@@ -1804,4 +1804,44 @@ one they learn to ignore.
 
 ---
 
-**Final totals: 597 backend + 87 frontend + 11 end-to-end**, lint clean on both packages.
+## Making the production mail transport actually reach a provider
+
+Found while writing the post-deploy runbook, which is a good argument for writing runbooks:
+the advice "set `MAIL_TRANSPORT=webhook` and point `MAIL_WEBHOOK_URL` at your email provider"
+did not work, and failed in the quietest possible way.
+
+The webhook transport sent no `Authorization` header. Every hosted provider — Resend,
+Postmark, SendGrid — rejects an unauthenticated POST, so the only endpoint it could ever
+talk to was one you had written yourself and left open. Following the documented advice got
+you a 401, and because `sendMail` deliberately never throws (a mail outage must not turn a
+public endpoint into a 500), the visible symptom was password-reset emails that simply never
+arrived.
+
+So `MAIL_WEBHOOK_AUTH` now goes out as the `Authorization` header, **verbatim**. Not
+`Bearer ${key}` — Resend and SendGrid want Bearer, an internal relay might want Basic, and
+prefixing here would silently break the second group to save eight characters of config.
+
+The existing body, `{ from, to, subject, text }`, already happens to match Resend's send
+endpoint, so with the header in place the common case needs no relay at all:
+
+```
+MAIL_TRANSPORT=webhook
+MAIL_WEBHOOK_URL=https://api.resend.com/emails
+MAIL_WEBHOOK_AUTH=Bearer re_...
+MAIL_FROM=SimpleCRM <no-reply@a-verified-domain.com>
+```
+
+Failures now include the provider's own response body, truncated to 500 characters. The
+status alone is rarely enough to act on: a 422 from a mail provider almost always means "that
+From address is not a verified sender", which is a five-minute fix if you can read it and an
+afternoon if all you have is the number.
+
+**8 new tests, and the first ones this transport has ever had.** That gap was the real
+finding — the invite and password-reset suites both stub delivery out, so the webhook branch
+was executed for the first time in production, by a user trying to get back into their
+account. The new suite covers the header being sent, being sent verbatim, being omitted when
+unset, and the three failure paths all returning `{ delivered: false }` instead of throwing.
+
+---
+
+**Final totals: 605 backend + 87 frontend + 11 end-to-end**, lint clean on both packages.
