@@ -4,6 +4,7 @@ const asyncHandler = require('../utils/asyncHandler');
 const { canAccessCustomer } = require('../middleware/roles');
 const { computeCustomerMetrics } = require('../services/customerMetrics');
 const { calculateLeadScore } = require('../services/leadScore');
+const { assessChurnRisk } = require('../services/churnRisk');
 const customerSummaryService = require('../services/customerSummaryService');
 const { buildFallbackSummary } = require('../services/summaryFallback');
 
@@ -47,6 +48,14 @@ const getCustomerSummary = asyncHandler(async (req, res) => {
    */
   const health = calculateLeadScore(metrics);
 
+  /*
+   * Churn risk answers a different question from the health score, and the two
+   * genuinely disagree: a customer with forty orders who has gone quiet scores
+   * superbly and is the most urgent call in the book. Computed from the same
+   * metrics, so it costs one function call and no extra query.
+   */
+  const churn = assessChurnRisk(metrics);
+
   // Called through the module object rather than a destructured reference so
   // the test suite can stub it, exactly as the AI search tests do.
   const generated = await customerSummaryService.generateSummary(
@@ -72,6 +81,7 @@ const getCustomerSummary = asyncHandler(async (req, res) => {
       customer: { _id: customer._id, name: customer.name, company: customer.company },
       metrics,
       health,
+      churn,
       summary,
       mode: generated.mode,
       // Only on the fallback path, and only useful to a developer — but a

@@ -798,6 +798,41 @@ confidently wrong answer and nobody would know why.
 
 ---
 
+### Churn risk
+
+Returned alongside the metrics and health score by `GET /api/customers/:id/summary`, and
+shown on the customer detail page beneath the score.
+
+**It is not the health score restated.** RFM answers "how valuable is this relationship";
+churn risk answers "is it ending", and they disagree in the case that matters most — a
+customer with forty orders who has not bought in six months scores superbly and is the most
+urgent call in the book.
+
+**Risk is measured against each customer own ordering cadence, not a fixed threshold.** A
+flat "90 days = at risk" rule is wrong in both directions: a customer who orders every three
+weeks and has been silent for 90 days is four cycles overdue, while one who orders annually
+is exactly where they always are. So the measure is how many of their own typical gaps have
+elapsed — 1.5 is overdue, 3 is a pattern rather than a delay.
+
+The cadence is averaged across the whole relationship rather than the last two orders, or two
+orders placed a day apart during one busy week would imply a one-day rhythm.
+
+| level | means |
+| --- | --- |
+| `unknown` | no completed orders — an unconverted lead, not a relationship being lost |
+| `low` | ordering on schedule |
+| `moderate` | overdue by their own standards, or on schedule but spending less |
+| `high` | several of their own cycles missed |
+
+Every assessment carries a **reason** built from checkable facts ("they normally order about
+every 24 days, and it has been 96"), and the UI shows it. A flag a rep cannot interrogate is
+one they learn to ignore.
+
+It is computed, not generated — no AI call, no new query, derived entirely from metrics the
+summary endpoint already calculates.
+
+---
+
 ## Order stock rules
 
 This is the only place in the app where one request mutates a second collection, so the

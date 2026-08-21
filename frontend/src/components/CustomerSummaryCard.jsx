@@ -46,6 +46,58 @@ const HEALTH_STYLES = {
   dormant: { label: 'Dormant', bar: 'bg-critical', text: 'text-critical-ink' },
 };
 
+/**
+ * Churn risk, shown next to the score because they answer different questions
+ * and are allowed to disagree.
+ *
+ * A customer with forty orders who has gone quiet scores superbly on health and
+ * is the most urgent call in the book. Showing only the score would hide
+ * exactly the case a rep most needs to see, which is why this sits beside it
+ * rather than being folded into it.
+ *
+ * The REASON is shown, not just the level. A flag a rep cannot interrogate is a
+ * flag they learn to ignore — "they normally order every 24 days and it has
+ * been 96" is checkable and actionable; "at risk" on its own is neither.
+ */
+const CHURN_STYLES = {
+  high: {
+    badge: 'bg-critical-wash text-critical-ink',
+    border: 'border-critical/30',
+    dot: 'bg-critical',
+  },
+  moderate: {
+    badge: 'bg-warning-wash text-warning-ink',
+    border: 'border-warning/30',
+    dot: 'bg-warning',
+  },
+  low: { badge: 'bg-good-wash text-good-ink', border: 'border-hairline', dot: 'bg-good' },
+  unknown: {
+    badge: 'bg-neutral-wash text-neutral-ink',
+    border: 'border-hairline',
+    dot: 'bg-muted',
+  },
+};
+
+function ChurnRisk({ churn }) {
+  const style = CHURN_STYLES[churn.level] || CHURN_STYLES.unknown;
+
+  return (
+    <div className={`mb-5 rounded-lg border p-4 ${style.border}`}>
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs font-medium uppercase tracking-wide text-muted">Churn risk</p>
+        <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${style.badge}`}>
+          {churn.label}
+        </span>
+      </div>
+
+      <div className="flex items-start gap-2.5">
+        <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${style.dot}`} aria-hidden="true" />
+        <p className="text-sm text-ink-2">{churn.reason}</p>
+      </div>
+    </div>
+  );
+}
+
 function HealthScore({ health }) {
   const style = HEALTH_STYLES[health.band] || HEALTH_STYLES.dormant;
 
@@ -124,7 +176,7 @@ export default function CustomerSummaryCard({ customerId }) {
   if (error) return <ErrorBanner message={`Could not load the account summary: ${error}`} />;
   if (!data) return null;
 
-  const { metrics, health, summary, mode } = data;
+  const { metrics, health, churn, summary, mode } = data;
   const trend = TREND_LABELS[metrics.trend] || TREND_LABELS.no_orders;
 
   return (
@@ -137,6 +189,7 @@ export default function CustomerSummaryCard({ customerId }) {
       </div>
 
       {health && <HealthScore health={health} />}
+      {churn && <ChurnRisk churn={churn} />}
 
       {/* Computed from the database — exact. */}
       <div className="mb-5 grid grid-cols-2 gap-4 sm:grid-cols-4">
@@ -154,19 +207,30 @@ export default function CustomerSummaryCard({ customerId }) {
         <p className="text-sm font-semibold text-ink">{summary.headline}</p>
         <p className="mt-1.5 text-sm text-ink-2">{summary.summary}</p>
 
-        {summary.recommendedAction && (
-          <p className="mt-3 text-sm text-ink">
-            <span className="font-medium">Suggested next step: </span>
-            {summary.recommendedAction}
-          </p>
-        )}
-
         <p className="mt-3 text-xs text-muted">
           {mode === 'ai'
             ? `AI-generated from the figures above · ${humanize(summary.confidence)} confidence`
             : 'Written from the figures above — AI summary unavailable right now'}
         </p>
       </div>
+
+      {/*
+        The recommended action, promoted out of the narrative.
+
+        It was previously the third paragraph inside the grey block above,
+        styled identically to the summary prose — which made the one line a rep
+        is supposed to ACT on look like more description. It is the only part of
+        this card that asks for a decision, so it gets its own block, its own
+        label and an accent border.
+      */}
+      {summary.recommendedAction && (
+        <div className="mt-4 rounded-lg border-l-4 border-brand bg-brand-wash px-4 py-3">
+          <p className="text-xs font-medium uppercase tracking-wide text-brand-ink opacity-80">
+            Suggested next step
+          </p>
+          <p className="mt-1 text-sm font-medium text-ink">{summary.recommendedAction}</p>
+        </div>
+      )}
     </Card>
   );
 }

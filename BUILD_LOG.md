@@ -1744,3 +1744,64 @@ confidently wrong answer nobody can explain. Checked before the API-key check, b
 validation should not depend on whether a dependency is configured.
 
 26 new tests.
+
+
+## 4. Churn risk — and promoting the recommended action
+
+The brief offered two options and asked which fit with least new infrastructure.
+
+**`recommendedAction` already existed**, on both the AI and fallback paths, and was already
+rendered — but as the third paragraph inside the grey narrative block, styled identically to
+the summary prose. So per the brief that bullet needed **UI prominence, not new logic**: it is
+now its own block with an accent border and a label, because it is the only part of the card
+that asks for a decision and it looked like more description.
+
+**Churn risk is the new build**, because it is genuinely new signal derived entirely from
+metrics that already exist — no model, no API call, no collection, no query.
+
+### Why it is not just the health score again
+
+The RFM score answers "how valuable is this relationship". Churn risk answers "is it
+ending", and the two genuinely disagree: **a customer with forty orders and no purchase in
+six months scores superbly and is the most urgent call in the book.** A score cannot express
+that, because most of its inputs are historical and history does not decay. A test asserts
+the two can report a healthy score and a high churn risk together.
+
+### Why it is relative to each customer own cadence
+
+The obvious implementation is a fixed threshold — 90 days without an order means at risk —
+and it is wrong in both directions:
+
+- A customer who orders every three weeks and has been silent for 90 days is **four cycles
+  overdue**. Something has happened.
+- A customer who orders once a year is at 90 days **exactly where they always are**. Flagging
+  them wastes a call and teaches the rep the flag means nothing.
+
+So the measure is how many of the customer own typical gaps have elapsed. The headline test
+is two customers with **identical 90-day silence** and different rhythms: one comes back
+high, the other low. A flat threshold scores them the same.
+
+The cadence is averaged across the whole relationship rather than the last two orders —
+otherwise two orders placed a day apart during one busy week imply a one-day rhythm and flag
+the customer as catastrophically overdue by Thursday. Several orders on the same day report
+"no measurable cadence" rather than an infinite overdue ratio.
+
+### The cases that are not churn
+
+- **No orders at all** returns `unknown`, not `low`. That is an unconverted lead, not a
+  relationship being lost, and calling it low risk on a screen used to decide who to chase
+  would be technically true and actively misleading.
+- **A single order** has no gap to measure, so it falls back to deliberately generous fixed
+  thresholds — one purchase says very little, and a false "high risk" is what teaches a rep
+  to ignore the column.
+- **On schedule but spending less** is raised one step, because someone ordering on time for
+  steadily less money is leaving slowly and the cadence measure alone would never notice.
+
+The reason string is always returned and always rendered. A flag a rep cannot interrogate is
+one they learn to ignore.
+
+20 new tests.
+
+---
+
+**Final totals: 597 backend + 87 frontend + 11 end-to-end**, lint clean on both packages.
