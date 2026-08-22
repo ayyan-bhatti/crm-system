@@ -125,6 +125,16 @@ export default function OrderDetail() {
                 Cancel order
               </button>
             )}
+            {/*
+              Only while pending. Once completed or cancelled the API refuses
+              item changes, so offering the link would lead to a form that can
+              show the order and change nothing — worse than no link at all.
+            */}
+            {isPending && (
+              <Link to={`/orders/${order._id}/edit`} className={btnSecondary}>
+                Edit items
+              </Link>
+            )}
             <button type="button" className={btnDanger} onClick={handleDelete} disabled={busy}>
               Delete
             </button>

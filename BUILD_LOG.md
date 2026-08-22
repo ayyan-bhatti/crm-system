@@ -2200,4 +2200,58 @@ absolute instants so it fails in any timezone if it returns.
 
 ---
 
-**Final totals: 714 backend + 139 frontend + 11 end-to-end**, lint clean on both packages.
+## Item 2: the two CRUD gaps that were real
+
+The audit found the picture better than the brief assumed. Customers and Products already had
+list, detail, edit and delete, all reachable and all with confirmation on delete. Two genuine
+gaps:
+
+### No way to edit an order
+
+`PATCH /api/orders/:id` accepted item changes on a pending order and **nothing in the UI ever
+sent them**. A mistyped quantity meant deleting the order and placing it again — which on a
+completed order also means the stock moves twice.
+
+`OrderForm` now serves both routes, as the customer and product forms already did. The
+interesting part is what it refuses to offer:
+
+- **Items are frozen once the order is completed or cancelled.** The stock has moved and the
+  money is real. The form says so in a sentence instead of rendering a page of disabled
+  inputs — a form full of dead controls is a puzzle, a sentence is an answer.
+- **The customer never changes.** Moving an order to a different customer is not an edit, it
+  is a different order; the original customer's history would silently lose a purchase.
+- **Status stays on the detail page**, because completing or cancelling is the one action in
+  the UI that moves stock, and keeping that in one place beats the symmetry of having every
+  field on one form.
+
+The submit path sends only `items`, so it never asks the API for something it is right to
+refuse.
+
+### No way to correct a colleague's name or email
+
+`PATCH /api/users/:id` has always accepted both, and the only thing the screen ever sent was
+`role` from the dropdown. So a typo in a colleague's email address was unfixable without a
+database console — on the screen whose entire purpose is managing people.
+
+A small panel above the table, deliberately without a password field even though the endpoint
+accepts one: an admin setting somebody else's credential is exactly the pattern the invite
+flow was built to remove.
+
+### A wrong fixture that had been passing
+
+Writing the user tests, `findByText('Bilal Ahmed')` could not find a row that was plainly in
+the mock. `usersApi.list` resolves to the whole envelope and the component reads `data.data`,
+but the existing fixture was a bare array — so the table had **always** rendered empty in
+those tests. Harmless while nothing asserted on a row, and exactly the kind of harness bug
+that makes the next test mysteriously impossible to write.
+
+Also raised `testTimeout` above `asyncUtilTimeout`. With the two equal, a `waitFor` that is
+going to fail dies of the test timeout at the same instant it would have reported what it was
+waiting for, so the output says "test timed out" instead of naming the element. Two of my own
+failures were diagnosed a step slower for that reason.
+
+**26 new frontend tests.**
+
+---
+
+**Final totals: 714 backend + 158 frontend + 11 end-to-end**, lint clean on both packages.

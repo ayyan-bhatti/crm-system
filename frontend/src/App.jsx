@@ -125,6 +125,7 @@ export default function App() {
                     <Route index element={<OrderList />} />
                     <Route path="new" element={<OrderForm />} />
                     <Route path=":id" element={<OrderDetail />} />
+                    <Route path=":id/edit" element={<OrderForm />} />
                   </Route>
 
                   <Route

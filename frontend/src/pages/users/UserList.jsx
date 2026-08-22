@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { usersApi } from '../../api/resources';
 import { errorMessage } from '../../api/client';
 import useFetch from '../../hooks/useFetch';
@@ -13,7 +13,7 @@ import {
 } from '../../components/common';
 import { useAuth } from '../../context/AuthContext';
 import { ROLE_VALUES, ROLES } from '../../constants';
-import { btnPrimary, formatDate, humanize, input, td, th } from '../../ui';
+import { btnPrimary, btnSecondary, formatDate, humanize, input, td, th } from '../../ui';
 
 /**
  * Admin-only user management: list users, change roles, add and remove accounts.
@@ -35,6 +35,9 @@ export default function UserList() {
    * until dismissed.
    */
   const [pendingLink, setPendingLink] = useState(null);
+
+  // The user whose details are being corrected, if any.
+  const [editing, setEditing] = useState(null);
 
   const { data, loading, error, reload } = useFetch(() => usersApi.list(), []);
 
@@ -156,6 +159,19 @@ export default function UserList() {
         />
       )}
 
+      {editing && (
+        <EditUserForm
+          user={editing}
+          onCancel={() => setEditing(null)}
+          onSaved={(name) => {
+            setEditing(null);
+            toast.success(`${name} updated.`);
+            reload();
+          }}
+          onError={(message) => toast.error(message)}
+        />
+      )}
+
       {pendingLink && (
         <InviteLinkPanel
           email={pendingLink.email}
@@ -226,6 +242,20 @@ export default function UserList() {
                       <td className={`${td} text-right`}>
                         {!isSelf && (
                           <div className="flex items-center justify-end gap-3">
+                            {/*
+                              Correcting a name or email. PATCH /api/users/:id
+                              has always supported both; nothing in the UI
+                              called it, so a typo in a colleague's address was
+                              unfixable without a database console.
+                            */}
+                            <button
+                              type="button"
+                              className="text-sm font-medium text-ink-2 hover:underline"
+                              onClick={() => setEditing(user)}
+                            >
+                              Edit
+                            </button>
+
                             {user.status === 'pending' && (
                               <button
                                 type="button"
@@ -439,6 +469,89 @@ function InviteUserForm({ onInvited, onError }) {
         <div className="sm:col-span-3">
           <button type="submit" className={btnPrimary} disabled={submitting}>
             {submitting ? <Spinner /> : 'Send invitation'}
+          </button>
+        </div>
+      </form>
+    </Card>
+  );
+}
+
+/**
+ * Correct a colleague's name or email.
+ *
+ * WHY THIS EXISTS AND WHY IT IS SO SMALL.
+ *
+ * `PATCH /api/users/:id` has always accepted `name` and `email`, and nothing in
+ * the UI ever called it with either — the role dropdown sent `role` and that
+ * was the whole of it. So a typo in a colleague's address was unfixable without
+ * a database console, on a screen whose entire purpose is managing people.
+ *
+ * NO PASSWORD FIELD, and no role field either. The endpoint accepts a password
+ * and this form deliberately does not offer one: an admin setting somebody
+ * else's password means the admin knows a credential that is not theirs, which
+ * is exactly the pattern the invite flow was built to remove. Someone who has
+ * lost access uses the reset flow. The role has its own control in the table,
+ * where the consequence of changing it is visible next to the person.
+ *
+ * Rendered as a panel above the table rather than a modal: the row it refers to
+ * stays on screen, so there is no doubt about who is being edited.
+ */
+function EditUserForm({ user, onCancel, onSaved, onError }) {
+  const [form, setForm] = useState({ name: user.name, email: user.email });
+  const [saving, setSaving] = useState(false);
+
+  // Re-prefills when the admin clicks Edit on a different row without closing
+  // the panel first — otherwise the form would keep the previous person's
+  // details and quietly write them over this one.
+  useEffect(() => {
+    setForm({ name: user.name, email: user.email });
+  }, [user]);
+
+  const unchanged = form.name === user.name && form.email === user.email;
+
+  async function handleSubmit(event) {
+    event.preventDefault();
+    setSaving(true);
+
+    try {
+      await usersApi.update(user._id, { name: form.name, email: form.email });
+      onSaved(form.name);
+    } catch (err) {
+      onError(errorMessage(err, 'Could not update the account'));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Card className="mb-4 p-5">
+      <h2 className="mb-1 text-base font-semibold text-ink">Edit {user.name}</h2>
+      <p className="mb-4 text-sm text-ink-2">
+        Their role is changed in the table, and passwords are only ever set by the account
+        holder through a reset link.
+      </p>
+
+      <form onSubmit={handleSubmit} className="grid gap-4 sm:grid-cols-2">
+        <Field
+          label="Name"
+          required
+          value={form.name}
+          onChange={(e) => setForm({ ...form, name: e.target.value })}
+        />
+        <Field
+          label="Email"
+          type="email"
+          required
+          value={form.email}
+          onChange={(e) => setForm({ ...form, email: e.target.value })}
+        />
+
+        <div className="flex gap-3 sm:col-span-2">
+          <button type="submit" className={btnPrimary} disabled={saving || unchanged}>
+            {saving ? <Spinner /> : 'Save changes'}
+          </button>
+          <button type="button" className={btnSecondary} onClick={onCancel} disabled={saving}>
+            Cancel
           </button>
         </div>
       </form>

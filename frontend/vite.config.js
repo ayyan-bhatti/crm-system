@@ -58,6 +58,16 @@ export default defineConfig({
     maxWorkers: 4,
     minWorkers: 1,
 
+    /*
+     * Comfortably above the 5s `asyncUtilTimeout` set in the test setup.
+     *
+     * With the two equal, a `waitFor` that is genuinely going to fail dies of
+     * the test timeout at the same instant it would have reported what it was
+     * waiting for — so the output says "test timed out" instead of naming the
+     * element it could not find. The gap is what makes a failure diagnosable.
+     */
+    testTimeout: 15000,
+
     globals: true,
     setupFiles: './src/test/setup.js',
     css: false,

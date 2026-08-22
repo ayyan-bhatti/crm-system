@@ -247,6 +247,37 @@ immediately, instead of whenever the old token happens to expire.
   refreshes present an already-consumed token and trip reuse detection against the real
   user.
 
+### What can be edited, and what cannot
+
+Every entity has list, view, edit and delete. Two of the edit rules are
+deliberately narrower than the others, and both exist to stop the UI offering
+something the API is right to refuse.
+
+| Entity | View | Edit | Delete |
+| --- | --- | --- | --- |
+| Customer | detail page | all fields; reassignment for managers and admins only | confirm, then list refreshes |
+| Product | detail page | all fields (managers and admins) | confirm |
+| Order | detail page | **items only, and only while pending**; status from the detail page | confirm |
+| User | the list row carries every field | name and email; role inline; status inline | confirm, never yourself |
+
+**An order's items are frozen once it is completed or cancelled.** The stock has moved and
+the money is real — rewriting the lines would silently change what was shipped and what was
+charged for it, leaving the stock ledger describing an order that no longer exists. The form
+says so in a sentence rather than showing a page of disabled inputs: a form full of dead
+controls is a puzzle, a sentence is an answer.
+
+**An order's customer never changes.** Moving an order to a different customer is not an edit,
+it is a different order — the original customer's history would silently lose a purchase they
+actually made.
+
+**Status lives on the detail page, not the edit form**, because completing or cancelling is
+the one action in the UI that moves stock. Keeping that in one place is worth more than the
+symmetry of having every field on one screen.
+
+**A user's password is never set by an admin.** The edit form has no password field even
+though the endpoint accepts one: an admin setting somebody else's credential is exactly the
+pattern the invite flow was built to remove. Someone who has lost access uses the reset flow.
+
 ### Order numbers
 
 Orders carry a human-readable number alongside their `_id`:
