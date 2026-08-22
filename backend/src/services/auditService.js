@@ -115,7 +115,7 @@ function diff(before, after) {
  * @param {object} [options.before] document state before the write
  * @param {object} [options.after]  document state after the write
  */
-async function recordAudit(req, { action, entity, entityId, label, before, after }) {
+async function recordAudit(req, { action, entity, entityId, label, before, after, note }) {
   try {
     const beforeSnapshot = snapshot(before);
     const afterSnapshot = snapshot(after);
@@ -135,6 +135,10 @@ async function recordAudit(req, { action, entity, entityId, label, before, after
       before: beforeSnapshot,
       after: afterSnapshot,
       changes: diff(beforeSnapshot, afterSnapshot),
+      // Trimmed to the schema's limit here rather than relying on validation to
+      // reject it: a note too long must not be the reason an audit entry is
+      // lost, and a truncated note is far better than no entry.
+      note: String(note || '').slice(0, 500),
       ip: req.ip || '',
       userAgent: String(req.get?.('user-agent') || '').slice(0, 255),
       method: req.method,

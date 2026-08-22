@@ -247,6 +247,80 @@ immediately, instead of whenever the old token happens to expire.
   refreshes present an already-consumed token and trip reuse detection against the real
   user.
 
+### Order numbers
+
+Orders carry a human-readable number alongside their `_id`:
+
+```
+ORD-000142
+```
+
+`_id` remains the primary key and remains what URLs and every relation use. The number is a
+display and lookup field, not a replacement — swapping the key for a sequential integer would
+leak the order volume of the business to anyone who can see one, and invalidate every existing
+reference.
+
+It is allocated **atomically**, from a counter document with a `$inc`, and the reason is the
+same one behind the atomic stock decrement:
+
+```js
+const n = await Order.countDocuments();      // two requests both read 41
+await Order.create({ orderNumber: n + 1 });  // both write ORD-000042
+```
+
+The window is exactly the gap between the read and the write, which is where every race of
+this shape lives. `findOneAndUpdate` with `$inc` closes it by making the read and the write
+one operation. `count()` is also not a sequence on its own terms — delete order 42 and the
+next one is numbered 42 again, so the number stops identifying anything.
+
+Allocation happens inside the order's transaction, so an order that is never written does not
+burn a number. Search accepts whatever someone types: `ORD-000142`, `ord-142` and `142` all
+find the same order.
+
+**Existing deployments:** orders created before this field have no number, which is handled
+everywhere (the field is optional; the UI falls back to a short id). To close the gap:
+
+```bash
+cd backend && npm run backfill-order-numbers        # report
+cd backend && npm run backfill-order-numbers --yes  # assign, oldest first
+```
+
+### Order assignment
+
+An order can be assigned to a specific rep, independently of its customer.
+
+**Why not just inherit the customer's rep?** Inheriting is right most of the time and was the
+previous behaviour. Two ordinary things it cannot express:
+
+- **One deal handled by someone else** — a specialist brought in for a large order, or cover
+  during leave. Reassigning the *customer* to move one order hands over the whole relationship.
+- **History.** Moving a customer to a new rep silently rewrites who owned every order that
+  customer ever placed, including ones closed years ago by someone who has since left.
+  Commission and credit are attached to those.
+
+`assignedTo` is therefore stored per order, and **null means "follows the customer"** — the
+common case, and the default, so nothing is frozen onto historical rows.
+
+The scope filter treats it as an **override, and it cuts both ways**:
+
+```js
+$or: [
+  { assignedTo: user._id },                              // explicitly mine
+  { createdBy: user._id, assignedTo: null },             // mine unless handed over
+  { customer: { $in: myCustomers }, assignedTo: null },  // ditto
+]
+```
+
+The second half is the part that is easy to miss: an order assigned *away* from you has to
+leave your list even though the customer is still yours. Without that, a hand-off adds the
+order to the recipient's list and changes nothing for the person who gave it up, and both of
+them believe they own it.
+
+`PATCH /api/orders/:id/assign` — manager and admin only, a separate route from the general
+update because it is a different kind of change: editing an order alters what was sold,
+reassigning alters who is accountable. A rep may do the first to their own order and must not
+do the second. The audit entry names both people rather than logging two ObjectIds.
+
 ### Role-based UI
 
 Authorisation is enforced by the API. The frontend's job is a different one: not to OFFER

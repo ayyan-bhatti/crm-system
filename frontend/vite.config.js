@@ -55,9 +55,8 @@ export default defineConfig({
      * is comfortably stable here and costs a few seconds. CI runners have two to
      * four cores anyway, so this gives up nothing there.
      */
-    poolOptions: {
-      threads: { maxThreads: 4, minThreads: 1 },
-    },
+    maxWorkers: 4,
+    minWorkers: 1,
 
     globals: true,
     setupFiles: './src/test/setup.js',

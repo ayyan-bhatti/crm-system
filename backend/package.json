@@ -12,7 +12,8 @@
     "test:watch": "cross-env NODE_ENV=test jest --runInBand --watch",
     "lint": "eslint .",
     "indexes": "node scripts/syncIndexes.js",
-    "prune-audit": "node scripts/pruneAuditLog.js"
+    "prune-audit": "node scripts/pruneAuditLog.js",
+    "backfill-order-numbers": "node scripts/backfillOrderNumbers.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.71.0",

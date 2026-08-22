@@ -142,3 +142,23 @@ export function humanize(value) {
   const spaced = String(value).replace(/_/g, ' ');
   return spaced.charAt(0).toUpperCase() + spaced.slice(1);
 }
+
+/**
+ * How an order is named on screen.
+ *
+ * Prefers the human-readable number (`ORD-000142`), which is the point of
+ * having one: it can be read down a phone line, quoted in an email, and typed
+ * into the search box.
+ *
+ * Falls back to a SHORTENED `_id` for orders created before order numbers
+ * existed. Shortened rather than shown in full because a 24-character hex
+ * string in a table column is noise that pushes everything else off the screen
+ * — and nobody was ever going to read it aloud anyway. The full id is still in
+ * the URL, which is what anything mechanical uses.
+ */
+export function orderLabel(order) {
+  if (order?.orderNumber) return order.orderNumber;
+  if (!order?._id) return '—';
+
+  return `#${String(order._id).slice(-6)}`;
+}

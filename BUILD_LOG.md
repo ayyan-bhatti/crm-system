@@ -2121,4 +2121,83 @@ real regression gets re-run away with the noise. Six consecutive clean runs now.
 
 ---
 
-**Final totals: 663 backend + 126 frontend + 11 end-to-end**, lint clean on both packages.
+## Items 4 and 5: order numbers and order assignment
+
+Done together because both change the `Order` model, and doing them separately would have
+meant two migrations of the same document.
+
+### The number
+
+`ORD-000142` beside the `_id`, not instead of it. Replacing the key would leak the order
+volume of the business to anyone who can see a single order, and invalidate every existing
+reference — the number is for humans, and `_id` is for machines.
+
+Allocated from a counter document with an atomic `$inc`. The obvious alternative is a race:
+
+```js
+const n = await Order.countDocuments();      // two requests both read 41
+await Order.create({ orderNumber: n + 1 });  // both write ORD-000042
+```
+
+That is the same shape as the stock bug fixed in the first round — a read and a write with a
+window between them — and it is closed the same way, by making them one operation. `count()`
+is also not a sequence on its own terms: delete order 42 and the next order is numbered 42
+again, so the number stops identifying anything, which is the whole point of having one.
+
+Allocation sits inside the order's transaction, so an aborted order does not burn a number.
+
+**A trap I walked into and the test caught.** I first declared the field `default: null` with
+a `sparse` unique index, reasoning that sparse would let the many historical nulls coexist. It
+does not: a sparse index skips documents where the field is ABSENT, and one explicitly set to
+null is present. The second unnumbered order was rejected with a duplicate key error on null.
+Replaced with a **partial** index conditioned on the value being a string, which ignores nulls
+and absences alike.
+
+### The assignment
+
+`assignedTo` on the order, where **null means "follows the customer"**.
+
+Inheriting from the customer was the previous behaviour and is right most of the time. Two
+ordinary things it cannot express: one deal handled by a specialist while the account stays
+put, and history — moving a customer to a new rep silently rewrote who owned every order that
+customer ever placed, including ones closed years ago by someone who has since left.
+Commission is attached to those.
+
+The design claim is that assignment is an **override**, and the half that is easy to get wrong
+is that an override has to cut both ways. Granting the assignee access is obvious. Removing it
+from the customer's owner is what most implementations forget — and without it, a hand-off
+adds the order to one list, removes it from none, and both reps believe they own it. There is
+a test for exactly that, and the list and detail endpoints are checked against each other,
+because a rep seeing a row they cannot open is worse than either rule alone.
+
+Its own endpoint rather than a field on the general update: editing an order changes what was
+sold, reassigning changes who is accountable. Different permissions, so folding them together
+would mean a per-field permission check inside one handler, which is where rules like this go
+wrong quietly.
+
+The audit trail gained a `note` field for this. The generated diff is complete and says
+`assignedTo: 65f3a9… → 68b1c4…`, which is the whole truth and tells a reader nothing —
+resolving those ids a year later means looking up two users who may since have been deleted.
+"assigned: Ayesha → Bilal" is readable when it matters.
+
+### Two bugs found on the way
+
+**The colleague picker offered people who cannot be assigned work.**
+`/api/users/assignable` returned every user including deactivated and pending accounts. Work
+assigned to someone who cannot sign in lands in a list nobody opens, which looks exactly like
+the work being handled. Now active-only, with `?search=` so the picker queries the server.
+
+**A timezone bug in every date-range filter.** The full backend suite failed after midnight
+local time, on a test I had not touched. `getDateRange` ended the range with `setHours`, which
+operates in LOCAL time, while `new Date('2026-08-21')` parses a bare date as UTC midnight.
+Mixing the two shortens every range by the machine's UTC offset — on a server five hours
+ahead, the last five hours of every day were silently missing from every filtered result. No
+error, just quietly incomplete answers. Invisible on the deployment, which runs in UTC, and
+found only because a test happened to run at 00:13. Now `setUTCHours`, with assertions on
+absolute instants so it fails in any timezone if it returns.
+
+**53 new backend tests, 13 new frontend tests.**
+
+---
+
+**Final totals: 714 backend + 139 frontend + 11 end-to-end**, lint clean on both packages.

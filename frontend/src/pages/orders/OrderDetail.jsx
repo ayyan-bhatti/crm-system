@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ordersApi } from '../../api/resources';
+import { ordersApi, usersApi } from '../../api/resources';
 import { errorMessage } from '../../api/client';
 import useFetch from '../../hooks/useFetch';
 import { useToast } from '../../components/Toast';
@@ -11,7 +11,20 @@ import {
   Spinner,
   StatusBadge,
 } from '../../components/common';
-import { btnDanger, btnPrimary, btnSecondary, formatDate, link, money, td, th } from '../../ui';
+import Can from '../../components/Can';
+import SearchSelect from '../../components/SearchSelect';
+import {
+  btnDanger,
+  btnPrimary,
+  btnSecondary,
+  formatDate,
+  humanize,
+  link,
+  money,
+  orderLabel,
+  td,
+  th,
+} from '../../ui';
 
 /**
  * A single order, plus the status controls.
@@ -88,7 +101,7 @@ export default function OrderDetail() {
   return (
     <div className="mx-auto max-w-3xl space-y-6">
       <PageHeader
-        title="Order"
+        title={orderLabel(order)}
         subtitle={formatDate(order.createdAt)}
         action={
           <div className="flex flex-wrap gap-2">
@@ -119,6 +132,8 @@ export default function OrderDetail() {
         }
       />
 
+
+      <AssignmentPanel order={order} onChanged={reload} />
 
       <Card className="p-5">
         <div className="mb-4 flex flex-wrap items-start justify-between gap-4">
@@ -199,5 +214,131 @@ export default function OrderDetail() {
         </p>
       </Card>
     </div>
+  );
+}
+
+/**
+ * Who is responsible for this order.
+ *
+ * WHY THIS IS ITS OWN BLOCK RATHER THAN A FIELD IN AN EDIT FORM.
+ *
+ * Reassigning is not editing. Editing an order changes what was sold;
+ * reassigning changes who is accountable for it, which is attached to
+ * commission and to who fields the call when something goes wrong. They also
+ * have different permissions — a rep may edit their own order and may not hand
+ * it to someone else — so folding the control into the edit form would mean
+ * enabling and disabling one field inside it, which is exactly where rules like
+ * this go wrong quietly.
+ *
+ * EVERYONE SEES THE STATE; ONLY MANAGERS AND ADMINS SEE THE CONTROL.
+ *
+ * A rep needs to know an order was handed to a colleague — that is the whole
+ * point of the hand-off — so the panel is not hidden wholesale. What is hidden
+ * is the ability to change it, per the API rule.
+ */
+function AssignmentPanel({ order, onChanged }) {
+  const toast = useToast();
+  const [saving, setSaving] = useState(false);
+  const [editing, setEditing] = useState(false);
+
+  const assignee = order.assignedTo;
+
+  async function assign(userId) {
+    setSaving(true);
+
+    try {
+      await ordersApi.assign(order._id, userId);
+      toast.success(
+        userId ? 'Order reassigned.' : 'Assignment cleared — the order follows its customer again.'
+      );
+      setEditing(false);
+      onChanged();
+    } catch (err) {
+      toast.error(errorMessage(err, 'Could not reassign the order'));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Card className="p-5">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <p className="text-xs font-medium uppercase tracking-wide text-muted">Assigned to</p>
+
+          {assignee ? (
+            <>
+              <p className="mt-1 text-sm font-medium text-ink">{assignee.name}</p>
+              <p className="text-xs text-muted">{humanize(assignee.role)}</p>
+            </>
+          ) : (
+            /*
+             * Unassigned is not "nobody" — it means the order follows whoever
+             * owns the customer, which is the normal case. Saying "Unassigned"
+             * alone would read as an oversight and invite someone to "fix" it.
+             */
+            <>
+              <p className="mt-1 text-sm text-ink">
+                {order.customer?.assignedTo?.name || 'Follows the customer'}
+              </p>
+              <p className="text-xs text-muted">
+                No specific rep — this order follows whoever owns the account
+              </p>
+            </>
+          )}
+        </div>
+
+        <Can do="reassignRecords">
+          {editing ? (
+            <button
+              type="button"
+              className={btnSecondary}
+              onClick={() => setEditing(false)}
+              disabled={saving}
+            >
+              Cancel
+            </button>
+          ) : (
+            <button type="button" className={btnSecondary} onClick={() => setEditing(true)}>
+              Reassign
+            </button>
+          )}
+        </Can>
+      </div>
+
+      <Can do="reassignRecords">
+        {editing && (
+          <div className="mt-4 space-y-3 border-t border-hairline pt-4">
+            <SearchSelect
+              id="order-assignee"
+              value={assignee?._id || ''}
+              selected={assignee || null}
+              /*
+               * The same picker used for customers and products on the order
+               * form. Reusing it means the keyboard behaviour, the debounce and
+               * the empty state are the ones people already know here.
+               */
+              fetchOptions={(query) => usersApi.assignable(query)}
+              getOptionLabel={(user) => user.name}
+              getOptionMeta={(user) => humanize(user.role)}
+              placeholder="Search colleagues…"
+              emptyMessage="No matching colleague"
+              onChange={(user) => user && assign(user._id)}
+            />
+
+            {assignee && (
+              <button
+                type="button"
+                className={`${btnSecondary} w-full`}
+                onClick={() => assign(null)}
+                disabled={saving}
+              >
+                {saving ? <Spinner /> : 'Clear assignment — let it follow the customer'}
+              </button>
+            )}
+          </div>
+        )}
+      </Can>
+    </Card>
   );
 }

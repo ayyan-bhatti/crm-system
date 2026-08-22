@@ -245,6 +245,24 @@ function cursorResponse({ data, limit, sort }) {
  *
  * `to` is pushed to the end of that day so a range like from=2024-01-01&to=2024-01-31
  * includes orders placed on the 31st, which is what a user means by "to".
+ *
+ * BOTH ENDS ARE INTERPRETED IN UTC, AND THAT IS A FIX RATHER THAN A PREFERENCE.
+ *
+ * This used to call `setHours`, which was a bug that only appears outside UTC
+ * and only for part of the day, which is why it survived so long:
+ *
+ *   `new Date('2026-08-21')` parses a bare date as UTC midnight — that is what
+ *   the ECMAScript date-only form means. But `setHours` operates in LOCAL time.
+ *
+ * Mixing the two shortens the range by the machine's UTC offset. On a server
+ * five hours ahead, `to=2026-08-21` ended the range at 18:59:59Z instead of
+ * 23:59:59Z, so the last five hours of every day were silently missing from
+ * every date-range filter — no error, just quietly incomplete answers. It was
+ * invisible on the deployment, which runs in UTC, and it was found by a test
+ * that happened to run after midnight local time.
+ *
+ * `setUTCHours` makes both ends mean the same thing: the range covers the whole
+ * UTC day named, whatever timezone the server is in.
  */
 function getDateRange(from, to) {
   const range = {};
@@ -257,7 +275,7 @@ function getDateRange(from, to) {
   if (to) {
     const end = new Date(to);
     if (!Number.isNaN(end.getTime())) {
-      end.setHours(23, 59, 59, 999);
+      end.setUTCHours(23, 59, 59, 999);
       range.$lte = end;
     }
   }

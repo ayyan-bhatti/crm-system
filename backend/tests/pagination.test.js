@@ -329,3 +329,65 @@ describe('cursor encoding', () => {
     expect(decodeCursor(forged)).toBeNull();
   });
 });
+
+/**
+ * Date ranges, and the timezone bug that hid in them.
+ *
+ * `getDateRange` used to end the range with `setHours`, which operates in LOCAL
+ * time, while `new Date('2026-08-21')` parses a bare date as UTC midnight. The
+ * mismatch shortened every range by the machine's UTC offset: on a server five
+ * hours ahead, the last five hours of each day were silently absent from every
+ * filtered result. No error — just quietly incomplete answers.
+ *
+ * It was invisible on the deployment, which runs in UTC, and surfaced only
+ * because a test happened to run after local midnight. These assertions are
+ * absolute instants, so they fail in ANY timezone if the mixing returns.
+ */
+describe('getDateRange', () => {
+  const { getDateRange } = require('../src/utils/queryHelpers');
+
+  it('starts at the very beginning of the from-day, in UTC', () => {
+    const range = getDateRange('2026-08-21', undefined);
+
+    expect(range.$gte.toISOString()).toBe('2026-08-21T00:00:00.000Z');
+  });
+
+  /** The assertion the bug failed: 23:59:59.999Z, not local 23:59. */
+  it('ends at the very end of the to-day, in UTC', () => {
+    const range = getDateRange(undefined, '2026-08-21');
+
+    expect(range.$lte.toISOString()).toBe('2026-08-21T23:59:59.999Z');
+  });
+
+  it('covers a whole single day when from and to are the same', () => {
+    const range = getDateRange('2026-08-21', '2026-08-21');
+
+    expect(range.$gte.toISOString()).toBe('2026-08-21T00:00:00.000Z');
+    expect(range.$lte.toISOString()).toBe('2026-08-21T23:59:59.999Z');
+
+    // Every instant of that UTC day falls inside it — including the hours the
+    // old implementation dropped.
+    for (const hour of [0, 12, 19, 23]) {
+      const instant = new Date(`2026-08-21T${String(hour).padStart(2, '0')}:30:00.000Z`);
+      expect(instant >= range.$gte && instant <= range.$lte).toBe(true);
+    }
+  });
+
+  it('excludes the day either side', () => {
+    const range = getDateRange('2026-08-21', '2026-08-21');
+
+    expect(new Date('2026-08-20T23:59:59.999Z') >= range.$gte).toBe(false);
+    expect(new Date('2026-08-22T00:00:00.000Z') <= range.$lte).toBe(false);
+  });
+
+  it('returns null when neither end is given, so callers can skip the key', () => {
+    expect(getDateRange(undefined, undefined)).toBeNull();
+    expect(getDateRange('', '')).toBeNull();
+  });
+
+  it('ignores an end that is not a date rather than producing an invalid range', () => {
+    expect(getDateRange('2026-08-21', 'not-a-date')).toEqual({
+      $gte: new Date('2026-08-21T00:00:00.000Z'),
+    });
+  });
+});

@@ -107,13 +107,27 @@ export const ordersApi = {
       .post('/orders', payload, { headers: { 'Idempotency-Key': key } })
       .then((r) => r.data.data),
   update: (id, payload) => client.patch(`/orders/${id}`, payload).then((r) => r.data.data),
+
+  /**
+   * Reassign an order to a different rep, or pass null to clear it and let the
+   * order follow its customer again.
+   *
+   * Its own endpoint rather than a field on `update`, because it is a different
+   * kind of change with different permissions — see the note on the route.
+   */
+  assign: (id, assignedTo) =>
+    client.patch(`/orders/${id}/assign`, { assignedTo }).then((r) => r.data.data),
+
   remove: (id) => client.delete(`/orders/${id}`).then((r) => r.data),
 };
 
 // --- users ------------------------------------------------------------------
 export const usersApi = {
   // Available to every authenticated user — used to fill "assign to" dropdowns.
-  assignable: () => client.get('/users/assignable').then((r) => r.data.data),
+  assignable: (search) =>
+    client
+      .get('/users/assignable', { params: search ? { search } : undefined })
+      .then((r) => r.data.data),
   // Admin only.
   list: (params) => client.get('/users', { params }).then((r) => r.data),
 

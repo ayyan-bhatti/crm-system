@@ -30,6 +30,36 @@ const orderItemSchema = new mongoose.Schema(
 );
 
 const orderSchema = new mongoose.Schema({
+  /**
+   * The human-readable identifier, e.g. `ORD-000142`.
+   *
+   * NOT the primary key. `_id` remains that, and remains what URLs and every
+   * relation use — this is a display and lookup field. Replacing the key with
+   * a sequential number would leak the order volume of the business to anyone
+   * who can see one, and make every existing reference invalid.
+   *
+   * Allocated atomically from a counter document; see models/Counter.js for why
+   * `count() + 1` is a race rather than a shortcut.
+   *
+   * `required` is deliberately NOT set. Orders created before this field
+   * existed do not have one and are still perfectly valid orders — making it
+   * required would mean every read of a historical order failing validation on
+   * save. The UI falls back to a short `_id` for those.
+   */
+  orderNumber: {
+    type: String,
+    /*
+     * No `default: null`, and no `unique` here — both were wrong, and the
+     * reason is worth recording because it is a genuinely easy trap.
+     *
+     * A `sparse` unique index only skips documents where the field is ABSENT.
+     * A field explicitly set to null is present, so `default: null` plus a
+     * sparse unique index rejects the second unnumbered order with a duplicate
+     * key error on null. The uniqueness is declared below as a PARTIAL index
+     * instead, which ignores nulls and absent fields alike.
+     */
+  },
+
   customer: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Customer',
@@ -59,6 +89,37 @@ const orderSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
     required: true,
+  },
+
+  /**
+   * The rep responsible for this order, which is NOT necessarily whoever
+   * created it.
+   *
+   * WHY ORDERS NEED THEIR OWN ASSIGNMENT RATHER THAN INHERITING THE CUSTOMER'S.
+   *
+   * Inheriting was the previous behaviour and it is right most of the time: an
+   * order belongs to the rep who owns the account. Two things it cannot
+   * express, both ordinary:
+   *
+   *   - One deal on a shared account handled by someone else — a specialist
+   *     brought in for a large order, cover during leave. Reassigning the
+   *     CUSTOMER to move one order hands over the whole relationship.
+   *   - History. Moving a customer to a new rep silently rewrites who owned
+   *     every order that customer ever placed, including ones closed years ago
+   *     by someone who has since left. Commission and credit are attached to
+   *     those.
+   *
+   * So assignment is stored per order, and left null to mean "follows the
+   * customer". Null is the common case and the sensible default: most orders
+   * should follow the account, and defaulting to the creator would freeze an
+   * answer nobody asked for onto every historical row.
+   *
+   * The scope filter reads it as an override — see orderScopeFilter.
+   */
+  assignedTo: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    default: null,
   },
   // Set when the order first transitions to `completed`. Used to guarantee
   // stock is only ever decremented once per order.
@@ -122,5 +183,29 @@ orderSchema.index({ createdAt: -1, _id: -1 });
 
 /* Sorting by value — "the biggest orders", on the dashboard and the list. */
 orderSchema.index({ total: -1, _id: -1 });
+
+/*
+ * The third branch of the sales-rep scope, now that an order can be assigned
+ * independently of its customer. Same reasoning as the two above: an $or
+ * evaluates each branch separately, so a branch without an index is a
+ * collection scan no matter how well the others are served.
+ */
+orderSchema.index({ assignedTo: 1, createdAt: -1, _id: -1 });
+
+/*
+ * Looking an order up by the number a human quoted — the entire point of having
+ * one — and enforcing that no two orders share a number.
+ *
+ * PARTIAL rather than sparse, and the distinction is the whole reason this
+ * comment exists. A sparse unique index skips only documents where the field is
+ * ABSENT; one explicitly set to null is present, so every unnumbered order past
+ * the first would be rejected with a duplicate key error on null. A partial
+ * index conditioned on the value being a string ignores nulls and absences
+ * alike, so historical orders coexist happily and real numbers stay unique.
+ */
+orderSchema.index(
+  { orderNumber: 1 },
+  { unique: true, partialFilterExpression: { orderNumber: { $type: 'string' } } }
+);
 
 module.exports = mongoose.model('Order', orderSchema);

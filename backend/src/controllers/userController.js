@@ -5,6 +5,7 @@ const { recordAudit } = require('../services/auditService');
 const inviteService = require('../services/inviteService');
 const { revokeAllForUser } = require('../services/sessionService');
 const { ROLE_VALUES, ROLES, USER_STATUS } = require('../config/constants');
+const { containsRegex } = require('../utils/queryHelpers');
 
 /**
  * User management. Every route in this controller is admin-only — that
@@ -34,12 +35,36 @@ const listUsers = asyncHandler(async (req, res) => {
 });
 
 /**
- * GET /api/users/assignable
- * A trimmed list (id + name + role only) for populating "assigned to" dropdowns.
+ * GET /api/users/assignable?search=
+ *
+ * A trimmed list (id + name + role only) for populating "assigned to" pickers.
  * Available to any authenticated user — it exposes no sensitive fields.
+ *
+ * ONLY ACTIVE ACCOUNTS.
+ *
+ * A deactivated colleague cannot sign in, so work assigned to them lands in a
+ * list nobody opens — which looks exactly like the work being handled, and is
+ * the opposite. Pending accounts are excluded for the same reason: the person
+ * has not set a password yet. Offering names that the write endpoints then
+ * refuse would be a picker whose options are partly decorative.
+ *
+ * `?search=` narrows by name or email so the picker can query the server rather
+ * than pulling down every colleague and filtering in the browser. Capped,
+ * because a picker only ever displays a handful and an uncapped list grows with
+ * the company.
  */
 const listAssignableUsers = asyncHandler(async (req, res) => {
-  const users = await User.find({}).select('name email role').sort({ name: 1 });
+  const { search } = req.query;
+
+  const filter = { status: USER_STATUS.ACTIVE };
+
+  if (search) {
+    const rx = containsRegex(search);
+    filter.$or = [{ name: rx }, { email: rx }];
+  }
+
+  const users = await User.find(filter).select('name email role').sort({ name: 1 }).limit(25);
+
   res.json({ success: true, count: users.length, data: users });
 });
 

@@ -2,9 +2,10 @@ const mongoose = require('mongoose');
 const Order = require('../models/Order');
 const Product = require('../models/Product');
 const Customer = require('../models/Customer');
+const User = require('../models/User');
 const ApiError = require('../utils/ApiError');
 const asyncHandler = require('../utils/asyncHandler');
-const { ORDER_STATUS } = require('../config/constants');
+const { ORDER_STATUS, USER_STATUS } = require('../config/constants');
 const { hasFullRecordAccess, canAccessCustomer } = require('../middleware/roles');
 const { customerScopeFilter } = require('./customerController');
 const {
@@ -17,8 +18,17 @@ const {
 } = require('../utils/queryHelpers');
 const { withTransaction } = require('../utils/transaction');
 const { recordAudit } = require('../services/auditService');
+const { nextOrderNumber, parseOrderNumber } = require('../services/orderNumber');
 
 const SORTABLE_FIELDS = ['total', 'status', 'createdAt'];
+
+/*
+ * A value no order number can hold, used when `?search=` is not an order
+ * number at all. Matching nothing is the honest answer to a search for
+ * something that cannot exist; ignoring the parameter and returning every
+ * order would look like the search silently failed.
+ */
+const NO_SUCH_ORDER_NUMBER = '__no_such_order__';
 
 // ---------------------------------------------------------------------------
 // Stock helpers
@@ -199,7 +209,34 @@ async function orderScopeFilter(user) {
 
   const customerIds = await Customer.find(customerScopeFilter(user)).distinct('_id');
 
-  return { $or: [{ createdBy: user._id }, { customer: { $in: customerIds } }] };
+  /*
+   * `assignedTo` is an OVERRIDE, not another way in.
+   *
+   * The first two branches are the inherited rule: you see an order you placed,
+   * or one belonging to a customer you own. The third is the explicit
+   * assignment, which is what makes "hand this one deal to a specialist" work
+   * without handing over the account.
+   *
+   * The override has to cut both ways or it is not an override — an order
+   * assigned AWAY from you must leave your list even when the customer is still
+   * yours, or reassignment moves the record for the recipient and changes
+   * nothing for the person who gave it up. So the two inherited branches are
+   * qualified: they only apply while nobody else has been named.
+   *
+   * `assignedTo: null` covers both an explicit null and the field being absent
+   * entirely, which is what every order created before this existed looks like.
+   * MongoDB treats a missing field as null for equality, so historical orders
+   * keep exactly the behaviour they had.
+   */
+  const unassigned = { assignedTo: null };
+
+  return {
+    $or: [
+      { assignedTo: user._id },
+      { createdBy: user._id, ...unassigned },
+      { customer: { $in: customerIds }, ...unassigned },
+    ],
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -212,13 +249,31 @@ async function orderScopeFilter(user) {
  * Paging:  ?page= ?limit= ?sort=
  */
 const listOrders = asyncHandler(async (req, res) => {
-  const { status, customer, from, to } = req.query;
+  const { status, customer, from, to, search } = req.query;
   const { page, limit, skip } = getPagination(req.query);
 
   const filter = { ...(await orderScopeFilter(req.user)) };
 
   if (status) filter.status = status;
   if (customer) filter.customer = customer;
+
+  /*
+   * `?search=` looks the order up by its human-readable number, which is the
+   * entire point of having one — somebody quotes ORD-000142 and you need to
+   * find it.
+   *
+   * An exact match on the normalised form rather than a partial one. A prefix
+   * search over a padded sequence is close to useless ("ORD-0001" matches ten
+   * thousand orders), and `parseOrderNumber` is already forgiving about how the
+   * number is typed: `142`, `ord-142` and `ORD-000142` all arrive here as the
+   * same string. If it does not look like an order number at all, the filter is
+   * one nothing matches — an empty result is the honest answer to a search for
+   * something that cannot exist, and is much clearer than silently ignoring the
+   * parameter and returning every order.
+   */
+  if (search !== undefined && String(search).trim() !== '') {
+    filter.orderNumber = parseOrderNumber(search) ?? NO_SUCH_ORDER_NUMBER;
+  }
 
   const createdAt = getDateRange(from, to);
   if (createdAt) filter.createdAt = createdAt;
@@ -229,6 +284,7 @@ const listOrders = asyncHandler(async (req, res) => {
     query
       .populate('customer', 'name email company city status')
       .populate('createdBy', 'name email role')
+      .populate('assignedTo', 'name email role')
       .populate('items.product', 'name sku price');
 
   /*
@@ -309,17 +365,41 @@ const createOrder = asyncHandler(async (req, res) => {
 
     const { items, total } = await buildOrderItems(rawItems, session);
 
+    /*
+     * The human-readable number, allocated atomically.
+     *
+     * Inside the transaction, so an order that is never written does not burn
+     * a number — an abort rolls the counter back with everything else, and the
+     * sequence stays dense.
+     *
+     * Deliberately NOT `countDocuments() + 1`: two orders created in the same
+     * moment would both read the same count and both claim the same number.
+     * See models/Counter.js — it is the same shape of race as the stock
+     * decrement a few lines below, and it is closed the same way, by making the
+     * read and the write a single operation.
+     */
+    const orderNumber = await nextOrderNumber(session);
+
     // Order.create with a session takes an array — the single-document form
     // does not accept options.
     const [created] = await Order.create(
       [
         {
+          orderNumber,
           customer: customer._id,
           items,
           total,
           status: completing ? ORDER_STATUS.COMPLETED : ORDER_STATUS.PENDING,
           completedAt: completing ? new Date() : null,
           createdBy: req.user._id,
+          /*
+           * Left null on creation: null means "follows the customer", which is
+           * what an order should do unless somebody says otherwise. Writing the
+           * creator here instead would freeze an assignment nobody asked for
+           * onto every order, and make moving a customer stop moving their
+           * orders.
+           */
+          assignedTo: null,
         },
       ],
       { session }
@@ -510,7 +590,21 @@ const deleteOrder = asyncHandler(async (req, res) => {
 function canAccessOrderDocument(user, order) {
   if (hasFullRecordAccess(user)) return true;
 
-  const createdBy = order.createdBy?._id || order.createdBy;
+  const idOf = (value) => (value && typeof value === 'object' ? value._id : value);
+
+  /*
+   * An explicit assignment decides the question on its own, in both
+   * directions. This mirrors `orderScopeFilter` exactly, and the two MUST agree
+   * — if the list showed an order the detail endpoint then refused, a rep
+   * would see a row they could not open, which is a worse experience than
+   * either rule alone.
+   */
+  const assignedTo = idOf(order.assignedTo);
+
+  if (assignedTo) return String(assignedTo) === String(user._id);
+
+  // Unassigned: fall back to the inherited rule.
+  const createdBy = idOf(order.createdBy);
   if (createdBy && String(createdBy) === String(user._id)) return true;
 
   // When the customer is populated we can check assignment directly.
@@ -522,11 +616,91 @@ function canAccessOrderDocument(user, order) {
   return false;
 }
 
+/**
+ * PATCH /api/orders/:id/assign — manager and admin only.
+ *
+ * Body: { "assignedTo": "<user id>" } or { "assignedTo": null } to clear it.
+ *
+ * A SEPARATE ENDPOINT FROM PATCH /api/orders/:id, DELIBERATELY.
+ *
+ * Reassignment is a different KIND of change from editing an order. Editing
+ * alters what was sold; reassigning alters who is accountable for it, which is
+ * attached to commission and to who gets the call when something goes wrong.
+ * The two also have different permissions — a rep may edit their own order and
+ * may not hand it to someone else, and expressing that inside one handler means
+ * a field-by-field permission check, which is where this kind of rule goes
+ * wrong quietly.
+ *
+ * It also keeps the audit trail legible: "assigned: Ayesha -> Bilal" rather
+ * than a general update that happens to contain an id.
+ *
+ * Clearing the assignment (null) is a real operation, not a mistake to guard
+ * against: it returns the order to following its customer, which is the right
+ * move once a temporary hand-off is over.
+ */
+const assignOrder = asyncHandler(async (req, res) => {
+  const { assignedTo } = req.body;
+
+  if (assignedTo !== null && !mongoose.isValidObjectId(assignedTo)) {
+    throw ApiError.badRequest('assignedTo must be a user id, or null to clear the assignment');
+  }
+
+  const order = await Order.findById(req.params.id).populate('customer');
+  if (!order) throw ApiError.notFound('Order not found');
+
+  let assignee = null;
+
+  if (assignedTo !== null) {
+    assignee = await User.findById(assignedTo);
+    if (!assignee) throw ApiError.badRequest('That user does not exist');
+
+    /*
+     * A deactivated account must not be handed work. It cannot sign in, so the
+     * order would land in a list nobody opens — which looks exactly like the
+     * order being handled and is the opposite.
+     */
+    if (assignee.status !== USER_STATUS.ACTIVE) {
+      throw ApiError.badRequest('That account is not active, so it cannot be assigned work');
+    }
+  }
+
+  // Captured before the write, so the audit entry can name both ends.
+  const before = order.toObject({ depopulate: true });
+  const previous = order.assignedTo;
+
+  order.assignedTo = assignedTo;
+  await order.save();
+
+  await order.populate('assignedTo', 'name email role');
+
+  /*
+   * Audited with both names rather than both ids. "assigned: Ayesha -> Bilal"
+   * is readable a year later; two ObjectIds require two lookups against a users
+   * collection that may no longer contain either of them.
+   */
+  const previousUser = previous ? await User.findById(previous).select('name') : null;
+
+  await recordAudit(req, {
+    action: 'update',
+    entity: 'order',
+    entityId: order._id,
+    label: order.orderNumber || String(order._id),
+    before,
+    after: order.toObject({ depopulate: true }),
+    note: `assigned: ${previousUser?.name || 'follows customer'} → ${
+      assignee?.name || 'follows customer'
+    }`,
+  });
+
+  res.json({ success: true, data: order });
+});
+
 module.exports = {
   listOrders,
   getOrder,
   createOrder,
   updateOrder,
+  assignOrder,
   deleteOrder,
   orderScopeFilter,
 };

@@ -346,3 +346,109 @@ describe('Role-based access control', () => {
     });
   });
 });
+
+/**
+ * The colleague picker.
+ *
+ * It fills "assign to" controls, so what it returns is what a user can pick —
+ * which makes the exclusions the interesting part. Offering a name that the
+ * write endpoints then refuse is a picker whose options are partly decorative,
+ * and the person choosing has no way to tell which.
+ */
+describe('GET /api/users/assignable', () => {
+  const { api, createAdmin, createManager, createRep } = require('./helpers');
+
+  it('is available to every authenticated role', async () => {
+    const rep = await createRep();
+
+    const res = await api().get('/api/users/assignable').set(rep.headers);
+
+    expect(res.status).toBe(200);
+  });
+
+  it('is refused to an anonymous caller', async () => {
+    expect((await api().get('/api/users/assignable')).status).toBe(401);
+  });
+
+  /** Names and roles only — this is reachable by every role in the system. */
+  it('exposes no sensitive fields', async () => {
+    const rep = await createRep();
+
+    const res = await api().get('/api/users/assignable').set(rep.headers);
+
+    for (const user of res.body.data) {
+      expect(user.password).toBeUndefined();
+      expect(user.failedLoginAttempts).toBeUndefined();
+      expect(user).toHaveProperty('name');
+      expect(user).toHaveProperty('role');
+    }
+  });
+
+  /**
+   * A deactivated colleague cannot sign in, so work assigned to them lands in
+   * a list nobody opens — which looks exactly like the work being handled.
+   */
+  it('omits deactivated accounts', async () => {
+    const admin = await createAdmin();
+    const leaver = await createRep({ name: 'Departed Rep', email: 'gone@example.com' });
+
+    await api()
+      .patch(`/api/users/${leaver.user._id}/status`)
+      .set(admin.headers)
+      .send({ status: 'deactivated' });
+
+    const res = await api().get('/api/users/assignable').set(admin.headers);
+
+    expect(res.body.data.map((u) => u.name)).not.toContain('Departed Rep');
+  });
+
+  /** A pending account has not set a password yet, so it cannot work either. */
+  it('omits accounts that have not been activated', async () => {
+    const admin = await createAdmin();
+
+    await api()
+      .post('/api/users/invite')
+      .set(admin.headers)
+      .send({ name: 'Not Yet Started', email: 'soon@example.com', role: 'sales_rep' });
+
+    const res = await api().get('/api/users/assignable').set(admin.headers);
+
+    expect(res.body.data.map((u) => u.name)).not.toContain('Not Yet Started');
+  });
+
+  describe('?search=', () => {
+    it('narrows by name', async () => {
+      const admin = await createAdmin();
+      await createManager({ name: 'Bilal Ahmed', email: 'bilal@example.com' });
+      await createRep({ name: 'Sana Iqbal', email: 'sana@example.com' });
+
+      const res = await api()
+        .get('/api/users/assignable')
+        .query({ search: 'bilal' })
+        .set(admin.headers);
+
+      expect(res.body.data.map((u) => u.name)).toEqual(['Bilal Ahmed']);
+    });
+
+    it('narrows by email too, since that is what people paste', async () => {
+      const admin = await createAdmin();
+      await createRep({ name: 'Sana Iqbal', email: 'sana@example.com' });
+
+      const res = await api()
+        .get('/api/users/assignable')
+        .query({ search: 'sana@example' })
+        .set(admin.headers);
+
+      expect(res.body.data.map((u) => u.name)).toEqual(['Sana Iqbal']);
+    });
+
+    /** A picker shows a handful; an uncapped list grows with the company. */
+    it('caps how many it returns', async () => {
+      const admin = await createAdmin();
+
+      const res = await api().get('/api/users/assignable').set(admin.headers);
+
+      expect(res.body.data.length).toBeLessThanOrEqual(25);
+    });
+  });
+});

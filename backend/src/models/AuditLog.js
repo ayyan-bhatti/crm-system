@@ -102,6 +102,21 @@ const auditLogSchema = new mongoose.Schema({
     default: [],
   },
 
+  /**
+   * A short human sentence about what happened, when the diff alone does not
+   * say it.
+   *
+   * The `changes` array above is generated and complete, and for most writes it
+   * is enough — "status: pending → completed" reads fine. It is not enough when
+   * the changed value is an id: "assignedTo: 65f3a9… → 68b1c4…" is technically
+   * the whole truth and tells a reader nothing, and resolving those ids a year
+   * later means looking up two users who may since have been deleted.
+   *
+   * So a caller that knows something the diff cannot express writes it down at
+   * the time. Optional, and never a substitute for the diff — it sits beside it.
+   */
+  note: { type: String, default: '', maxlength: 500 },
+
   /** Request metadata — where the action came from. */
   ip: { type: String, default: '' },
   userAgent: { type: String, default: '' },

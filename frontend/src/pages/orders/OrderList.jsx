@@ -1,6 +1,7 @@
+import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { ordersApi } from '../../api/resources';
-import useFetch from '../../hooks/useFetch';
+import useFetch, { useDebounced } from '../../hooks/useFetch';
 import {
   Card,
   ListEmptyState,
@@ -11,7 +12,7 @@ import {
   StatusBadge,
 } from '../../components/common';
 import { ORDER_STATUSES } from '../../constants';
-import { btnPrimary, formatDate, input, link, money, td, th } from '../../ui';
+import { btnPrimary, formatDate, input, link, money, orderLabel, td, th } from '../../ui';
 
 /** Order list, filterable by status and date range. */
 export default function OrderList() {
@@ -21,6 +22,15 @@ export default function OrderList() {
   const status = searchParams.get('status') || '';
   const from = searchParams.get('from') || '';
   const to = searchParams.get('to') || '';
+  const search = searchParams.get('search') || '';
+
+  /*
+   * Debounced, so typing an order number does not fire a request per keystroke.
+   * The input is uncontrolled-ish for the same reason: `searchInput` updates
+   * immediately for responsiveness while the URL and the query lag behind it.
+   */
+  const [searchInput, setSearchInput] = useState(search);
+  const debouncedSearch = useDebounced(searchInput, 300);
 
   const { data, loading, error } = useFetch(
     () =>
@@ -29,8 +39,9 @@ export default function OrderList() {
         ...(status && { status }),
         ...(from && { from }),
         ...(to && { to }),
+        ...(debouncedSearch && { search: debouncedSearch }),
       }),
-    [page, status, from, to]
+    [page, status, from, to, debouncedSearch]
   );
 
   function setFilter(key, value) {
@@ -62,7 +73,25 @@ export default function OrderList() {
       <ErrorBanner message={error} />
 
       <Card>
-        <div className="grid gap-3 border-b border-hairline p-4 sm:grid-cols-3">
+        <div className="grid gap-3 border-b border-hairline p-4 sm:grid-cols-4">
+          {/*
+            Looking an order up by the number somebody quoted, which is the
+            entire reason the number exists. The API is forgiving about the
+            format — "142", "ord-142" and "ORD-000142" all find the same order —
+            so the placeholder shows the canonical form without demanding it.
+          */}
+          <input
+            type="search"
+            className={input}
+            placeholder="Order number, e.g. ORD-000142"
+            aria-label="Search by order number"
+            value={searchInput}
+            onChange={(e) => {
+              setSearchInput(e.target.value);
+              setFilter('search', e.target.value);
+            }}
+          />
+
           <select className={input} value={status} onChange={(e) => setFilter('status', e.target.value)}>
             <option value="">All statuses</option>
             {ORDER_STATUSES.map((value) => (
@@ -97,7 +126,7 @@ export default function OrderList() {
           <TableSkeleton rows={6} columns={5} />
         ) : !data?.data.length ? (
           <ListEmptyState
-            filtered={Boolean(status || from || to)}
+            filtered={Boolean(status || from || to || search)}
             entity="orders"
             onClear={() => setSearchParams(new URLSearchParams(), { replace: true })}
           />
@@ -107,6 +136,7 @@ export default function OrderList() {
               <table className="w-full">
                 <thead className="border-b border-hairline bg-plane">
                   <tr>
+                    <th className={th}>Order</th>
                     <th className={th}>Customer</th>
                     <th className={th}>Date</th>
                     <th className={th}>Items</th>
@@ -118,6 +148,12 @@ export default function OrderList() {
                 <tbody className="divide-y divide-hairline">
                   {data.data.map((order) => (
                     <tr key={order._id} className="hover:bg-plane">
+                      {/* The number leads, because it is what someone quotes. */}
+                      <td className={`${td} whitespace-nowrap font-mono text-xs`}>
+                        <Link to={`/orders/${order._id}`} className={link}>
+                          {orderLabel(order)}
+                        </Link>
+                      </td>
                       <td className={td}>
                         <Link to={`/orders/${order._id}`} className={link}>
                           {order.customer?.name || 'Unknown customer'}
