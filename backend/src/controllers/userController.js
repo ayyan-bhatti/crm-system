@@ -2,10 +2,15 @@ const User = require('../models/User');
 const ApiError = require('../utils/ApiError');
 const asyncHandler = require('../utils/asyncHandler');
 const { recordAudit } = require('../services/auditService');
+const mailer = require('../services/mailer');
+const { publicUrl } = require('../utils/publicUrl');
+const { componentLogger } = require('../config/logger');
 const inviteService = require('../services/inviteService');
 const { revokeAllForUser } = require('../services/sessionService');
 const { ROLE_VALUES, ROLES, USER_STATUS } = require('../config/constants');
 const { containsRegex } = require('../utils/queryHelpers');
+
+const log = componentLogger('users');
 
 /**
  * User management. Every route in this controller is admin-only — that
@@ -320,8 +325,184 @@ const setUserStatus = asyncHandler(async (req, res) => {
   res.json({ success: true, data: user });
 });
 
+/**
+ * GET /api/users/pending — admin only.
+ *
+ * The sign-up requests waiting on a decision.
+ *
+ * Deliberately its own endpoint rather than `GET /api/users?status=pending`,
+ * even though that filter would return the same rows. Two reasons: this list is
+ * a WORK QUEUE and the admin screen polls it for a badge count, so it should be
+ * cheap and shaped for that; and `pending` covers two different situations —
+ * an unaccepted invite and an unapproved request — of which only the second is
+ * a decision anybody is waiting on. Filtering by status alone would put invited
+ * colleagues into the approvals queue, where there is nothing to approve.
+ */
+const listPendingRequests = asyncHandler(async (req, res) => {
+  const users = await User.find({
+    status: USER_STATUS.PENDING,
+    // What separates a request from an unaccepted invite.
+    requestedRole: { $ne: null },
+  })
+    .select('name email role requestedRole createdAt')
+    .sort({ createdAt: 1 });
+
+  /*
+   * Oldest first, unlike every other list in the app. A queue is worked from
+   * the front — newest-first would leave the person who has been waiting
+   * longest permanently at the bottom of the screen.
+   */
+  res.json({ success: true, count: users.length, data: users });
+});
+
+/**
+ * PATCH /api/users/:id/approve — admin only.
+ *
+ * Body: { "role": "manager" } to grant something other than what was asked for,
+ * or omit it to grant the requested role.
+ *
+ * THE ADMIN MAY OVERRIDE THE REQUESTED ROLE, AND THAT IS THE POINT.
+ *
+ * A request is a request. Someone asking to be a manager is telling you what
+ * they believe their job is, which is useful information and not a decision.
+ * Forcing an admin to approve-then-demote would mean a window, however brief,
+ * where somebody holds access nobody agreed to give them.
+ */
+const approveUser = asyncHandler(async (req, res) => {
+  const { role } = req.body;
+
+  if (role !== undefined && !ROLE_VALUES.includes(role)) {
+    throw ApiError.badRequest(`Role must be one of: ${ROLE_VALUES.join(', ')}`);
+  }
+
+  const user = await User.findById(req.params.id);
+  if (!user) throw ApiError.notFound('User not found');
+
+  /*
+   * Only a pending REQUEST can be approved. An unaccepted invite is not one:
+   * that account has no password, so activating it would produce an account
+   * nobody can sign in to, in a state the invite flow would then refuse to fix.
+   */
+  if (user.status !== USER_STATUS.PENDING || !user.requestedRole) {
+    throw ApiError.badRequest('That account does not have a pending request to approve');
+  }
+
+  const before = user.toObject();
+  const granted = role || user.requestedRole;
+
+  user.role = granted;
+  user.status = USER_STATUS.ACTIVE;
+  user.reviewedAt = new Date();
+  user.reviewedBy = req.user._id;
+  await user.save();
+
+  await recordAudit(req, {
+    action: 'update',
+    entity: 'user',
+    entityId: user._id,
+    label: user.name,
+    before,
+    after: user,
+    // The requested role is recorded next to the granted one, because
+    // "approved, but as something else" is the interesting case and the diff
+    // alone would not say that a different decision had been made.
+    note:
+      granted === user.requestedRole
+        ? `approved as ${granted}`
+        : `approved as ${granted} (asked for ${user.requestedRole})`,
+  });
+
+  await notifyDecision(user, req, true);
+
+  res.json({ success: true, message: `${user.name} can now sign in.`, data: user });
+});
+
+/**
+ * PATCH /api/users/:id/reject — admin only.
+ *
+ * WHY THE ACCOUNT IS KEPT RATHER THAN DELETED.
+ *
+ * The brief allowed either. Keeping it wins on three counts:
+ *
+ *   - Deleting frees the email address, so the same person can immediately
+ *     apply again and the admin sees an identical request with no memory of
+ *     having declined it. A queue you cannot clear permanently is not a queue.
+ *   - The decision itself is worth keeping. "Who asked for access and what was
+ *     decided" is exactly the question an audit of an internal system asks, and
+ *     deleting the row deletes the answer.
+ *   - The person gets a truthful message at the login screen instead of
+ *     "invalid email or password", which would send them round the password
+ *     reset loop for an account that no longer exists.
+ *
+ * The cost is that a rejected applicant cannot re-apply on their own. That is
+ * deliberate — re-applying after a refusal is a conversation with an
+ * administrator, not a form. An admin can still approve a rejected request
+ * later (the decision is reversible), or delete the account outright to free
+ * the address.
+ */
+const rejectUser = asyncHandler(async (req, res) => {
+  const user = await User.findById(req.params.id);
+  if (!user) throw ApiError.notFound('User not found');
+
+  if (user.status !== USER_STATUS.PENDING || !user.requestedRole) {
+    throw ApiError.badRequest('That account does not have a pending request to reject');
+  }
+
+  const before = user.toObject();
+
+  user.status = USER_STATUS.REJECTED;
+  user.reviewedAt = new Date();
+  user.reviewedBy = req.user._id;
+  await user.save();
+
+  await recordAudit(req, {
+    action: 'update',
+    entity: 'user',
+    entityId: user._id,
+    label: user.name,
+    before,
+    after: user,
+    note: `rejected (asked for ${user.requestedRole})`,
+  });
+
+  await notifyDecision(user, req, false);
+
+  res.json({ success: true, message: `${user.name}'s request was rejected.`, data: user });
+});
+
+/**
+ * Tell the applicant what was decided.
+ *
+ * Best-effort for the same reason the admin notification is: the decision is
+ * already recorded and the login screen states it plainly, so losing the email
+ * costs the applicant a little time and nothing else. Turning a mail outage
+ * into a failed approval would be far worse — the admin would retry, and the
+ * second attempt would be refused because the account is no longer pending.
+ */
+async function notifyDecision(user, req, approved) {
+  try {
+    await mailer.sendMail({
+      to: user.email,
+      subject: approved ? 'Your SimpleCRM account is ready' : 'About your SimpleCRM request',
+      text: approved
+        ? `Hello ${user.name},\n\n` +
+          `Your account has been approved as a ${String(user.role).replace('_', ' ')}. ` +
+          `You can sign in with the password you chose when you signed up:\n\n` +
+          `${publicUrl(req, '/login')}`
+        : `Hello ${user.name},\n\n` +
+          `Your request for a SimpleCRM account was not approved. If you think this is a ` +
+          `mistake, please speak to an administrator.`,
+    });
+  } catch (err) {
+    log.warn({ err, userId: user._id }, 'could not tell an applicant what was decided');
+  }
+}
+
 module.exports = {
   listUsers,
+  listPendingRequests,
+  approveUser,
+  rejectUser,
   inviteUser: inviteUserHandler,
   setUserStatus,
   listAssignableUsers,

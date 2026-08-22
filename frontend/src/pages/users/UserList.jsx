@@ -12,6 +12,7 @@ import {
   StatusBadge,
 } from '../../components/common';
 import { useAuth } from '../../context/AuthContext';
+import PendingApprovals from './PendingApprovals';
 import { ROLE_VALUES, ROLES } from '../../constants';
 import { btnPrimary, btnSecondary, formatDate, humanize, input, td, th } from '../../ui';
 
@@ -159,6 +160,13 @@ export default function UserList() {
         />
       )}
 
+      {/*
+        The approvals queue, above everything else on the screen. It renders
+        nothing at all when nobody is waiting, so it costs no space in the
+        normal case and is impossible to miss in the one that matters.
+      */}
+      <PendingApprovals onDecided={reload} />
+
       {editing && (
         <EditUserForm
           user={editing}
@@ -256,7 +264,14 @@ export default function UserList() {
                               Edit
                             </button>
 
-                            {user.status === 'pending' && (
+                            {/*
+                              Only for an INVITED account. A pending sign-up
+                              request is also `pending`, but that person already
+                              has a password and needs a decision, not another
+                              link — re-sending would mint an invite token for an
+                              account that has no use for one.
+                            */}
+                            {user.status === 'pending' && !user.requestedRole && (
                               <button
                                 type="button"
                                 className="text-sm font-medium text-brand hover:underline"

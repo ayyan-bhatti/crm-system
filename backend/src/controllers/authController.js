@@ -1,7 +1,7 @@
 const User = require('../models/User');
 const ApiError = require('../utils/ApiError');
 const asyncHandler = require('../utils/asyncHandler');
-const { ROLES, USER_STATUS } = require('../config/constants');
+const { ROLES, USER_STATUS, REQUESTABLE_ROLES } = require('../config/constants');
 const inviteService = require('../services/inviteService');
 const {
   issueSession,
@@ -13,6 +13,11 @@ const { setAuthCookies, clearAuthCookies, REFRESH_COOKIE } = require('../utils/c
 const { assertStrongPassword } = require('../utils/passwordPolicy');
 const passwordResetService = require('../services/passwordResetService');
 const env = require('../config/env');
+const mailer = require('../services/mailer');
+const { publicUrl } = require('../utils/publicUrl');
+const { componentLogger } = require('../config/logger');
+
+const log = componentLogger('auth');
 
 /**
  * Send a freshly issued session to the client.
@@ -37,26 +42,55 @@ function sendSession(res, { user, accessToken, refreshToken }, statusCode = 200)
 /**
  * POST /api/auth/register
  *
- * Role assignment is deliberately NOT taken from the request body — otherwise
- * anyone could register themselves as an admin. Instead:
+ * Signing up is a REQUEST, not a registration. It creates an account that
+ * cannot sign in until an administrator approves it.
  *
- *   - the very first user to register becomes the `admin` (bootstrapping a
- *     fresh install, so there is someone who can manage everyone else)
- *   - every later public registration is a `sales_rep`, the least-privileged role
+ * WHY A REQUEST RATHER THAN AN ACCOUNT.
  *
- * Admins promote users afterwards through PATCH /api/users/:id.
+ * This is an internal CRM. Anyone who could reach the sign-up page previously
+ * gave themselves a working login and could read the customer list — the
+ * least-privileged role limited what they could damage, not what they could
+ * see, and seeing it was the part that mattered. An account that exists but
+ * cannot be used turns "anyone can get in" into "anyone can ask", which is a
+ * question an administrator answers.
  *
- * Whether later registrations are accepted at all is ALLOW_PUBLIC_SIGNUP, which
- * defaults to open. A deployment holding real customer data on the public
- * internet should close it and use invitations instead; see config/env.js for
- * the trade-off in full. The first-user bootstrap ignores the setting, because
- * a new install has nobody to send an invitation.
+ * WHAT THE APPLICANT MAY ASK FOR.
+ *
+ * A role from REQUESTABLE_ROLES — manager or sales rep. Never admin, and that
+ * is deliberate rather than an omission: the request comes from an anonymous
+ * member of the public, and offering admin as a selectable option would put a
+ * tired administrator's attention between a stranger and full control.
+ *
+ * The requested role is a REQUEST and is never granted by signing up. `role`
+ * stays at the least-privileged default until somebody approves, and the
+ * approver may choose a different role than the one asked for.
+ *
+ * THE FIRST ACCOUNT ON AN EMPTY DATABASE IS STILL AN EXCEPTION.
+ *
+ * It becomes an active admin immediately, because a fresh install has nobody to
+ * approve anything and the alternative is a deployment whose first user waits
+ * for an administrator who can never exist. It applies only when the users
+ * collection is genuinely empty, so on any deployment that already has an admin
+ * — this one does — no second account can ever bootstrap into admin.
  */
 const register = asyncHandler(async (req, res) => {
-  const { name, email, password } = req.body;
+  const { name, email, password, requestedRole } = req.body;
 
   if (!name || !email || !password) {
     throw ApiError.badRequest('Name, email and password are required');
+  }
+
+  /*
+   * Validated against the REQUESTABLE list rather than the full role list, so
+   * a request for admin is refused outright instead of quietly downgraded.
+   * Silently ignoring it would let someone believe they had asked for admin and
+   * been approved for it.
+   */
+  if (requestedRole !== undefined && !REQUESTABLE_ROLES.includes(requestedRole)) {
+    throw ApiError.badRequest(
+      `You can request one of: ${REQUESTABLE_ROLES.join(', ')}. ` +
+        'Administrator access is granted by an existing administrator, not requested.'
+    );
   }
 
   // Checked before the duplicate-email lookup so a weak password is reported
@@ -92,27 +126,91 @@ const register = asyncHandler(async (req, res) => {
 
   if (!isFirstUser && !env.allowPublicSignup) {
     throw ApiError.forbidden(
-      'Public registration is closed on this deployment. SimpleCRM accounts are created ' +
-        'by invitation — ask an administrator to invite you.'
+      'Sign-up is closed on this deployment. SimpleCRM accounts are created by ' +
+        'invitation — ask an administrator to invite you.'
     );
   }
 
   /*
-   * The role is assigned here rather than read from req.body. Taking it from
-   * the request would let anyone register themselves as an admin, which is the
-   * whole reason this is not a field.
+   * `role` is assigned here and never read from the body. `requestedRole` is
+   * what the applicant asked for; they are separate fields precisely so that
+   * asking cannot be mistaken for receiving.
    */
   const user = await User.create({
     name,
     email,
     password,
     role: isFirstUser ? ROLES.ADMIN : ROLES.SALES_REP,
-    status: USER_STATUS.ACTIVE,
+    status: isFirstUser ? USER_STATUS.ACTIVE : USER_STATUS.PENDING,
+    requestedRole: isFirstUser ? null : requestedRole || ROLES.SALES_REP,
   });
 
-  const session = await issueSession(user, req);
-  sendSession(res, { user, ...session }, 201);
+  // The bootstrap admin signs in immediately; there is nobody to approve them
+  // and nothing to wait for.
+  if (isFirstUser) {
+    const session = await issueSession(user, req);
+    return sendSession(res, { user, ...session }, 201);
+  }
+
+  /*
+   * No session for a request. The account exists and cannot be used, and
+   * issuing a session here would be a working login for an unapproved user —
+   * the exact thing this flow exists to prevent.
+   */
+  await notifyAdminsOfRequest(user, req);
+
+  /*
+   * 202 Accepted rather than 201 Created. Something was created, but the thing
+   * the caller asked for — an account they can use — has not happened yet, and
+   * may never. "Received, not acted on" is precisely the state.
+   */
+  res.status(202).json({
+    success: true,
+    message:
+      'Your request has been sent to an administrator. You will be able to sign in once ' +
+      'it has been approved.',
+    data: { name: user.name, email: user.email, requestedRole: user.requestedRole },
+  });
 });
+
+/**
+ * Tell the administrators that somebody is waiting.
+ *
+ * Best-effort, and failures are swallowed on purpose: a mail outage must not
+ * turn a sign-up into an error. The request has already been recorded and the
+ * admin screen lists it regardless, so the email is a convenience rather than
+ * the mechanism — which is exactly what makes it safe to lose.
+ */
+async function notifyAdminsOfRequest(user, req) {
+  try {
+    const admins = await User.find({
+      role: ROLES.ADMIN,
+      status: USER_STATUS.ACTIVE,
+    }).select('name email');
+
+    if (!admins.length) return;
+
+    const link = publicUrl(req, '/users');
+
+    await Promise.all(
+      admins.map((admin) =>
+        mailer.sendMail({
+          to: admin.email,
+          subject: `Account request from ${user.name}`,
+          text:
+            `Hello ${admin.name},\n\n` +
+            `${user.name} (${user.email}) has asked for a SimpleCRM account as a ` +
+            `${String(user.requestedRole).replace('_', ' ')}.\n\n` +
+            `They cannot sign in until you approve the request:\n\n${link}\n\n` +
+            `If you do not recognise this person, reject it — the account cannot be ` +
+            `used either way until somebody approves it.`,
+        })
+      )
+    );
+  } catch (err) {
+    log.warn({ err }, 'could not notify admins of an account request');
+  }
+}
 
 /**
  * POST /api/auth/login
@@ -180,12 +278,17 @@ const login = asyncHandler(async (req, res) => {
    * offboarded employee off to reset a password that was never the problem.
    */
   if (!user.canSignIn()) {
-    const message =
-      user.status === USER_STATUS.PENDING
-        ? 'This account has not been activated yet. Please use the invitation link you were sent.'
-        : 'Your account has been deactivated. Please contact an administrator.';
-
-    throw ApiError.forbidden(message);
+    /*
+     * Four different reasons an account cannot be used, and each sends the
+     * person somewhere different. A single "account unavailable" would be
+     * accurate and useless — an applicant waiting on approval would go looking
+     * for a password reset, and an invitee would sit waiting for an approval
+     * that is not coming.
+     *
+     * The two PENDING cases are told apart by `requestedRole`: an invited user
+     * has none and needs their link, an applicant has one and needs patience.
+     */
+    throw ApiError.forbidden(refusalMessage(user));
   }
 
   await user.clearFailedLogins();
@@ -193,6 +296,32 @@ const login = asyncHandler(async (req, res) => {
   const session = await issueSession(user, req);
   return sendSession(res, { user, ...session });
 });
+
+/**
+ * Why this account cannot sign in, phrased for the person reading it.
+ *
+ * Only ever shown AFTER the correct password has been supplied — see the note
+ * at the call site. That is what makes it safe to be specific: only the genuine
+ * owner of the account sees any of this, so it leaks nothing to someone typing
+ * in addresses to see which exist.
+ */
+function refusalMessage(user) {
+  if (user.status === USER_STATUS.REJECTED) {
+    return (
+      'Your request for an account was not approved. Please contact an administrator if ' +
+      'you think this is a mistake.'
+    );
+  }
+
+  if (user.status === USER_STATUS.PENDING) {
+    return user.requestedRole
+      ? 'Your account is awaiting administrator approval. You will be able to sign in once ' +
+          'it has been approved.'
+      : 'This account has not been activated yet. Please use the invitation link you were sent.';
+  }
+
+  return 'Your account has been deactivated. Please contact an administrator.';
+}
 
 /** "90 seconds" reads better than "in 90 seconds" for a two-minute wait. */
 function formatWait(seconds) {

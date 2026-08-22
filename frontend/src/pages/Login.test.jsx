@@ -142,10 +142,15 @@ describe('Login', () => {
     expect(password).toHaveAttribute('autocomplete', 'current-password');
   });
 
-  it('offers a link to registration', async () => {
+  /**
+   * "Request one", not "Create one". Signing up does not produce a working
+   * account — it produces a request an administrator has to approve — and
+   * saying so here sets the expectation before anyone fills in a form.
+   */
+  it('offers a link to request an account', async () => {
     renderWithProviders(<Login />);
 
-    expect(await screen.findByRole('link', { name: /create one/i })).toHaveAttribute(
+    expect(await screen.findByRole('link', { name: /request one/i })).toHaveAttribute(
       'href',
       '/register'
     );

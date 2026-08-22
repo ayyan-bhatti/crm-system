@@ -7,6 +7,9 @@ const {
   updateUser,
   deleteUser,
   inviteUser,
+  listPendingRequests,
+  approveUser,
+  rejectUser,
   setUserStatus,
 } = require('../controllers/userController');
 const { protect } = require('../middleware/auth');
@@ -33,6 +36,23 @@ router.post('/invite', requireManagerOrAdmin, inviteUser);
 
 // Everything else is admin-only — managers and sales reps get a 403.
 router.use(requireRole(ROLES.ADMIN));
+
+/*
+ * The sign-up approval queue.
+ *
+ * Separate routes from the general update and from /status, for the same
+ * reason order reassignment is: these are decisions rather than edits. An
+ * approval grants access that did not exist, and the audit entry should read
+ * "approved as manager (asked for manager)" rather than a general update that
+ * happens to contain a status field.
+ *
+ * Admin only, inherited from the requireRole above. Approving accounts is not
+ * delegated to managers: a manager who can approve accounts can approve one
+ * for themselves under another name.
+ */
+router.get('/pending', listPendingRequests);
+router.patch('/:id/approve', approveUser);
+router.patch('/:id/reject', rejectUser);
 
 router.route('/').get(listUsers).post(createUser);
 router.route('/:id').get(getUser).patch(updateUser).delete(deleteUser);

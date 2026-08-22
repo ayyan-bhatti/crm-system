@@ -76,6 +76,10 @@ export const STATUS_STYLES = {
   // Account status. `active` and `pending` are already defined above and mean
   // the same thing here — a healthy account and one waiting on something.
   deactivated: 'bg-critical-wash text-critical-ink',
+  // A declined sign-up request. Styled like deactivated rather than like a
+  // failure: both are accounts that exist and cannot be used, and neither is
+  // an error that somebody needs to go and fix.
+  rejected: 'bg-critical-wash text-critical-ink',
   // Role
   admin: 'bg-brand-wash text-brand-ink',
   manager: 'bg-brand-wash text-brand-ink',

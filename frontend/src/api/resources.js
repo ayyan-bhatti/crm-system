@@ -11,7 +11,12 @@ import client from './client';
 
 // --- auth -------------------------------------------------------------------
 export const authApi = {
-  register: (payload) => client.post('/auth/register', payload).then((r) => r.data.data),
+  /**
+   * Sign up. Returns the whole envelope, not just `data`, because the useful
+   * part of the answer is the MESSAGE — the account was created and cannot be
+   * used yet, which is a sentence rather than a record.
+   */
+  register: (payload) => client.post('/auth/register', payload).then((r) => r.data),
   login: (payload) => client.post('/auth/login', payload).then((r) => r.data.data),
   // The session cookies are set by the response itself; nothing is returned
   // that the app needs to keep.
@@ -130,6 +135,15 @@ export const usersApi = {
       .then((r) => r.data.data),
   // Admin only.
   list: (params) => client.get('/users', { params }).then((r) => r.data),
+
+  /** Admin only. Sign-up requests waiting on a decision. */
+  pending: () => client.get('/users/pending').then((r) => r.data.data),
+
+  /** Admin only. Pass a role to grant something other than what was requested. */
+  approve: (id, role) =>
+    client.patch(`/users/${id}/approve`, role ? { role } : {}).then((r) => r.data.data),
+
+  reject: (id) => client.patch(`/users/${id}/reject`).then((r) => r.data.data),
 
   /** Admin or manager. Creates a pending account and emails an invite link. */
   invite: (payload) => client.post('/users/invite', payload).then((r) => r.data),

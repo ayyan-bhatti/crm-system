@@ -396,24 +396,58 @@ not from someone using curl. The API enforces every rule independently.
 
 ### Account lifecycle
 
-There are two ways to get an account, and which of them is available is a deployment
-decision — `ALLOW_PUBLIC_SIGNUP`, which defaults to **open**.
+There are two ways to get an account, and **neither of them produces a working login without
+an administrator**.
 
-| | who starts it | role granted | available when |
+| | who starts it | who decides | what the applicant does |
 | --- | --- | --- | --- |
-| **Sign-up** | the person themselves, at `/register` | `sales_rep` | `ALLOW_PUBLIC_SIGNUP` is not `false` |
-| **Invitation** | an admin or manager | whatever they choose | always |
+| **Request** | the person themselves, at `/register` | an admin approves or rejects | chooses their own password up front, then waits |
+| **Invitation** | an admin or manager | already decided | follows a single-use link and chooses a password |
 
-The very first account on an empty database is a special case that ignores the setting
-entirely: it is always allowed and always becomes the **admin**. A fresh install has nobody
-to send an invitation, so gating it would lock everyone out of a new deployment permanently.
+```
+Someone signs up, choosing a role to REQUEST
+        |  account created as `pending`, password already hashed
+        |  admins are emailed; the request appears in their approvals queue
+Admin approves (with the requested role, or a different one) or rejects
+        |
+   approved -> `active`, and their existing password simply starts working
+   rejected -> `rejected`, and they are told so at the login screen
+```
 
-**Which to run.** Open sign-up means anyone who can reach the page gets an account and can
-read the customer list — the role granted is the least-privileged one, so they cannot
-administer anything, but a stranger reading the CRM is usually the part you minded about. A
-deployment holding real customer data on the public internet should set
-`ALLOW_PUBLIC_SIGNUP=false` and invite people instead. It is left open by default so that a
-freshly cloned or demoed instance works without configuration.
+**Signing up is a request, not a registration.** The account exists immediately and cannot be
+used. This is an internal CRM: anyone who could reach the sign-up page previously gave
+themselves a working login and could read the customer list — the least-privileged role
+limited what they could damage, not what they could see, and seeing it was the part that
+mattered.
+
+**Admin is never requestable.** `REQUESTABLE_ROLES` is manager and sales rep. The request
+comes from an anonymous member of the public, and offering admin as a selectable option would
+put a tired administrator's attention between a stranger and full control. A request for it
+is refused outright rather than quietly downgraded, so nobody can come away believing they
+asked for admin and were approved for it. Promotion to admin is a deliberate act by an
+existing admin, on the user management screen.
+
+**The requested role is a request, and the admin may override it in the same action.** Someone
+asking to be a manager is telling you what they believe their job is, which is useful and not
+binding. Approving and then demoting would leave a window, however brief, in which they hold
+access nobody agreed to give them.
+
+**Rejected accounts are kept, not deleted.** Deleting frees the email address, so the same
+person can immediately re-apply and the admin sees an identical request with no memory of
+having declined it. Keeping it also preserves the answer to "who asked for access and what was
+decided", and lets the login screen say *"your request was not approved"* rather than
+"invalid email or password", which would send someone round the password-reset loop for an
+account that no longer exists. The cost is that a rejected applicant cannot re-apply on their
+own — deliberately, since that is a conversation with an administrator rather than a form. An
+admin can still approve them later, or delete the account to free the address.
+
+**The very first account on an empty database is the one exception**: it becomes an active
+admin immediately, because a fresh install has nobody to approve anything. It applies only
+when the users collection is genuinely empty, so on a deployment that already has an admin, no
+sign-up can ever produce a second one.
+
+`ALLOW_PUBLIC_SIGNUP=false` closes the request route entirely, so accounts come only from
+invitations.
 
 ```
 Admin or manager invites (email + role)
@@ -441,7 +475,8 @@ only place it exists.
 
 | status | can sign in? | meaning |
 | --- | :---: | --- |
-| `pending` | no | invited, has not set a password yet |
+| `pending` | no | either invited and not yet activated, or signed up and not yet approved — told apart by `requestedRole` |
+| `rejected` | no | an admin declined the sign-up request |
 | `active` | yes | normal |
 | `deactivated` | no | offboarded — **existing sessions stop working on the next request** |
 

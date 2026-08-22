@@ -1,6 +1,12 @@
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
-const { ROLES, ROLE_VALUES, USER_STATUS, USER_STATUS_VALUES } = require('../config/constants');
+const {
+  ROLES,
+  ROLE_VALUES,
+  USER_STATUS,
+  USER_STATUS_VALUES,
+  REQUESTABLE_ROLES,
+} = require('../config/constants');
 
 const SALT_ROUNDS = 10;
 
@@ -103,6 +109,44 @@ const userSchema = new mongoose.Schema({
 
   /** Who invited this user, for the pending-invite list. */
   invitedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    default: null,
+  },
+
+  /**
+   * The role this person asked for when they signed up.
+   *
+   * Set only on a self-service SIGN-UP, never on an invite, which is what
+   * distinguishes the two kinds of `pending` account: an invited user has no
+   * password and no requested role, a sign-up has both. The login screen needs
+   * that distinction, because "use your invitation link" and "awaiting
+   * approval" send someone to two completely different places.
+   *
+   * It is a REQUEST and never a grant. `role` is what the person actually has,
+   * and stays at the least-privileged default until an admin approves them —
+   * approving is what copies this across, and the admin may choose a different
+   * role instead. Storing the request separately is what lets the approval
+   * screen show "asked for manager" next to the decision.
+   *
+   * Kept after approval rather than cleared, so the trail still answers "what
+   * did they ask for" months later.
+   */
+  requestedRole: {
+    type: String,
+    enum: {
+      values: [...REQUESTABLE_ROLES, null],
+      message: `A requested role must be one of: ${REQUESTABLE_ROLES.join(', ')}`,
+    },
+    default: null,
+  },
+
+  /** When an admin approved or rejected the request, and who did it. */
+  reviewedAt: {
+    type: Date,
+    default: null,
+  },
+  reviewedBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
     default: null,

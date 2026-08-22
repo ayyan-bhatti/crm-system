@@ -57,30 +57,39 @@ describe('Authentication', () => {
       expect(first.body.data.user.status).toBe('active');
     });
 
-    describe('when public sign-up is open (the default)', () => {
-      it('accepts a registration after the first', async () => {
+    /**
+     * These used to assert that a second sign-up produced a working account.
+     * It no longer does: signing up is now a REQUEST an administrator has to
+     * approve. The blast radius that worried the earlier version — a stranger
+     * who signs up can read the CRM — is closed by the account being unusable
+     * rather than by the role it holds.
+     *
+     * The approval flow itself is covered in accountRequests.test.js; these
+     * pin the boundary between "open" and "closed", which is what
+     * ALLOW_PUBLIC_SIGNUP still controls.
+     */
+    describe('when sign-up is open (the default)', () => {
+      it('accepts a request after the first account', async () => {
         await registerAs('First', 'first@example.com');
 
         const second = await registerAs('Second', 'second@example.com');
 
-        expect(second.status).toBe(201);
-        expect(second.body.data.user.status).toBe('active');
+        // 202 Accepted: something was created, but not the thing the caller
+        // asked for. See the note on the handler.
+        expect(second.status).toBe(202);
       });
 
-      /**
-       * The blast radius of open sign-up. A stranger who signs up can read the
-       * CRM; they must not be able to administer it, so only the bootstrap
-       * account ever gets the admin role.
-       */
-      it('gives them the least-privileged role, not the bootstrap role', async () => {
+      it('leaves the new account pending rather than active', async () => {
         await registerAs('First', 'first@example.com');
+        await registerAs('Second', 'second@example.com');
 
-        const second = await registerAs('Second', 'second@example.com');
-
-        expect(second.body.data.user.role).toBe('sales_rep');
+        const user = await User.findOne({ email: 'second@example.com' });
+        expect(user.status).toBe('pending');
+        expect(user.role).toBe('sales_rep');
       });
 
-      it('lets them sign in immediately, with no invitation involved', async () => {
+      /** The account exists, and existing is not the same as usable. */
+      it('does not let them sign in until somebody approves', async () => {
         await registerAs('First', 'first@example.com');
         await registerAs('Second', 'second@example.com');
 
@@ -88,8 +97,8 @@ describe('Authentication', () => {
           .post('/api/auth/login')
           .send({ email: 'second@example.com', password: 'Karachi-Ledger-72' });
 
-        expect(login.status).toBe(200);
-        expect(login.body.data.user.email).toBe('second@example.com');
+        expect(login.status).toBe(403);
+        expect(login.body.message).toMatch(/awaiting administrator approval/i);
       });
     });
 

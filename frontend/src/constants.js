@@ -27,3 +27,17 @@ export const PRODUCT_WRITE_ROLES = [ROLES.ADMIN, ROLES.MANAGER];
  * Mirrors `hasFullRecordAccess` in backend/src/middleware/roles.js.
  */
 export const FULL_ACCESS_ROLES = [ROLES.ADMIN, ROLES.MANAGER];
+
+/**
+ * Roles somebody may request for themselves when signing up.
+ *
+ * Admin is absent deliberately, and mirrors REQUESTABLE_ROLES on the server: a
+ * request comes from an anonymous member of the public, and offering admin as a
+ * selectable option would put a tired administrator between a stranger and full
+ * control. The API refuses it outright rather than downgrading it, so this list
+ * is the UI half of a rule enforced in both places.
+ */
+export const REQUESTABLE_ROLES = [ROLES.MANAGER, ROLES.SALES_REP];
+
+/** Account statuses, mirrored from the backend. */
+export const USER_STATUSES = ['pending', 'active', 'rejected', 'deactivated'];

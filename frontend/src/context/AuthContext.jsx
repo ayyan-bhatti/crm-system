@@ -94,11 +94,18 @@ export function AuthProvider({ children }) {
           return nextUser;
         }),
 
-      register: (payload) =>
-        authApi.register(payload).then(({ user: nextUser }) => {
-          setUser(nextUser);
-          return nextUser;
-        }),
+      /**
+       * Sign up. Deliberately does NOT set the user.
+       *
+       * Signing up creates a REQUEST, not a session — the account cannot be
+       * used until an administrator approves it. Setting the user here would
+       * put the app into a signed-in state with no credentials behind it: every
+       * subsequent request would 401 and the person would be bounced back to
+       * the login screen having apparently been logged in for a second.
+       *
+       * The caller shows the "waiting for approval" message instead.
+       */
+      register: (payload) => authApi.register(payload),
 
       logout,
       refresh,

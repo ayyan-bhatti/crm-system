@@ -2254,4 +2254,79 @@ failures were diagnosed a step slower for that reason.
 
 ---
 
-**Final totals: 714 backend + 158 frontend + 11 end-to-end**, lint clean on both packages.
+## Item 7: sign-up becomes a request somebody has to approve
+
+The previous round had re-opened public sign-up behind `ALLOW_PUBLIC_SIGNUP`, and I flagged
+the trade-off at the time: anyone who could reach the page got a working login and could read
+the customer list. The least-privileged role limited what they could damage, not what they
+could see, and seeing it was the part that mattered.
+
+This resolves that properly rather than by choosing a side. Signing up now creates an account
+that **exists and cannot be used**. "Anyone can get in" becomes "anyone can ask", which is a
+question an administrator answers.
+
+### The details that took the most thought
+
+**Two kinds of `pending`.** An invited colleague and an unapproved applicant are both pending,
+and they need completely different treatment. They are told apart by `requestedRole`, which
+only a sign-up sets. It matters most at the login screen: *"use your invitation link"* and
+*"awaiting approval"* send someone to two entirely different places, and a single "account
+unavailable" would leave an invitee waiting for an approval that is not coming. It matters
+again in the approvals queue, which filters on the same field — filtering by status alone
+would put invited colleagues into a queue where there is nothing to approve.
+
+**Admin is not requestable, and asking for it is an error rather than a downgrade.** Quietly
+turning `requestedRole: 'admin'` into `sales_rep` would let someone come away believing they
+had asked for admin and been approved for it.
+
+**The admin may override the requested role in the same action.** A request is a request.
+Approve-then-demote would leave a window, however brief, in which somebody holds access nobody
+agreed to give them.
+
+**Rejected accounts are kept.** The brief allowed either; keeping wins on three counts.
+Deleting frees the address, so the same person re-applies and the admin sees an identical
+request with no memory of declining it. The decision itself is the answer to "who asked for
+access and what was decided", which is exactly what an audit of an internal system asks. And
+the login screen can say "your request was not approved" instead of "invalid email or
+password", which would send them round the reset loop for an account that no longer exists.
+The cost — a rejected applicant cannot re-apply unaided — is deliberate: that is a
+conversation, not a form.
+
+**202, not 201.** Something was created, but the thing the caller asked for — an account they
+can use — has not happened and may never. "Received, not acted on" is precisely the state.
+
+**No session on sign-up, and the frontend had to be changed to match.** `register` in
+`AuthContext` used to set the user. Leaving that would have put the app into a signed-in state
+with no credentials behind it: every request 401s and the person is bounced back to login
+having apparently been signed in for a second.
+
+**Both emails are best-effort.** The request is already recorded and the queue shows it
+regardless, so losing a notification costs a little time and nothing else. Failing the
+approval because mail is down would be much worse — the admin retries, and the second attempt
+is refused because the account is no longer pending.
+
+**A route-ordering bug I caught before it shipped.** `GET /users/pending` was registered after
+`GET /users/:id`, so Express would have matched it as an id. Moved above.
+
+### The queue is in the way, and vanishes when empty
+
+`PendingApprovals` renders nothing at all when nobody is waiting. An empty "no pending
+approvals" panel on every visit is how people learn to skip past that part of the screen —
+including on the day it is not empty. When there is something, it is the first thing on the
+page, with a count.
+
+**34 new backend tests, 21 new frontend tests.** Three existing tests in `auth.test.js`
+asserted the old behaviour (a second sign-up producing a usable account) and were rewritten
+against the new one.
+
+### A note on the environment, not the code
+
+Nine backend tests failed mid-way through this item with `Mongod internal error (fassert()
+failure)`. That was not the code: **the disk was 100% full**, 92 MB free of 277 GB, so the
+in-memory MongoDB could not write its data files. Clearing regenerable build artifacts and the
+npm cache freed 3.9 GB and all nine passed unchanged. Worth recording because the symptom
+looks nothing like the cause.
+
+---
+
+**Final totals: 748 backend + 179 frontend + 11 end-to-end**, lint clean on both packages.

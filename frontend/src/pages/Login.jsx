@@ -90,8 +90,11 @@ export default function Login() {
 
         <p className="mt-5 text-center text-sm text-ink-2">
           No account?{' '}
+          {/* "Request one", not "Create one": signing up does not produce a
+              working account, and saying so here rather than only on the next
+              page sets the expectation before anyone fills in a form. */}
           <Link to="/register" className={link}>
-            Create one
+            Request one
           </Link>
         </p>
       </div>
