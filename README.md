@@ -1483,6 +1483,35 @@ without setting any of them. Add them when you want the behaviour they describe.
 `JWT_EXPIRES_IN` is **no longer read** — `ACCESS_TOKEN_TTL` replaced it. Leaving it set is
 harmless; it simply does nothing.
 
+### npm version
+
+`package.json` in both packages carries `"packageManager": "npm@10.9.9"`, and CI installs that
+npm explicitly before running `npm ci`. That is not tidiness — it is the fix for a failure
+that broke every build and every deployment:
+
+**npm 10 and npm 11 write different lock files for the same `package.json`.** npm 11 records
+optional platform binaries (`fsevents`, the `@unrs` and `@emnapi` resolver bindings) that npm
+10 omits, and each version then *rejects* the other's lock:
+
+```
+npm error `npm ci` can only install packages when your package.json and
+npm error package-lock.json are in sync.
+npm error Missing: @emnapi/core@1.11.3 from lock file
+```
+
+So a lock regenerated on Node 24 (npm 11) fails on any machine running npm 10 — which
+included GitHub Actions (Node 20.19) and the Vercel build. The error names the lock file, not
+the npm version that wrote it, which is what makes it so slow to diagnose.
+
+**If you regenerate the lock, use npm 10:**
+
+```bash
+npx npm@10 install --package-lock-only
+```
+
+Committing a lock written by a different npm major will break CI and stop deployments, and it
+will look like a dependency problem rather than a toolchain one.
+
 ### Node version
 
 Both `package.json` files declare `engines.node >= 20.19.0`, which Vercel reads to pick the

@@ -2329,4 +2329,45 @@ looks nothing like the cause.
 
 ---
 
+## The lock file that stopped every deployment
+
+CI had been failing on `npm ci` with a lock file out of sync, and the same failure was
+stopping Vercel from building — which is why the live site had not changed despite all of the
+work above being merged. The features were shipped to `main` and never to a server.
+
+```
+npm error Missing: @emnapi/core@1.11.3 from lock file
+npm error Missing: @emnapi/runtime@1.11.3 from lock file
+```
+
+The first read of that is a dependency problem, and it is not one. **npm 10 and npm 11 write
+different lock files for the same `package.json`**: npm 11 records optional platform binaries
+— `fsevents`, the `@unrs`/`@emnapi` resolver bindings — that npm 10 leaves out entirely.
+Reproduced both directions locally, which is what turned a guess into a diagnosis:
+
+| lock written by | packages | npm 10 verdict | npm 11 verdict |
+| --- | --- | --- | --- |
+| npm 10 | 582 | accepted | rejected — wants `fsevents`, the `@unrs` bindings |
+| npm 11 | 607 | rejected — wants `@emnapi/core@1.11.3` | accepted |
+
+Neither lock works everywhere, so the fix cannot be "regenerate the lock". Whichever version
+writes it, a machine on the other major rejects it, and the error blames the file rather than
+the toolchain. My Node 24 gives npm 11; CI runs Node 20.19, which gives npm 10.
+
+So the npm MAJOR is now pinned rather than inherited: `packageManager` in both
+`package.json` files declares it, and CI installs `npm@10` explicitly before `npm ci`, so the
+lock is always validated by the same npm that produced it — whatever npm `setup-node` ships
+with next. The lock itself was regenerated with npm 10 and verified against both packages
+with `npm ci --dry-run`.
+
+The stale entry that triggered it is worth recording too: the committed lock pinned
+`@napi-rs/wasm-runtime@1.2.2` with only `@tybys/wasm-util` as its dependency, while that
+version's real manifest also requires `@emnapi/core` and `@emnapi/runtime`. A regenerated
+npm 10 tree drops that whole subtree — it was a leftover from a dependency no longer in
+`package.json`.
+
+**No application code changed.** The suites are re-run to confirm that.
+
+---
+
 **Final totals: 748 backend + 179 frontend + 11 end-to-end**, lint clean on both packages.

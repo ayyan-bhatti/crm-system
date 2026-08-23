@@ -41,6 +41,23 @@ jobs:
           cache: npm
           cache-dependency-path: backend/package-lock.json
 
+      # THE npm MAJOR IS PINNED, NOT JUST NODE.
+      #
+      # This is the fix for a real CI failure rather than caution. npm 10 and
+      # npm 11 write DIFFERENT lock files for the same package.json: npm 11
+      # records optional platform binaries (fsevents, the @unrs and @emnapi
+      # resolver bindings) that npm 10 omits, and each version then REJECTS the
+      # other's lock with "can only install packages when your package.json and
+      # package-lock.json are in sync".
+      #
+      # So a developer on Node 24 — which ships npm 11 — regenerating the lock
+      # broke every CI run and every deployment, with an error that points at
+      # the lock file rather than at the npm version that wrote it. Pinning
+      # means `npm ci` is always validated by the same npm that produced the
+      # lock, whatever npm setup-node happens to ship with next.
+      - name: Pin npm
+        run: npm install -g npm@10
+
       # `npm ci` rather than `npm install`: it installs exactly what the
       # lockfile says and fails if package.json and the lockfile disagree. CI
       # should test the dependency tree that will actually be deployed, not
@@ -84,6 +101,23 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
+      # THE npm MAJOR IS PINNED, NOT JUST NODE.
+      #
+      # This is the fix for a real CI failure rather than caution. npm 10 and
+      # npm 11 write DIFFERENT lock files for the same package.json: npm 11
+      # records optional platform binaries (fsevents, the @unrs and @emnapi
+      # resolver bindings) that npm 10 omits, and each version then REJECTS the
+      # other's lock with "can only install packages when your package.json and
+      # package-lock.json are in sync".
+      #
+      # So a developer on Node 24 — which ships npm 11 — regenerating the lock
+      # broke every CI run and every deployment, with an error that points at
+      # the lock file rather than at the npm version that wrote it. Pinning
+      # means `npm ci` is always validated by the same npm that produced the
+      # lock, whatever npm setup-node happens to ship with next.
+      - name: Pin npm
+        run: npm install -g npm@10
+
       - name: Install
         working-directory: frontend
         run: npm ci
@@ -126,6 +160,23 @@ jobs:
         with:
           node-version: '20.19'
           cache: npm
+
+      # THE npm MAJOR IS PINNED, NOT JUST NODE.
+      #
+      # This is the fix for a real CI failure rather than caution. npm 10 and
+      # npm 11 write DIFFERENT lock files for the same package.json: npm 11
+      # records optional platform binaries (fsevents, the @unrs and @emnapi
+      # resolver bindings) that npm 10 omits, and each version then REJECTS the
+      # other's lock with "can only install packages when your package.json and
+      # package-lock.json are in sync".
+      #
+      # So a developer on Node 24 — which ships npm 11 — regenerating the lock
+      # broke every CI run and every deployment, with an error that points at
+      # the lock file rather than at the npm version that wrote it. Pinning
+      # means `npm ci` is always validated by the same npm that produced the
+      # lock, whatever npm setup-node happens to ship with next.
+      - name: Pin npm
+        run: npm install -g npm@10
 
       # Both halves are needed: the specs drive the frontend, and the throwaway
       # server that backs them lives in the backend package.
