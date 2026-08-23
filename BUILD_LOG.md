@@ -2370,7 +2370,7 @@ npm 10 tree drops that whole subtree — it was a leftover from a dependency no 
 
 ---
 
-## Switching the AI from Claude to Gemini
+## Switching the AI provider to Gemini
 
 Asked for directly, and it turned into the best argument yet for the seam that was put in
 front of the SDK three rounds ago: **every AI feature calls `aiClient.complete()` and nothing
@@ -2413,12 +2413,12 @@ attempt would have given in twelve. Measured p50 is 2–4 s, so: 15 s per attemp
 and a new **20 s deadline on the whole operation** stops three retries adding up to a minute
 of somebody watching a spinner.
 
-The pricing table was wrong the instant the provider changed — it still held Claude's rates
-and would have reported roughly twenty times the real spend, with nothing failing, because
-nothing there can tell a plausible number from a correct one. The Claude entry is *kept*
-rather than deleted: usage rows recorded before the switch still name that model, and dropping
-its price would silently re-cost that history at the default, changing what last month cost
-after the fact.
+The pricing table was wrong the instant the provider changed — it still held the old rates and
+would have reported roughly twenty times the real spend, with nothing failing, because nothing
+there can tell a plausible number from a correct one. Carrying the old entry over would
+normally be right, since re-costing existing usage rows at the default silently changes what
+last month cost. There were no such rows to protect: the old key was never configured on any
+deployment, so not one call was ever billed — which was the finding that started this work.
 
 **Verified against the live API: 4 of 4 brief queries translate correctly in AI mode**, with
 the filters and results they should produce. Before the retry fixes it was 2 of 4.

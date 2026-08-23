@@ -18,13 +18,13 @@ const aiSearchService = require('../src/services/aiSearchService');
 describe('Cost estimation', () => {
   it('prices a call from the published per-token rates', () => {
     const cost = aiUsageService.estimateCost({
-      model: 'claude-sonnet-4-6',
+      model: 'gemini-3.6-flash',
       inputTokens: 1_000_000,
       outputTokens: 1_000_000,
     });
 
-    // $3 per Mtok in + $15 per Mtok out.
-    expect(cost).toBeCloseTo(18, 5);
+    // Gemini 3 Flash: $0.30 per Mtok in + $2.50 per Mtok out.
+    expect(cost).toBeCloseTo(2.8, 5);
   });
 
   /**
@@ -34,7 +34,7 @@ describe('Cost estimation', () => {
    */
   it('does not round a small call down to zero', () => {
     const cost = aiUsageService.estimateCost({
-      model: 'claude-sonnet-4-6',
+      model: 'gemini-3.6-flash',
       inputTokens: 800,
       outputTokens: 200,
     });
@@ -71,7 +71,7 @@ describe('Usage tracking', () => {
   it('records a call with its tokens and estimated cost', async () => {
     await aiUsageService.recordUsage({
       feature: 'ai-search',
-      model: 'claude-sonnet-4-6',
+      model: 'gemini-3.6-flash',
       inputTokens: 1200,
       outputTokens: 300,
       durationMs: 850,
@@ -92,7 +92,7 @@ describe('Usage tracking', () => {
   it('never stores the prompt or the response', async () => {
     await aiUsageService.recordUsage({
       feature: 'ai-search',
-      model: 'claude-sonnet-4-6',
+      model: 'gemini-3.6-flash',
       inputTokens: 10,
       outputTokens: 10,
     });
@@ -122,21 +122,21 @@ describe('Usage tracking', () => {
     beforeEach(async () => {
       await aiUsageService.recordUsage({
         feature: 'ai-search',
-        model: 'claude-sonnet-4-6',
+        model: 'gemini-3.6-flash',
         inputTokens: 1000,
         outputTokens: 500,
         durationMs: 900,
       });
       await aiUsageService.recordUsage({
         feature: 'customer-summary',
-        model: 'claude-sonnet-4-6',
+        model: 'gemini-3.6-flash',
         inputTokens: 2000,
         outputTokens: 400,
         durationMs: 1100,
       });
       await aiUsageService.recordUsage({
         feature: 'ai-search',
-        model: 'claude-sonnet-4-6',
+        model: 'gemini-3.6-flash',
         outcome: 'cached',
       });
     });
@@ -292,7 +292,7 @@ describe('GET /api/internal/ai-usage', () => {
     const admin = await createAdmin();
     await aiUsageService.recordUsage({
       feature: 'ai-search',
-      model: 'claude-sonnet-4-6',
+      model: 'gemini-3.6-flash',
       inputTokens: 500,
       outputTokens: 100,
     });

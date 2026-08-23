@@ -821,7 +821,7 @@ an audit trail that can be edited through the API is not evidence of anything.
 `POST /api/ai-search` with `{ "query": "customers in Karachi with no orders in the last 30 days" }`.
 
 ```
-natural language → Claude → JSON text → parse → validate → Mongoose query → results
+natural language → model → JSON text → parse → validate → Mongoose query → results
                                                     │
                                               (any failure)
                                                     ↓

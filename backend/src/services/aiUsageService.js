@@ -28,14 +28,16 @@ const log = componentLogger('ai-usage');
  * `PRICE_CHECKED_ON` exists so that a figure quietly going stale is visible
  * rather than assumed current — a cost report nobody can date is a cost report
  * nobody should trust. It is also why this table was WRONG the moment the
- * provider changed: it still held Claude's rates, and would have reported
+ * provider changed: it still held the previous provider's rates, and would have reported
  * roughly twenty times the real spend without a single test failing, because
  * nothing here can tell a plausible number from a correct one.
  *
- * The old Claude entry is kept rather than deleted. Usage rows recorded before
- * the switch still name that model, and dropping the price would silently
- * re-cost that history at the default — changing what last month cost, after
- * the fact, which is the one thing a cost report must never do.
+ * No entry is carried over for the previous provider. That would normally be
+ * wrong — re-costing existing usage rows at the default silently changes what
+ * last month cost, which is the one thing a cost report must never do — but
+ * there are no such rows to protect: the previous key was never configured on
+ * any deployment, so not one call was ever billed. That was the finding that
+ * started this work.
  */
 const PRICE_CHECKED_ON = '2026-08-23';
 
@@ -46,9 +48,6 @@ const PRICING_USD_PER_MTOK = {
   'gemini-2.5-flash': { input: 0.3, output: 2.5 },
   'gemini-2.5-flash-lite': { input: 0.1, output: 0.4 },
   'gemini-2.5-pro': { input: 1.25, output: 10 },
-
-  // Historical: rows recorded while the app ran on Claude. See the note above.
-  'claude-sonnet-4-6': { input: 3, output: 15 },
 
   /*
    * Sensible default for an unrecognised model — better a rough number with a

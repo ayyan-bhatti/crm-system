@@ -19,9 +19,9 @@ const {
  * Turns a free-text question into a validated, structured filter object.
  *
  * The flow:
- *   natural language  ->  Claude  ->  JSON text  ->  parse  ->  validate  ->  filter
+ *   natural language  ->  model  ->  JSON text  ->  parse  ->  validate  ->  filter
  *
- * Every step after "Claude" treats the model's output as untrusted input. The
+ * Every step after "model" treats its output as untrusted input. The
  * model is a translator, not an authority: nothing it returns reaches the
  * database until it has been matched against the allow-lists in filterSchema.js.
  */
@@ -218,7 +218,7 @@ function validateFilter(raw) {
 }
 
 /**
- * Ask Claude to translate the query.
+ * Ask the model to translate the query.
  *
  * Timeouts, retries with backoff and usage logging all live in aiClient — this
  * function's only job is the prompt.

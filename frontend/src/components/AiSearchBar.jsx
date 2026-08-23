@@ -11,7 +11,7 @@ import { btnPrimary, input, money, formatDate, link } from '../ui';
  * Natural-language search box, backed by POST /api/ai-search.
  *
  * The endpoint answers in one of two modes and the UI says which:
- *   "ai"       — Claude translated the question into a structured filter
+ *   "ai"       — the model translated the question into a structured filter
  *   "fallback" — the AI path was unavailable, so this is a keyword search
  *
  * Showing the mode (and, for AI results, the filter that was actually run)
