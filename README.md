@@ -1,7 +1,7 @@
 # SimpleCRM
 
 A full-stack CRM and inventory application: customers, products, orders, role-based access
-control, and a natural-language search endpoint backed by the Anthropic API.
+control, and a natural-language search endpoint backed by the Gemini API.
 
 **Stack:** React (Vite) + Tailwind CSS + React Router · Node.js + Express · MongoDB +
 Mongoose · JWT auth with bcrypt · Jest + Supertest with an in-memory MongoDB.
@@ -35,7 +35,7 @@ Mongoose · JWT auth with bcrypt · Jest + Supertest with an in-memory MongoDB.
 
 - **Node.js 20.19+** (Vite 7 requires it; developed on Node 24)
 - **MongoDB** running locally, or a MongoDB Atlas connection string
-- An **Anthropic API key** — optional. Without one the AI search endpoint still works, it
+- An **Gemini API key** — optional. Without one the AI search endpoint still works, it
   just falls back to keyword search and says so.
 
 ### 1. Backend
@@ -127,8 +127,8 @@ a deployment immune to host-header injection in reset emails. See `src/utils/pub
 | `LOG_LEVEL` | no | `info` in production, `debug` otherwise | `fatal` · `error` · `warn` · `info` · `debug` · `trace` |
 | `AI_CACHE_DISABLED` | no | — | `true` turns off the 5-minute AI search response cache |
 | `AI_MAX_PROMPT_CHARS` | no | `8000` | Prompts above this are refused before the call is made |
-| `ANTHROPIC_API_KEY` | no | — | Blank ⇒ AI search falls back to keyword search |
-| `ANTHROPIC_MODEL` | no | `claude-sonnet-4-6` | Model used to translate queries |
+| `GEMINI_API_KEY` | no | — | Blank ⇒ AI search falls back to keyword search |
+| `GEMINI_MODEL` | no | `gemini-3.6-flash` | Model used to translate queries |
 
 `JWT_EXPIRES_IN` is **no longer read**. It was the single-token lifetime from before the
 session was split into an access and a refresh token; `ACCESS_TOKEN_TTL` replaced it.
@@ -840,7 +840,7 @@ reaches Mongoose, so a hallucinated or hostile response cannot inject an arbitra
 operator such as `$where`. The test suite verifies rejection of `$where`, `__proto__`,
 `constructor`, cross-entity fields, and out-of-enum values.
 
-**3. Parsing is defensive.** `claude-sonnet-4-6` cannot enforce a JSON schema server-side
+**3. Parsing is defensive.** `gemini-3.6-flash` cannot enforce a JSON schema server-side
 (see [Design decisions](#design-decisions)), so the parser tolerates what actually happens
 in practice: a ` ```json ` fence, or a sentence before or after the object. Braces are
 counted while tracking string literals, so a `}` inside a customer note does not truncate
@@ -970,6 +970,42 @@ UI can label it honestly. A generated sentence and a templated one look identica
 
 ### AI cost tracking and caching
 
+### Which model, and what live testing changed
+
+The AI runs on **Gemini** (`gemini-3.6-flash` by default, `GEMINI_MODEL` to override), through
+`@google/genai`. Every AI feature calls `aiClient.complete()` and nothing else, so moving from
+one provider to another meant rewriting one function body — the search translator, the
+customer summary and the lead scorer never knew which model they were talking to, and still
+do not.
+
+Four things were only discoverable by calling the real API, and each had shipped as a
+plausible-looking default:
+
+**Thinking tokens come out of the reply's budget.** `maxOutputTokens` caps thinking *and* the
+reply together. A request for 20 tokens came back **successful, with 16 thinking tokens and no
+text at all**. Callers ask for room to reply, so the client now adds a fixed thinking
+allowance on top of whatever they asked for, and treats an empty reply as an error rather than
+parsing it as JSON.
+
+**`thinkingBudget: 0` is a 400 on Gemini 3.** It was the Gemini 2.x way to switch thinking off;
+Gemini 3 rejects it outright. `thinkingLevel: 'low'` is the floor there — left unset, a
+one-word prompt spent over a hundred tokens thinking about it.
+
+**A 499 is our own timeout.** It arrives *with* a status, so the "any explicit status is
+permanent" rule sent it straight to the fallback without retrying — while the identical
+failure without a status was retried three times.
+
+**Retrying a 429 makes it worse.** The free tier allows **five requests per minute**, and the
+API says exactly how long to wait (`retryDelay: "47s"`). Three attempts 250 ms apart do not
+ride out a rate limit; they spend two more of the requests that are left on calls that cannot
+succeed yet. The client now reads that delay and abandons the call when it exceeds the
+operation's budget, so the caller falls back immediately instead of paying to fail twice more.
+
+Timeouts were re-tuned against measured latency rather than inherited: replies typically land
+in **2–4 seconds**, so 15 s per attempt marks a stall rather than a slow answer, and a 20 s
+deadline on the whole operation stops three retries adding up to a minute of somebody watching
+a spinner.
+
 ### Is the AI actually running?
 
 `GET /api/internal/ai-status` — **admin only** — answers the question this project got
@@ -977,7 +1013,7 @@ wrong for a long time.
 
 Every AI feature here degrades gracefully: no key, a network blip, an unparseable reply, and
 it falls back to something that still answers. That is the right behaviour, and it has one bad
-consequence — **a degraded feature looks exactly like a working one**. `ANTHROPIC_API_KEY`
+consequence — **a degraded feature looks exactly like a working one**. `GEMINI_API_KEY`
 was never set on the deployment, so AI search had been running a plain keyword search behind a
 label that said AI. Nothing errored. Every response was a 200. The only evidence anywhere was
 a `mode` field on individual responses.
@@ -989,9 +1025,9 @@ So configuration is now reported as a fact rather than inferred from behaviour:
   "configured": false,
   "keyPresent": false,
   "mode": "fallback",
-  "model": "claude-sonnet-4-6",
+  "model": "gemini-3.6-flash",
   "recent": { "days": 7, "calls": 0, "succeeded": 0, "failed": 0, "cached": 0 },
-  "summary": "ANTHROPIC_API_KEY is not set. Every AI feature is falling back to its non-AI path — AI search is running a plain keyword search."
+  "summary": "GEMINI_API_KEY is not set. Every AI feature is falling back to its non-AI path — AI search is running a plain keyword search."
 }
 ```
 
@@ -1435,7 +1471,7 @@ Set these in **Project → Settings → Environment Variables**:
 | `MONGO_URI` | A MongoDB Atlas connection string. Local MongoDB is unreachable from Vercel. |
 | `JWT_SECRET` | A long random string — `node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"` |
 | `NODE_ENV` | `production` |
-| `ANTHROPIC_API_KEY` | Optional. Without it, AI search falls back to keyword search. |
+| `GEMINI_API_KEY` | Optional. Without it, AI search falls back to keyword search. |
 
 In Atlas, allow Vercel's egress under **Network Access** (`0.0.0.0/0` for a quick start;
 tighten it for anything real).
@@ -1644,7 +1680,7 @@ asserts the harness really is a replica set, for exactly that reason.
 | `aiSearch` / `aiJson` / `aiClient` / `customerSummary` / `leadScore` | Parsing, allow-list validation, retry policy, degradation, and the scoring formula |
 | `options.test.js` | The picker endpoints, including that they cannot be used to see another rep's customers |
 
-**The Anthropic API is never called from the test suite.** The service functions are
+**The Gemini API is never called from the test suite.** The service functions are
 stubbed, so tests are fast, deterministic, and need no API key. What is tested is everything
 around the model - parsing, validation, scoping, and degradation.
 
@@ -1697,10 +1733,10 @@ would let anyone sign up as an admin. Instead the first account on a fresh datab
 the admin (so a new install has someone who can manage everyone else) and all later public
 sign-ups are sales reps — the least-privileged role. Admins assign roles afterwards.
 
-**`claude-sonnet-4-6` with prompt-instructed JSON, not structured outputs.** The model
+**`gemini-3.6-flash` with prompt-instructed JSON, not structured outputs.** The model
 named in the specification is current and valid, but it does not support the API's
 `output_config.format` feature, which would let the API guarantee schema-valid JSON. That
-is exactly why the parser is defensive and the fallback exists. `ANTHROPIC_MODEL` is
+is exactly why the parser is defensive and the fallback exists. `GEMINI_MODEL` is
 configurable, so pointing it at a structured-outputs model later is a `.env` change plus
 adding the `format` parameter. The request also sets `effort: "low"` — translating a
 question into a filter is not deep reasoning, and low effort cuts both latency and cost —

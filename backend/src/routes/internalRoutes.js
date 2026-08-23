@@ -65,7 +65,7 @@ router.get(
  *
  * Whether the AI is configured and actually succeeding.
  *
- * This endpoint exists because of a real failure: ANTHROPIC_API_KEY was never
+ * This endpoint exists because of a real failure: GEMINI_API_KEY was never
  * set, so every AI feature had been silently running its non-AI fallback. It
  * broke nothing and showed nothing — AI search returned results, they were
  * just keyword results behind a label that said otherwise. The only evidence

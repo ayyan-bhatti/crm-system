@@ -508,7 +508,7 @@ describe('AI search', () => {
       await createCustomer(admin, { name: 'Karachi Co', city: 'Karachi' });
       await createCustomer(admin, { name: 'Lahore Co', city: 'Lahore' });
 
-      stubFallback('ANTHROPIC_API_KEY is not configured');
+      stubFallback('GEMINI_API_KEY is not configured');
 
       const res = await api()
         .post('/api/ai-search')
@@ -517,7 +517,7 @@ describe('AI search', () => {
 
       expect(res.status).toBe(200);
       expect(res.body.mode).toBe('fallback');
-      expect(res.body.reason).toMatch(/ANTHROPIC_API_KEY/);
+      expect(res.body.reason).toMatch(/GEMINI_API_KEY/);
       expect(res.body.count).toBe(1);
     });
 

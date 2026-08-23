@@ -48,7 +48,7 @@ const aiResult = {
 const fallbackResult = {
   ...aiResult,
   mode: 'fallback',
-  reason: 'ANTHROPIC_API_KEY is not configured',
+  reason: 'GEMINI_API_KEY is not configured',
   filter: null,
 };
 
@@ -189,7 +189,7 @@ describe('AiSearchBar', () => {
 /**
  * The admin-only "AI is not configured" notice.
  *
- * This exists because of a real production failure: ANTHROPIC_API_KEY was never
+ * This exists because of a real production failure: GEMINI_API_KEY was never
  * set, so this box ran a plain keyword search, returned results, and said "AI
  * search" above them. Nothing was red and nothing said otherwise, so the
  * deployment stayed in that state indefinitely.
@@ -213,7 +213,7 @@ describe('AI configuration notice', () => {
       configured: false,
       keyPresent: false,
       mode: 'fallback',
-      summary: 'ANTHROPIC_API_KEY is not set. Every AI feature is falling back.',
+      summary: 'GEMINI_API_KEY is not set. Every AI feature is falling back.',
     });
     renderAs('admin');
 
@@ -221,7 +221,7 @@ describe('AI configuration notice', () => {
     // Named twice on purpose: once in the summary, once as the literal
     // variable to set. Both are useful, so assert on the count rather than
     // pretending only one exists.
-    expect(screen.getAllByText(/ANTHROPIC_API_KEY/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/GEMINI_API_KEY/).length).toBeGreaterThan(0);
   });
 
   /** A green "all fine" badge on every screen is how people stop reading badges. */

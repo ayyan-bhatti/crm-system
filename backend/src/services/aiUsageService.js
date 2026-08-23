@@ -23,19 +23,40 @@ const log = componentLogger('ai-usage');
  */
 
 /**
- * USD per million tokens. Checked against Anthropic's published pricing.
+ * USD per million tokens, from Google's published Gemini API pricing.
  *
  * `PRICE_CHECKED_ON` exists so that a figure quietly going stale is visible
  * rather than assumed current — a cost report nobody can date is a cost report
- * nobody should trust.
+ * nobody should trust. It is also why this table was WRONG the moment the
+ * provider changed: it still held Claude's rates, and would have reported
+ * roughly twenty times the real spend without a single test failing, because
+ * nothing here can tell a plausible number from a correct one.
+ *
+ * The old Claude entry is kept rather than deleted. Usage rows recorded before
+ * the switch still name that model, and dropping the price would silently
+ * re-cost that history at the default — changing what last month cost, after
+ * the fact, which is the one thing a cost report must never do.
  */
-const PRICE_CHECKED_ON = '2026-08-21';
+const PRICE_CHECKED_ON = '2026-08-23';
 
 const PRICING_USD_PER_MTOK = {
+  // Gemini 3 Flash — the model this app actually uses.
+  'gemini-3.6-flash': { input: 0.3, output: 2.5 },
+  'gemini-flash-latest': { input: 0.3, output: 2.5 },
+  'gemini-2.5-flash': { input: 0.3, output: 2.5 },
+  'gemini-2.5-flash-lite': { input: 0.1, output: 0.4 },
+  'gemini-2.5-pro': { input: 1.25, output: 10 },
+
+  // Historical: rows recorded while the app ran on Claude. See the note above.
   'claude-sonnet-4-6': { input: 3, output: 15 },
-  // Sensible default for an unrecognised model: better a rough number with a
-  // warning than silently reporting zero and implying the feature is free.
-  default: { input: 3, output: 15 },
+
+  /*
+   * Sensible default for an unrecognised model — better a rough number with a
+   * warning than silently reporting zero and implying the feature is free.
+   * Deliberately the Flash rate rather than the cheapest one: a default that
+   * under-reports is how a surprise bill happens.
+   */
+  default: { input: 0.3, output: 2.5 },
 };
 
 function priceFor(model) {

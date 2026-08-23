@@ -160,6 +160,17 @@ jobs:
         with:
           node-version: '20.19'
           cache: npm
+          # BOTH lock files, because this job installs both packages.
+          #
+          # Without this, setup-node looks for a lock at the REPOSITORY ROOT and
+          # fails the job outright with "Dependencies lock file is not found" —
+          # there is no root lock, the packages are backend/ and frontend/. The
+          # bug was latent from the day CI was written: this job only runs after
+          # the other two pass, and while the backend job was failing it never
+          # got the chance to fail on its own account.
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
 
       # THE npm MAJOR IS PINNED, NOT JUST NODE.
       #

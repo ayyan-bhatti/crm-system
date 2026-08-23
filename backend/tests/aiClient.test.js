@@ -193,3 +193,80 @@ describe('the prompt size ceiling', () => {
     expect(env.aiMaxPromptChars).toBeLessThan(100000);
   });
 });
+
+/**
+ * Behaviour specific to Gemini, all of it found by calling the real API rather
+ * than by reading the docs.
+ *
+ * Each of these is a bug that shipped and was caught in a live run: the client
+ * had been tuned against a different provider, and every one of the defaults
+ * turned out to be wrong in a way that produced a plausible-looking failure
+ * instead of an obvious one.
+ */
+describe('Gemini-specific failure handling', () => {
+  const { isRetryable, retryAfterMs, TOTAL_DEADLINE_MS, REQUEST_TIMEOUT_MS } =
+    require('../src/services/aiClient');
+
+  /**
+   * 499 is the client cancelling, which here means OUR timeout fired. It
+   * arrives with a status, so the "any explicit status is permanent" rule sent
+   * it straight to the fallback without a retry — while the identical failure
+   * without a status was retried three times.
+   */
+  it('retries a 499, which is our own timeout firing', () => {
+    expect(isRetryable({ status: 499 })).toBe(true);
+  });
+
+  it('still refuses to retry a genuinely permanent failure', () => {
+    expect(isRetryable({ status: 400 })).toBe(false);
+    expect(isRetryable({ status: 401 })).toBe(false);
+    expect(isRetryable({ status: 404 })).toBe(false);
+  });
+
+  describe('reading the retry delay the server sends', () => {
+    /** The exact body Gemini returned when the free-tier quota ran out. */
+    const REAL_429 =
+      '{"error":{"code":429,"message":"You exceeded your current quota, please check your ' +
+      'plan and billing details.\n* Quota exceeded for metric: ' +
+      'generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 5, ' +
+      'model: gemini-3.6-flash\nPlease retry in 47.432297979s.","status":"RESOURCE_EXHAUSTED",' +
+      '"details":[{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"47s"}]}}';
+
+    it('extracts the delay from a real quota error', () => {
+      expect(retryAfterMs({ message: REAL_429 })).toBe(47000);
+    });
+
+    it('falls back to the prose form when there is no RetryInfo', () => {
+      expect(retryAfterMs({ message: 'Please retry in 12s.' })).toBe(12000);
+    });
+
+    it('returns null when the server said nothing about waiting', () => {
+      expect(retryAfterMs({ message: 'connection reset' })).toBeNull();
+      expect(retryAfterMs({})).toBeNull();
+      expect(retryAfterMs(null)).toBeNull();
+    });
+
+    /**
+     * THE POINT OF PARSING IT AT ALL.
+     *
+     * The free tier allows five requests per MINUTE. Three attempts 250ms apart
+     * do not ride out a rate limit — they spend two more of the five requests
+     * that are left, on calls that cannot possibly succeed yet. A delay longer
+     * than the whole operation's budget means stop now and let the caller fall
+     * back, which is faster for the user and cheaper for the account.
+     */
+    it('asks for longer than the deadline allows, so the call is abandoned', () => {
+      expect(retryAfterMs({ message: REAL_429 })).toBeGreaterThan(TOTAL_DEADLINE_MS);
+    });
+  });
+
+  /**
+   * A per-attempt timeout bounds one call; on its own, three attempts bound
+   * nothing in particular. The deadline is what stops somebody watching a
+   * spinner on a search box for a minute.
+   */
+  it('bounds the whole operation, not just each attempt', () => {
+    expect(TOTAL_DEADLINE_MS).toBeGreaterThan(REQUEST_TIMEOUT_MS);
+    expect(TOTAL_DEADLINE_MS).toBeLessThan(REQUEST_TIMEOUT_MS * 3);
+  });
+});

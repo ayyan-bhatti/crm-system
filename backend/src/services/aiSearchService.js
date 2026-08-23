@@ -251,7 +251,7 @@ function callModel(query, userId) {
  */
 async function translateQuery(query, { userId = null, entity = null } = {}) {
   if (!aiClient.isConfigured()) {
-    return { mode: 'fallback', filter: null, reason: 'ANTHROPIC_API_KEY is not configured' };
+    return { mode: 'fallback', filter: null, reason: 'GEMINI_API_KEY is not configured' };
   }
 
   /*
@@ -271,7 +271,7 @@ async function translateQuery(query, { userId = null, entity = null } = {}) {
     aiUsageService
       .recordUsage({
         feature: 'ai-search',
-        model: env.anthropicModel,
+        model: env.geminiModel,
         outcome: 'cached',
         userId,
       })

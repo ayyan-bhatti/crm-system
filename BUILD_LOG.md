@@ -2370,4 +2370,66 @@ npm 10 tree drops that whole subtree — it was a leftover from a dependency no 
 
 ---
 
-**Final totals: 748 backend + 179 frontend + 11 end-to-end**, lint clean on both packages.
+## Switching the AI from Claude to Gemini
+
+Asked for directly, and it turned into the best argument yet for the seam that was put in
+front of the SDK three rounds ago: **every AI feature calls `aiClient.complete()` and nothing
+else**, so changing provider meant rewriting one function body. The search translator, the
+customer summary and the lead scorer never knew which model they were talking to and still do
+not. That abstraction had never had to prove itself before.
+
+What was NOT a one-line change was everything the old defaults quietly assumed. Four bugs, all
+of which shipped looking entirely reasonable, and none of which a unit test would have caught
+because each produced a *plausible* result rather than an obvious failure. All four were found
+by calling the real API.
+
+**Thinking tokens come out of the reply's budget.** `maxOutputTokens` caps thinking and the
+reply *together*. A 20-token request returned a **successful response containing 16 thinking
+tokens and no text**. Not an error — a 200 with nothing in it. The client now adds a measured
+thinking allowance on top of the caller's budget, and treats an empty reply as an error rather
+than handing `undefined` to a JSON parser.
+
+**`thinkingBudget: 0` is a 400 on Gemini 3.** It is how Gemini 2.x turned thinking off. Gemini
+3 rejects it outright, so the first working version of this switch failed every call with
+INVALID_ARGUMENT. `thinkingLevel: 'low'` is the floor; unset, a one-word prompt spent over a
+hundred tokens deliberating.
+
+**A 499 is our own timeout coming back to us.** It arrives with a status, so the existing rule
+— "any explicit status is a permanent answer" — sent it straight to the fallback, while the
+identical failure arriving *without* a status was retried three times. Inconsistent in the
+least useful direction.
+
+**Retrying a 429 actively made things worse.** The free tier allows five requests per
+*minute*, and the API says precisely how long to wait: `retryDelay: "47s"`. Three attempts
+250 ms apart do not ride out a rate limit — they spend two more of the five requests that are
+left on calls that cannot possibly succeed yet. The client now reads that delay and abandons
+the call when it exceeds the operation's budget, which is both faster for the user and cheaper
+for the account.
+
+Timeouts were re-tuned against measurement rather than inheritance. The 10 s ceiling was set
+for a different provider; Gemini 3 Flash is more variable, and one live query burned two
+timeouts before its third attempt succeeded — 24 seconds to produce an answer the first
+attempt would have given in twelve. Measured p50 is 2–4 s, so: 15 s per attempt marks a stall,
+and a new **20 s deadline on the whole operation** stops three retries adding up to a minute
+of somebody watching a spinner.
+
+The pricing table was wrong the instant the provider changed — it still held Claude's rates
+and would have reported roughly twenty times the real spend, with nothing failing, because
+nothing there can tell a plausible number from a correct one. The Claude entry is *kept*
+rather than deleted: usage rows recorded before the switch still name that model, and dropping
+its price would silently re-cost that history at the default, changing what last month cost
+after the fact.
+
+**Verified against the live API: 4 of 4 brief queries translate correctly in AI mode**, with
+the filters and results they should produce. Before the retry fixes it was 2 of 4.
+
+**No fallback to the old `ANTHROPIC_*` variable names.** A deployment with the old one still
+set would otherwise look configured while every call failed against a key for the wrong
+provider — precisely the silent degradation `/api/internal/ai-status` exists to make
+impossible.
+
+**7 new backend tests**, each pinning one of the four findings above.
+
+---
+
+**Final totals: 755 backend + 179 frontend + 11 end-to-end**, lint clean on both packages.

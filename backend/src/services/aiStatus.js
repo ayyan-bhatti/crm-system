@@ -43,9 +43,9 @@ const RECENT_DAYS = 7;
 function describe({ configured, keyPresent, recent }) {
   if (!configured) {
     return keyPresent
-      ? 'ANTHROPIC_API_KEY is set but was not usable at startup. Every AI feature is ' +
+      ? 'GEMINI_API_KEY is set but was not usable at startup. Every AI feature is ' +
           'falling back to its non-AI path.'
-      : 'ANTHROPIC_API_KEY is not set. Every AI feature is falling back to its non-AI ' +
+      : 'GEMINI_API_KEY is not set. Every AI feature is falling back to its non-AI ' +
           'path — AI search is running a plain keyword search.';
   }
 
@@ -82,7 +82,7 @@ async function getAiStatus() {
    * string, whitespace — and that distinction is the difference between "you
    * forgot to set it" and "you set it wrong".
    */
-  const keyPresent = Boolean(env.anthropicApiKey);
+  const keyPresent = Boolean(env.geminiApiKey);
 
   const recent = { calls: 0, succeeded: 0, failed: 0, cached: 0, available: false };
 
@@ -114,7 +114,7 @@ async function getAiStatus() {
      * did; this says what the system is currently set up to do.
      */
     mode: configured ? 'ai' : 'fallback',
-    model: env.anthropicModel,
+    model: env.geminiModel,
     recent: { days: RECENT_DAYS, ...recent },
   };
 

@@ -156,7 +156,7 @@ function AiConfigNotice() {
       <p className="text-sm font-medium text-warning-ink">AI is not configured</p>
       <p className="mt-1 text-sm text-ink-2">{status.summary}</p>
       <p className="mt-2 text-xs text-muted">
-        Set <code>ANTHROPIC_API_KEY</code> in the deployment&rsquo;s environment variables to
+        Set <code>GEMINI_API_KEY</code> in the deployment&rsquo;s environment variables to
         enable it. Until then this box runs a keyword search.
       </p>
     </div>

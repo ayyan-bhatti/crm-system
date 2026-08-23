@@ -10,7 +10,7 @@ const router = express.Router();
  * same filters as the regular list endpoints.
  *
  * The rate limit here is about cost, not access: every request is a paid
- * Anthropic call, so an unthrottled endpoint lets any signed-in user spend the
+ * Gemini call, so an unthrottled endpoint lets any signed-in user spend the
  * project's budget — a stuck retry loop does it by accident.
  *
  * Two limits, because they catch different things: per IP (one machine or

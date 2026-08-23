@@ -9,7 +9,7 @@ const { api, createAdmin, createManager, createRep } = require('./helpers');
  *
  * THE FAILURE THIS EXISTS FOR.
  *
- * ANTHROPIC_API_KEY was never set in production, so every AI feature had been
+ * GEMINI_API_KEY was never set in production, so every AI feature had been
  * silently running its non-AI fallback. Nothing broke: AI search returned
  * results, they were keyword results behind a label that said AI, and every
  * response was a 200. The only evidence anywhere was a `mode` field on
@@ -27,18 +27,18 @@ const stubUsage = (totals) => {
 describe('getAiStatus', () => {
   const realIsConfigured = aiClient.isConfigured;
   const realGetUsage = aiUsageService.getUsageSummary;
-  const realKey = env.anthropicApiKey;
+  const realKey = env.geminiApiKey;
 
   afterEach(() => {
     aiClient.isConfigured = realIsConfigured;
     aiUsageService.getUsageSummary = realGetUsage;
-    env.anthropicApiKey = realKey;
+    env.geminiApiKey = realKey;
   });
 
   describe('when the key is missing', () => {
     beforeEach(() => {
       aiClient.isConfigured = () => false;
-      env.anthropicApiKey = '';
+      env.geminiApiKey = '';
       stubUsage({ calls: 0, cacheHits: 0, failedCalls: 0 });
     });
 
@@ -54,7 +54,7 @@ describe('getAiStatus', () => {
     it('says which variable to set', async () => {
       const status = await getAiStatus();
 
-      expect(status.summary).toMatch(/ANTHROPIC_API_KEY is not set/i);
+      expect(status.summary).toMatch(/GEMINI_API_KEY is not set/i);
       expect(status.summary).toMatch(/keyword search/i);
     });
   });
@@ -66,7 +66,7 @@ describe('getAiStatus', () => {
    */
   it('distinguishes a set-but-unusable key from a missing one', async () => {
     aiClient.isConfigured = () => false;
-    env.anthropicApiKey = '   ';
+    env.geminiApiKey = '   ';
     stubUsage({ calls: 0, cacheHits: 0, failedCalls: 0 });
 
     const status = await getAiStatus();
@@ -79,7 +79,7 @@ describe('getAiStatus', () => {
   describe('when the key is configured', () => {
     beforeEach(() => {
       aiClient.isConfigured = () => true;
-      env.anthropicApiKey = 'sk-ant-test';
+      env.geminiApiKey = 'AIzaSy-test-key';
     });
 
     it('reports that the next request will use the AI', async () => {
@@ -136,7 +136,7 @@ describe('getAiStatus', () => {
    */
   it('still answers when the usage history cannot be read', async () => {
     aiClient.isConfigured = () => false;
-    env.anthropicApiKey = '';
+    env.geminiApiKey = '';
     aiUsageService.getUsageSummary = async () => {
       throw new Error('database unavailable');
     };
@@ -145,7 +145,7 @@ describe('getAiStatus', () => {
 
     expect(status.configured).toBe(false);
     expect(status.recent.available).toBe(false);
-    expect(status.summary).toMatch(/ANTHROPIC_API_KEY/);
+    expect(status.summary).toMatch(/GEMINI_API_KEY/);
   });
 });
 
@@ -193,16 +193,16 @@ describe('GET /api/internal/ai-status', () => {
   /** The key itself must never appear in the response, in any form. */
   it('never returns the key', async () => {
     const admin = await createAdmin();
-    const realKey = env.anthropicApiKey;
-    env.anthropicApiKey = 'sk-ant-super-secret-value';
+    const realKey = env.geminiApiKey;
+    env.geminiApiKey = 'AIzaSy-super-secret-value';
 
     try {
       const res = await api().get('/api/internal/ai-status').set(admin.headers);
 
-      expect(JSON.stringify(res.body)).not.toContain('sk-ant-super-secret-value');
+      expect(JSON.stringify(res.body)).not.toContain('AIzaSy-super-secret-value');
       expect(JSON.stringify(res.body)).not.toContain('secret');
     } finally {
-      env.anthropicApiKey = realKey;
+      env.geminiApiKey = realKey;
     }
   });
 });

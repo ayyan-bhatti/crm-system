@@ -135,8 +135,27 @@ const env = {
    */
   logLevel: process.env.LOG_LEVEL || (process.env.NODE_ENV === 'production' ? 'info' : 'debug'),
 
-  anthropicApiKey: process.env.ANTHROPIC_API_KEY || '',
-  anthropicModel: process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-6',
+  /**
+   * Gemini, from Google AI Studio.
+   *
+   * No fallback to the old ANTHROPIC_* names. A deployment that still has the
+   * old variable set would otherwise appear configured while every call failed
+   * against a key for a different provider — which is precisely the silent
+   * degradation `/api/internal/ai-status` exists to make impossible. Better to
+   * report "not configured" truthfully and have somebody set one variable.
+   */
+  geminiApiKey: process.env.GEMINI_API_KEY || '',
+
+  /**
+   * Flash rather than Pro, deliberately.
+   *
+   * Every call this app makes is a short prompt with a small, strictly-shaped
+   * reply: translate a question into a filter, summarise six numbers. Those are
+   * latency-sensitive and reasoning-light, which is exactly the trade Flash is
+   * built for — and the user is waiting on the answer while a fallback sits
+   * ready behind it.
+   */
+  geminiModel: process.env.GEMINI_MODEL || 'gemini-3.6-flash',
 };
 
 env.isTest = env.nodeEnv === 'test';
@@ -288,13 +307,13 @@ if (env.isTest) {
     );
   }
 
-  // --- ANTHROPIC_API_KEY (a warning, not an error) -----------------------
+  // --- GEMINI_API_KEY (a warning, not an error) --------------------------
   /*
    * Deliberately not fatal. Every AI feature has a working non-AI path, so a
    * missing key degrades the product rather than breaking it, and refusing to
    * boot would be the wrong trade for a CRM whose core is not the AI.
    *
-   * It is warned about LOUDLY because the failure is invisible otherwise. This
+   * It is warned about LOUDLY because the failure is invisible otherwise. The
    * key was missing in production and nothing said so: AI search returned
    * keyword results behind a label that said AI, the summary card rendered its
    * deterministic fallback, and every response was a 200. The only evidence was
@@ -304,9 +323,9 @@ if (env.isTest) {
    * GET /api/internal/ai-status reports the same thing at any time, for when
    * nobody is watching the boot logs — which, on serverless, is everybody.
    */
-  if (env.isProduction && !env.anthropicApiKey) {
+  if (env.isProduction && !env.geminiApiKey) {
     console.warn(
-      '[config] ANTHROPIC_API_KEY is not set. The app will run, but every AI ' +
+      '[config] GEMINI_API_KEY is not set. The app will run, but every AI ' +
         'feature is falling back to its non-AI path: AI search is a plain ' +
         'keyword search, and customer summaries are generated from the figures ' +
         'rather than written. Check GET /api/internal/ai-status to confirm.'

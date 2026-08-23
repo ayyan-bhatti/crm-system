@@ -1,7 +1,7 @@
 {
   "name": "simplecrm-backend",
   "version": "1.0.0",
-  "description": "SimpleCRM backend \u2014 Express + MongoDB REST API with JWT auth and AI-assisted search",
+  "description": "SimpleCRM backend — Express + MongoDB REST API with JWT auth and AI-assisted search",
   "main": "src/server.js",
   "type": "commonjs",
   "scripts": {
@@ -16,7 +16,7 @@
     "backfill-order-numbers": "node scripts/backfillOrderNumbers.js"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.71.0",
+    "@google/genai": "^2.18.0",
     "bcryptjs": "^3.0.2",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",

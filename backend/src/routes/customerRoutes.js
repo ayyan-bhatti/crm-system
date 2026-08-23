@@ -35,7 +35,7 @@ router.route('/:id').get(getCustomer).patch(updateCustomer).delete(deleteCustome
  * The AI-backed account summary.
  *
  * Rate limited exactly like AI search, and for the same reason: each call is a
- * paid Anthropic request, so an unthrottled endpoint is a way for any signed-in
+ * paid Gemini request, so an unthrottled endpoint is a way for any signed-in
  * user to spend the project's budget — a stuck retry loop does it by accident.
  * Limited per IP and per user; see middleware/rateLimit.js for why both.
  *

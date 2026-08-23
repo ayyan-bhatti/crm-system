@@ -10,7 +10,7 @@ const { MongoRateLimitStore } = require('./mongoRateLimitStore');
  *
  * This is the *volume* half of the defence: it caps how many requests one
  * network address can make in a window, which is what stops credential
- * stuffing, sign-up spam and someone running up an Anthropic bill. It is
+ * stuffing, sign-up spam and someone running up an Gemini bill. It is
  * deliberately not the only defence on login, because an attacker with a
  * botnet has thousands of addresses and each one stays under the limit. The
  * per-account lockout in models/User is the other half: it follows the
@@ -131,7 +131,7 @@ const passwordResetLimiter = createLimiter({
  * AI search: 20 requests per 5 minutes per IP.
  *
  * The only limit here that is about money rather than security. Every call is a
- * paid Anthropic request, so an unthrottled endpoint is a way for anyone with
+ * paid Gemini request, so an unthrottled endpoint is a way for anyone with
  * an account to spend the project's budget — accidentally, with a stuck retry
  * loop, as easily as deliberately. 20 in 5 minutes is far more than anyone
  * types by hand and far less than a script can burn through.

@@ -192,7 +192,7 @@ function callModel(customer, metrics, health, userId) {
  */
 async function generateSummary(customer, metrics, health = null, userId = null) {
   if (!aiClient.isConfigured()) {
-    return { mode: 'fallback', reason: 'ANTHROPIC_API_KEY is not configured' };
+    return { mode: 'fallback', reason: 'GEMINI_API_KEY is not configured' };
   }
 
   let text;
