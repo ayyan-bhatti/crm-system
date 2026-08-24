@@ -123,6 +123,18 @@ export const ordersApi = {
   assign: (id, assignedTo) =>
     client.patch(`/orders/${id}/assign`, { assignedTo }).then((r) => r.data.data),
 
+  /**
+   * The assigned rep asking for the order to be handed to a colleague.
+   *
+   * Its own call rather than `assign` with different permissions: the two make
+   * the same write and mean different things, and only one of them takes effect
+   * immediately.
+   */
+  requestTransfer: (id, assignedTo, reason) =>
+    client
+      .post(`/orders/${id}/transfer-request`, { assignedTo, reason })
+      .then((r) => r.data),
+
   remove: (id) => client.delete(`/orders/${id}`).then((r) => r.data),
 };
 

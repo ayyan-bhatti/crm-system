@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { customersApi, ordersApi, productsApi } from '../../api/resources';
+import { customersApi, ordersApi, productsApi, usersApi } from '../../api/resources';
 import { errorMessage } from '../../api/client';
 import useFetch from '../../hooks/useFetch';
 import { Card, ErrorBanner, Field, PageHeader, Spinner } from '../../components/common';
 import { useToast } from '../../components/Toast';
 import SearchSelect from '../../components/SearchSelect';
-import { btnPrimary, btnSecondary, input, money, orderLabel } from '../../ui';
+import { btnPrimary, btnSecondary, humanize, input, money, orderLabel } from '../../ui';
 
 /**
  * Create or edit an order.
@@ -62,6 +62,20 @@ export default function OrderForm() {
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [lines, setLines] = useState([{ product: '', quantity: 1, selected: null }]);
 
+  /*
+   * Who is going to work this order, asked here rather than on the detail page
+   * afterwards.
+   *
+   * It used to be a second trip: place the order, find it, reassign it. Two
+   * steps for one decision, and the decision is usually already made at the
+   * moment the order is taken.
+   *
+   * Held as id AND record for the same reason the customer and product pickers
+   * are — see the note above.
+   */
+  const [assignedTo, setAssignedTo] = useState('');
+  const [selectedAssignee, setSelectedAssignee] = useState(null);
+
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -112,6 +126,9 @@ export default function OrderForm() {
         selected: item.product || null,
       }))
     );
+
+    setAssignedTo(existing.assignedTo?._id || '');
+    setSelectedAssignee(existing.assignedTo || null);
   }, [existing]);
 
   // Items are only editable while the order is still pending; see the note at
@@ -185,7 +202,13 @@ export default function OrderForm() {
         toast.success('Order updated.');
         navigate(`/orders/${id}`, { replace: true });
       } else {
-        const order = await ordersApi.create({ customer: customerId, items });
+        const order = await ordersApi.create({
+          customer: customerId,
+          items,
+          // Sent as null rather than omitted when nobody was chosen, so the
+          // intent is explicit: this order is deliberately unassigned.
+          assignedTo: assignedTo || null,
+        });
         toast.success('Order created.');
         navigate(`/orders/${order._id}`, { replace: true });
       }
@@ -260,6 +283,60 @@ export default function OrderForm() {
               emptyMessage="No customers match that search"
             />
           </Field>
+          )}
+
+          {/*
+            WHO WILL WORK IT.
+
+            Under the customer and above the items, because that is the order the
+            decision is actually made in: who it is for, who is doing it, what
+            they are getting.
+
+            Only on creation. Changing it afterwards is reassignment, which lives
+            on the detail page with its own audit entry — see the note on the
+            assign route. Offering it here on an edit would be a second way to do
+            the same thing, with different consequences.
+          */}
+          {!isEdit && (
+            <Field
+              label="Assign to"
+              hint="Who will fulfil this order. Leave blank if you have not decided — nobody sees it until it is assigned."
+            >
+              <SearchSelect
+                value={assignedTo}
+                selected={selectedAssignee}
+                onChange={(user) => {
+                  setAssignedTo(user?._id || '');
+                  setSelectedAssignee(user || null);
+                }}
+                fetchOptions={(search) => usersApi.assignable(search)}
+                getOptionLabel={(user) => user.name}
+                getOptionMeta={(user) => humanize(user.role)}
+                placeholder="Search colleagues…"
+                emptyMessage="No matching colleague"
+              />
+            </Field>
+          )}
+
+          {/*
+            Outside the Field, not inside it.
+
+            `Field` clones its single child to give it the label's id, so a
+            second child throws — which took the whole form down rather than
+            just this control. The clearing button is a sibling of the field
+            rather than part of it, which is also what it is conceptually.
+          */}
+          {!isEdit && selectedAssignee && (
+            <button
+              type="button"
+              className={btnSecondary}
+              onClick={() => {
+                setAssignedTo('');
+                setSelectedAssignee(null);
+              }}
+            >
+              Leave unassigned
+            </button>
           )}
 
           {/* --- Line items --------------------------------------------- */}

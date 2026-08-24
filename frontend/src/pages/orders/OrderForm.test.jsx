@@ -3,7 +3,7 @@ import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import OrderForm from './OrderForm';
 import { renderWithProviders, fakeUser, apiError } from '../../test/utils';
-import { authApi, customersApi, ordersApi, productsApi } from '../../api/resources';
+import { authApi, customersApi, ordersApi, productsApi, usersApi } from '../../api/resources';
 
 /**
  * Creating an order.
@@ -18,7 +18,11 @@ vi.mock('../../api/resources', () => ({
   authApi: { login: vi.fn(), register: vi.fn(), logout: vi.fn(), me: vi.fn() },
   customersApi: { get: vi.fn(), options: vi.fn() },
   productsApi: { options: vi.fn() },
-  ordersApi: { create: vi.fn() },
+  ordersApi: { create: vi.fn(), get: vi.fn(), update: vi.fn() },
+  // The form now asks who will work the order, so it reaches for the colleague
+  // list on mount. Without this in the mock the whole component throws and
+  // every test in the file fails on a missing label rather than a missing API.
+  usersApi: { assignable: vi.fn() },
 }));
 
 const CUSTOMER = {
@@ -36,6 +40,22 @@ const WIDGET = {
   stockQty: 10,
 };
 
+/**
+ * The product pickers: every combobox after the customer and the assignee.
+ *
+ * `getAllByRole('combobox')[1]` used to be the first product. The form then
+ * gained an "Assign to" picker between the customer and the items, and every
+ * one of those indexes silently pointed at the wrong control.
+ *
+ * Selecting them by placeholder would be nicer and does not work: SearchSelect
+ * swaps its placeholder for the SELECTED LABEL once something is chosen, so a
+ * line stops matching /search products/ the moment it has a product on it —
+ * which is exactly when a test wants to look at the next one. Two fixed
+ * controls precede the lines, so the offset is a structural fact rather than a
+ * coincidence of ordering.
+ */
+const productBoxes = () => screen.getAllByRole('combobox').slice(2);
+
 /** Pick an option from a SearchSelect by typing and clicking the result. */
 async function pickFrom(user, combobox, searchText, optionName) {
   await user.click(combobox);
@@ -49,6 +69,7 @@ describe('OrderForm', () => {
     authApi.me.mockResolvedValue(fakeUser());
     customersApi.options.mockResolvedValue([CUSTOMER]);
     productsApi.options.mockResolvedValue([WIDGET]);
+    usersApi.assignable.mockResolvedValue([]);
   });
 
   const renderForm = (route = '/orders/new') =>
@@ -58,7 +79,7 @@ describe('OrderForm', () => {
     renderForm();
 
     expect(await screen.findByLabelText(/customer/i)).toBeInTheDocument();
-    expect(screen.getAllByRole('combobox').length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByRole('combobox').length).toBeGreaterThanOrEqual(3);
   });
 
   /**
@@ -84,7 +105,7 @@ describe('OrderForm', () => {
 
     await pickFrom(user, await screen.findByLabelText(/customer/i), 'karachi', 'Karachi Traders');
 
-    const [, productBox] = screen.getAllByRole('combobox');
+    const [productBox] = productBoxes();
     await pickFrom(user, productBox, 'widget', 'Blue Widget');
 
     await user.click(screen.getByRole('button', { name: /create order/i }));
@@ -105,7 +126,7 @@ describe('OrderForm', () => {
 
     await pickFrom(user, await screen.findByLabelText(/customer/i), 'karachi', 'Karachi Traders');
 
-    const [, productBox] = screen.getAllByRole('combobox');
+    const [productBox] = productBoxes();
     await pickFrom(user, productBox, 'widget', 'Blue Widget');
 
     const quantity = screen.getByRole('spinbutton');
@@ -132,7 +153,7 @@ describe('OrderForm', () => {
 
     await pickFrom(user, await screen.findByLabelText(/customer/i), 'karachi', 'Karachi Traders');
 
-    const [, productBox] = screen.getAllByRole('combobox');
+    const [productBox] = productBoxes();
     await pickFrom(user, productBox, 'widget', 'Blue Widget');
 
     const quantity = screen.getByRole('spinbutton');
@@ -159,7 +180,7 @@ describe('OrderForm', () => {
     renderForm();
 
     await pickFrom(user, await screen.findByLabelText(/customer/i), 'karachi', 'Karachi Traders');
-    const [, productBox] = screen.getAllByRole('combobox');
+    const [productBox] = productBoxes();
     await pickFrom(user, productBox, 'widget', 'Blue Widget');
 
     await user.click(screen.getByRole('button', { name: /create order/i }));
@@ -176,7 +197,8 @@ describe('OrderForm', () => {
       await user.click(screen.getByRole('button', { name: /add item/i }));
 
       // Customer + two product pickers.
-      expect(screen.getAllByRole('combobox')).toHaveLength(3);
+      // customer + assignee + two product lines
+      expect(screen.getAllByRole('combobox')).toHaveLength(4);
     });
 
     /**
@@ -196,7 +218,7 @@ describe('OrderForm', () => {
         'Karachi Traders'
       );
 
-      const [, firstProduct] = screen.getAllByRole('combobox');
+      const [firstProduct] = productBoxes();
       await pickFrom(user, firstProduct, 'widget', 'Blue Widget');
 
       await user.click(screen.getByRole('button', { name: /add item/i }));
@@ -205,8 +227,8 @@ describe('OrderForm', () => {
       const gadget = { _id: '650000000000000000000033', name: 'Red Gadget', sku: 'RG-1', price: 5, stockQty: 10 };
       productsApi.options.mockResolvedValue([gadget]);
 
-      const boxes = screen.getAllByRole('combobox');
-      await pickFrom(user, boxes[2], 'gadget', 'Red Gadget');
+      const boxes = productBoxes();
+      await pickFrom(user, boxes[1], 'gadget', 'Red Gadget');
 
       await user.click(screen.getByRole('button', { name: /create order/i }));
 
@@ -238,5 +260,128 @@ describe('OrderForm', () => {
       await waitFor(() => expect(customersApi.get).toHaveBeenCalledWith(CUSTOMER._id));
       expect(await screen.findByDisplayValue(/karachi traders/i)).toBeInTheDocument();
     });
+  });
+});
+
+/**
+ * Naming who will work the order, at the moment it is placed.
+ *
+ * This was the reported problem: the form never asked, so placing an order and
+ * getting it to a rep was two trips — create it, find it, reassign it. The
+ * decision is usually already made when the order is taken.
+ */
+describe('assigning the order while creating it', () => {
+  const SARA = { _id: 'u9', name: 'Sara Iqbal', email: 'sara@example.com', role: 'sales_rep' };
+
+  // Its own, because the one above is scoped to the outer describe.
+  const renderForm = () =>
+    renderWithProviders(<OrderForm />, { route: '/orders/new', guarded: true });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    authApi.me.mockResolvedValue(fakeUser({ role: 'manager' }));
+    customersApi.options.mockResolvedValue([CUSTOMER]);
+    productsApi.options.mockResolvedValue([WIDGET]);
+    usersApi.assignable.mockResolvedValue([SARA]);
+    ordersApi.create.mockResolvedValue({ _id: 'order-1' });
+  });
+
+  const fillOrder = async (user) => {
+    await pickFrom(user, await screen.findByLabelText(/customer/i), 'karachi', 'Karachi Traders');
+    await pickFrom(user, productBoxes()[0], 'widget', 'Blue Widget');
+  };
+
+  it('asks who will work it', async () => {
+    renderForm();
+
+    expect(await screen.findByLabelText(/assign to/i)).toBeInTheDocument();
+  });
+
+  it('lists colleagues from the server as you type', async () => {
+    const user = userEvent.setup();
+    renderForm();
+
+    const box = await screen.findByLabelText(/assign to/i);
+    await user.click(box);
+    await user.type(box, 'sara');
+
+    await waitFor(() => expect(usersApi.assignable).toHaveBeenCalledWith('sara'));
+  });
+
+  it('sends the chosen rep with the order', async () => {
+    const user = userEvent.setup();
+    renderForm();
+
+    await fillOrder(user);
+    await pickFrom(user, screen.getByLabelText(/assign to/i), 'sara', 'Sara Iqbal');
+    await user.click(screen.getByRole('button', { name: /create order/i }));
+
+    await waitFor(() =>
+      expect(ordersApi.create).toHaveBeenCalledWith(
+        expect.objectContaining({ assignedTo: 'u9' })
+      )
+    );
+  });
+
+  /**
+   * Optional on purpose: a manager taking an order over the phone should be
+   * able to record it before deciding who works it. Null rather than omitted,
+   * so "deliberately unassigned" is explicit rather than inferred.
+   */
+  it('can be left blank, and says so', async () => {
+    const user = userEvent.setup();
+    renderForm();
+
+    expect(await screen.findByText(/leave blank if you have not decided/i)).toBeInTheDocument();
+
+    await fillOrder(user);
+    await user.click(screen.getByRole('button', { name: /create order/i }));
+
+    await waitFor(() =>
+      expect(ordersApi.create).toHaveBeenCalledWith(
+        expect.objectContaining({ assignedTo: null })
+      )
+    );
+  });
+
+  it('can undo a choice back to unassigned', async () => {
+    const user = userEvent.setup();
+    renderForm();
+
+    await pickFrom(user, await screen.findByLabelText(/assign to/i), 'sara', 'Sara Iqbal');
+    await user.click(screen.getByRole('button', { name: /leave unassigned/i }));
+
+    await fillOrder(user);
+    await user.click(screen.getByRole('button', { name: /create order/i }));
+
+    await waitFor(() =>
+      expect(ordersApi.create).toHaveBeenCalledWith(
+        expect.objectContaining({ assignedTo: null })
+      )
+    );
+  });
+
+  /**
+   * Not on the edit form. Changing it afterwards is reassignment, which lives
+   * on the detail page with its own audit entry — offering it here too would be
+   * a second way to do the same thing with different consequences.
+   */
+  it('is absent when editing an existing order', async () => {
+    ordersApi.get.mockResolvedValue({
+      _id: '650000000000000000000001',
+      orderNumber: 'ORD-000009',
+      status: 'pending',
+      customer: CUSTOMER,
+      items: [{ _id: 'i1', quantity: 1, priceAtOrder: 10, product: WIDGET }],
+    });
+
+    renderWithProviders(<OrderForm />, {
+      route: '/orders/650000000000000000000001/edit',
+      path: '/orders/:id/edit',
+      guarded: true,
+    });
+
+    expect(await screen.findByRole('heading', { name: /edit ORD-000009/i })).toBeInTheDocument();
+    expect(screen.queryByLabelText(/assign to/i)).not.toBeInTheDocument();
   });
 });

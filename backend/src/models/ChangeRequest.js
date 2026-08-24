@@ -54,12 +54,23 @@ const changeRequestSchema = new mongoose.Schema({
     default: null,
   },
 
+  /**
+   * `transfer` is a fourth action rather than an `update` carrying an
+   * `assignedTo`.
+   *
+   * Mechanically it is the same write. It is separated because the two are
+   * asked by different people for different reasons and read completely
+   * differently in a queue: an update is "a manager wants to change what was
+   * sold", a transfer is "the rep holding this cannot do it". An admin skimming
+   * a list of "update order ORD-000142" rows would have to open each one to
+   * tell those apart.
+   */
   action: {
     type: String,
     required: true,
     enum: {
-      values: ['create', 'update', 'delete'],
-      message: 'A change request must be a create, an update or a delete',
+      values: ['create', 'update', 'delete', 'transfer'],
+      message: 'A change request must be a create, an update, a delete or a transfer',
     },
   },
 

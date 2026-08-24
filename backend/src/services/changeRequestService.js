@@ -26,6 +26,16 @@ const log = componentLogger('change-requests');
  * than a change to what was sold, and gating it would leave a rep able to see
  * work and unable to do it. See canAdvanceOrder in middleware/roles.
  *
+ * Placing an order is outside it too. That used to queue and it was the wrong
+ * call: it put the approver in the critical path of SELLING, so nothing a
+ * manager agreed became real until somebody else acted. What needs approval is
+ * changing or destroying a record that already exists.
+ *
+ * WHO ASKS FOR WHAT
+ *
+ *   manager  a customer write, an edit to an order's items, a deletion
+ *   rep      a transfer of an order they hold to a colleague
+ *
  * THE ORDER OF OPERATIONS MATTERS
  *
  * Nothing is written to the real collections when a request is made. The
@@ -167,12 +177,48 @@ async function applyChange(request, session) {
   }
 
   /*
+   * A transfer writes one field, and writes it from the payload rather than
+   * from whatever the requester happens to be able to see now. The rep asked
+   * for a specific colleague; approving means that colleague, not "whoever is
+   * free today".
+   */
+  if (request.action === 'transfer') {
+    doc.assignedTo = request.payload.assignedTo ?? null;
+    await doc.save({ session });
+    return doc;
+  }
+
+  const payload = { ...request.payload };
+
+  /*
+   * AN APPROVED EDIT TO AN ORDER'S ITEMS HAS TO BE PRICED, EXACTLY AS A DIRECT
+   * ONE IS.
+   *
+   * The payload holds what was proposed — `{ product, quantity }` — and an order
+   * line needs `priceAtOrder`, with a total recomputed from the lines. Assigning
+   * the raw payload produced a 400 from the schema, which is the same mistake
+   * the CREATE path made and for the same reason: a proposal is not a record.
+   *
+   * Priced at approval time rather than at proposal time, deliberately. The
+   * price of the day is the day the order actually changes; freezing the price
+   * when somebody asked would let a request sit in the queue over a price rise
+   * and then apply the old one.
+   */
+  if (request.entity === 'order' && Array.isArray(payload.items)) {
+    const { buildOrderItems } = require('../controllers/orderController');
+    const { items, total } = await buildOrderItems(payload.items, session);
+
+    payload.items = items;
+    payload.total = total;
+  }
+
+  /*
    * Assigned field by field rather than with `findByIdAndUpdate`, so the
    * schema's validators and pre-save hooks run. That is not a detail: it is
    * what stops an approved payload writing a value the model would have
    * refused when it was proposed.
    */
-  Object.assign(doc, request.payload);
+  Object.assign(doc, payload);
   await doc.save({ session });
 
   return doc;

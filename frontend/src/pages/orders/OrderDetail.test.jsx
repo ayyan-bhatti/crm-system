@@ -24,7 +24,13 @@ import { authApi, ordersApi, usersApi } from '../../api/resources';
 
 vi.mock('../../api/resources', () => ({
   authApi: { login: vi.fn(), register: vi.fn(), logout: vi.fn(), me: vi.fn() },
-  ordersApi: { get: vi.fn(), assign: vi.fn(), update: vi.fn(), remove: vi.fn() },
+  ordersApi: {
+    get: vi.fn(),
+    assign: vi.fn(),
+    update: vi.fn(),
+    remove: vi.fn(),
+    requestTransfer: vi.fn(),
+  },
   usersApi: { assignable: vi.fn() },
 }));
 
@@ -59,6 +65,10 @@ beforeEach(() => {
   vi.clearAllMocks();
   usersApi.assignable.mockResolvedValue([SPECIALIST]);
   ordersApi.assign.mockResolvedValue(order({ assignedTo: SPECIALIST }));
+  ordersApi.requestTransfer.mockResolvedValue({
+    success: true,
+    message: 'Asked for this order to be transferred to Bilal Ahmed.',
+  });
 });
 
 describe('the order number', () => {
@@ -122,7 +132,9 @@ describe('the assignment panel', () => {
 
     await user.click(await screen.findByRole('button', { name: /reassign/i }));
     await user.type(await screen.findByPlaceholderText(/search colleagues/i), 'Bilal');
-    await user.click(await screen.findByText('Bilal Ahmed'));
+    // By ROLE, not by text: the name also appears in the panel header as the
+    // current assignee, so a text match finds two elements.
+    await user.click(await screen.findByRole('option', { name: /Bilal Ahmed/i }));
 
     await waitFor(() =>
       expect(ordersApi.assign).toHaveBeenCalledWith('650000000000000000000001', 'u2')
@@ -165,7 +177,96 @@ describe('the assignment panel', () => {
 
     await user.click(await screen.findByRole('button', { name: /reassign/i }));
     await user.type(await screen.findByPlaceholderText(/search colleagues/i), 'Bilal');
-    await user.click(await screen.findByText('Bilal Ahmed'));
+    // By ROLE, not by text: the name also appears in the panel header as the
+    // current assignee, so a text match finds two elements.
+    await user.click(await screen.findByRole('option', { name: /Bilal Ahmed/i }));
+
+    expect(await screen.findByText(/not active/i)).toBeInTheDocument();
+  });
+});
+
+/**
+ * The rep's one way to move work.
+ *
+ * They cannot reassign — that would let them push a difficult account onto a
+ * colleague, which is a staffing decision somebody else should make. But they
+ * are the person who knows they are on leave next week. So the control is not
+ * hidden, it is a DIFFERENT control: ask, and an admin decides.
+ */
+describe('a rep asking for a transfer', () => {
+  const asHolder = () => renderAs('sales_rep', order({ assignedTo: SPECIALIST }));
+
+  it('offers the rep a request rather than a reassignment', async () => {
+    asHolder();
+
+    expect(await screen.findByRole('button', { name: /request transfer/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^reassign$/i })).not.toBeInTheDocument();
+  });
+
+  /** And the manager keeps the real thing, not the request. */
+  it('offers a manager the reassignment rather than a request', async () => {
+    renderAs('manager', order({ assignedTo: SPECIALIST }));
+
+    expect(await screen.findByRole('button', { name: /^reassign$/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /request transfer/i })).not.toBeInTheDocument();
+  });
+
+  it('sends the colleague and the reason', async () => {
+    const user = userEvent.setup();
+    asHolder();
+
+    await user.click(await screen.findByRole('button', { name: /request transfer/i }));
+    await user.type(await screen.findByPlaceholderText(/search colleagues/i), 'Bilal');
+    // By ROLE, not by text: the name also appears in the panel header as the
+    // current assignee, so a text match finds two elements.
+    await user.click(await screen.findByRole('option', { name: /Bilal Ahmed/i }));
+    await user.type(screen.getByLabelText(/reason for the transfer/i), 'On leave next week');
+    await user.click(screen.getByRole('button', { name: /send request/i }));
+
+    await waitFor(() =>
+      expect(ordersApi.requestTransfer).toHaveBeenCalledWith(
+        '650000000000000000000001',
+        'u2',
+        'On leave next week'
+      )
+    );
+  });
+
+  /** Nothing to send until a colleague is named. */
+  it('cannot be sent without naming somebody', async () => {
+    const user = userEvent.setup();
+    asHolder();
+
+    await user.click(await screen.findByRole('button', { name: /request transfer/i }));
+
+    expect(screen.getByRole('button', { name: /send request/i })).toBeDisabled();
+  });
+
+  /** The rep has to know it has not happened yet. */
+  it('says the order stays with them until somebody agrees', async () => {
+    const user = userEvent.setup();
+    asHolder();
+
+    await user.click(await screen.findByRole('button', { name: /request transfer/i }));
+
+    expect(
+      await screen.findByText(/stays with you until an administrator agrees/i)
+    ).toBeInTheDocument();
+  });
+
+  it('reports a refusal instead of appearing to succeed', async () => {
+    const user = userEvent.setup();
+    ordersApi.requestTransfer.mockRejectedValue({
+      response: { data: { message: 'That account is not active' } },
+    });
+    asHolder();
+
+    await user.click(await screen.findByRole('button', { name: /request transfer/i }));
+    await user.type(await screen.findByPlaceholderText(/search colleagues/i), 'Bilal');
+    // By ROLE, not by text: the name also appears in the panel header as the
+    // current assignee, so a text match finds two elements.
+    await user.click(await screen.findByRole('option', { name: /Bilal Ahmed/i }));
+    await user.click(screen.getByRole('button', { name: /send request/i }));
 
     expect(await screen.findByText(/not active/i)).toBeInTheDocument();
   });

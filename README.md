@@ -362,9 +362,11 @@ do the second. The audit entry names both people rather than logging two ObjectI
 | Products — see | yes | yes | yes |
 | Products — create, edit, delete | yes | yes | no |
 | Orders — see | all | all | **only assigned to them** |
-| Orders — create, and change what is on one | yes | **proposes** | no |
+| Orders — create, and assign to a rep | yes | **yes, directly** | no |
+| Orders — change what is on one | yes | **proposes** | no |
+| Orders — delete | **yes, only** | **proposes** | no |
 | Orders — complete or cancel | yes | yes | **yes, on their own** |
-| Orders — reassign to a rep | yes | yes | no |
+| Orders — reassign to a rep | yes | yes | **requests** |
 | Approvals, user management, audit, internals | yes | no | no |
 
 **A sales rep has no access to the customer book at all** — not a filtered slice
@@ -389,6 +391,38 @@ the step the assignment exists to let them take; changing what was sold alters t
 price and the stock that will move, and belongs to whoever agreed the deal. Sending
 `items` as a rep is refused explicitly rather than silently dropped — a rep who
 edited quantities and got a 200 back would find out from the customer.
+
+### The order lifecycle
+
+**Who will work it is asked when the order is placed**, not afterwards. The form
+has an "Assign to" picker under the customer, listing active colleagues. It used
+to be a second trip — create the order, find it, reassign it — for a decision
+that is usually already made when the order is taken.
+
+It is **optional**. Requiring it would mean a manager taking an order over the
+phone cannot record it until they have decided who works it, so the order does
+not get written down — which is worse than it being briefly unowned. Blank means
+nobody holds it and no rep sees it.
+
+**Placing an order does not wait for approval.** That was the first design and it
+was wrong: it put the approver in the critical path of SELLING, so nothing a
+manager agreed became real — and no rep could start — until somebody else acted.
+Deciding what is sold and who works it is the manager's job.
+
+What still waits is **changing or destroying a record that already exists**:
+editing an order's items, deleting an order, and any write to a customer. Those
+are edits to data the admin owns, and none of them is on anybody's critical path.
+
+**Deleting is the admin's alone.** It is the most destructive act available and
+the least reversible — on a completed order it restores stock, so the inventory
+ledger is rewritten along with the record. A manager may ask; only the admin does
+it.
+
+**A rep can ask for a transfer.** They cannot reassign: letting them would let
+them push a difficult account onto a colleague, which is a staffing decision
+somebody else should make. But they are the one who knows they are on leave next
+week. So they name a colleague, optionally say why, and an admin decides. The
+order stays with them until it is approved.
 
 ### Proposing a change, and approving it
 

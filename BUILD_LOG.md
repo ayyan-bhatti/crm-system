@@ -2538,4 +2538,80 @@ several could not simply be repointed:
 
 ---
 
-**Final totals: 798 backend + 183 frontend + 11 end-to-end**, lint clean on both packages.
+## Assignment at the point of sale, and undoing an approval step
+
+Reported as: the order form never asks who the order is for. It did not —
+assignment was a second trip to the detail page afterwards, for a decision that
+is usually already made when the order is taken. Fixing that turned into a
+correction of something I had got wrong the round before.
+
+### The correction
+
+**Order creation no longer waits for approval.** I built it that way and it was
+the wrong call: it put the approver in the critical path of SELLING. Nothing a
+manager agreed became real, and no rep could start work, until somebody else
+acted. Deciding what is sold and who works it is precisely the manager's job.
+
+What still waits is changing or destroying a record that already EXISTS —
+editing an order's items, deleting one, any write to a customer. None of those is
+on anybody's critical path, and all of them are edits to data the admin owns.
+That is a much better line than "everything a manager does".
+
+### The changes
+
+**"Assign to" on the order form**, under the customer, listing active colleagues.
+Optional on purpose: requiring it would mean a manager taking an order over the
+phone cannot record it until they have decided who works it — so the order does
+not get written down, which is worse than it being briefly unowned. Sent as
+`null` rather than omitted when nobody is chosen, so "deliberately unassigned" is
+explicit rather than inferred.
+
+**Deleting an order is the admin's alone.** A manager could do it directly, which
+was too casual for the most destructive and least reversible act available: on a
+completed order it restores stock, so the inventory ledger is rewritten along
+with the record. A manager may now ask.
+
+**A rep can request a transfer.** They cannot reassign — that would let them push
+a difficult account onto a colleague, which is a staffing decision somebody else
+should make. But the rep is the one who knows they are on leave next week. So
+they name a colleague, optionally say why, and an admin decides; the order stays
+with them meanwhile. Modelled as a fourth change-request action rather than an
+`update` carrying an `assignedTo`, because the two read completely differently in
+a queue: "a manager wants to change what was sold" against "the rep holding this
+cannot do it".
+
+### Three bugs the tests caught, all mine
+
+**An approved EDIT to an order was not priced.** Exactly the same mistake as the
+CREATE path a round earlier, in the branch next door: the payload holds
+`{ product, quantity }` and an order line needs `priceAtOrder` with a total
+recomputed from the lines. Now priced at APPROVAL time rather than when it was
+asked for, so a request that sits in the queue over a price rise applies the new
+price rather than a stale one.
+
+**A manager's queued item edit was writing anyway.** The decision is made deep
+inside the update transaction, and returning from there would have committed it.
+Fixed by throwing a sentinel to abort the transaction and submitting the change
+request outside it — with a test that asserts the order is *completely*
+untouched, not merely that a request exists.
+
+**Two children inside `<Field>` took the whole form down.** `Field` clones its
+single child to give it the label's id, so a second one throws — and every test
+in the file then failed on a missing customer label, which says nothing about the
+cause. The clearing button became a sibling, which is also what it is.
+
+### And a test helper that was lying by position
+
+`getAllByRole('combobox')[1]` was the first product picker. Adding the assignee
+control between the customer and the items shifted every index, and the tests
+failed on a missing OPTION rather than on the control they were actually
+grabbing. Replaced with a named helper — and the obvious fix, matching on the
+placeholder, does not work either: `SearchSelect` swaps its placeholder for the
+selected label, so a line stops matching the moment it has a product on it, which
+is exactly when a test wants the next one.
+
+**33 new backend tests, 12 new frontend tests.**
+
+---
+
+**Final totals: 831 backend + 195 frontend + 11 end-to-end**, lint clean on both packages.

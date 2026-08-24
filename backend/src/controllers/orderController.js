@@ -335,7 +335,7 @@ const getOrder = asyncHandler(async (req, res) => {
  * `pending` and stock moves later, on completion.
  */
 const createOrder = asyncHandler(async (req, res) => {
-  const { customer: customerId, items: rawItems, status } = req.body;
+  const { customer: customerId, items: rawItems, status, assignedTo } = req.body;
 
   if (!customerId) throw ApiError.badRequest('An order must reference a customer');
 
@@ -344,46 +344,32 @@ const createOrder = asyncHandler(async (req, res) => {
   }
 
   /*
-   * A MANAGER'S ORDER WAITS FOR AN ADMIN.
+   * WHO IS GOING TO WORK THIS ORDER, ASKED AT THE MOMENT IT IS PLACED.
    *
-   * The customer is checked first even though nothing is being written yet:
-   * queueing a request against a customer that does not exist, or that the
-   * proposer cannot see, would put a request in the admin's queue that can only
-   * ever be rejected. Better to refuse it at the point somebody can still fix
-   * the input.
+   * Optional, and that is deliberate. Requiring it would mean a manager taking
+   * an order over the phone cannot record it until they have decided who works
+   * it — so the order does not get written down, which is worse than it being
+   * briefly unowned. Blank means nobody holds it yet and no rep sees it.
    *
-   * Stock is deliberately NOT touched or reserved here. Nothing moves until an
-   * order exists, and no order exists until approval — so two pending requests
-   * for the last item in stock both queue happily, and whichever is approved
-   * second fails the atomic decrement on completion. That is the same guard
-   * that already protects two people completing two orders at once, so there is
-   * no new race to reason about.
+   * Validated here rather than left to the schema so the failure names the
+   * problem: "that account is not active" is actionable, where a cast error is
+   * not.
    */
-  if (!canWriteOrders(req.user) || !isAdmin(req.user)) {
-    const customer = await Customer.findById(customerId);
-    if (!customer) throw ApiError.notFound('Customer not found');
+  const assignee = await resolveAssignee(assignedTo);
 
-    const request = await changeRequestService.submit(
-      {
-        entity: 'order',
-        action: 'create',
-        payload: {
-          customer: customerId,
-          items: rawItems,
-          status: status || ORDER_STATUS.PENDING,
-          createdBy: req.user._id,
-        },
-        label: `New order for ${customer.name}`,
-      },
-      req.user
-    );
-
-    return res.status(202).json({
-      success: true,
-      message: 'Sent to an administrator for approval. The order is not placed yet.',
-      data: request,
-    });
-  }
+  /*
+   * A manager places orders DIRECTLY.
+   *
+   * This used to queue for an admin, and it was the wrong call: it put the
+   * approver in the critical path of SELLING, so nothing a manager agreed
+   * became real — and no rep could start work — until somebody else acted.
+   * Deciding what is sold and who works it is the manager's job.
+   *
+   * What still needs approval is changing or destroying a record after the
+   * fact: editing the items, deleting the order, and any change to a customer.
+   * Those are edits to the data the admin owns, and they are not on anybody's
+   * critical path.
+   */
 
   /*
    * The whole sequence — validate the customer, price the lines, write the
@@ -398,7 +384,14 @@ const createOrder = asyncHandler(async (req, res) => {
    */
   const order = await withTransaction((session) =>
     placeOrder(
-      { customerId, rawItems, status, actorId: req.user._id, actor: req.user },
+      {
+        customerId,
+        rawItems,
+        status,
+        assignedTo: assignee?._id ?? null,
+        actorId: req.user._id,
+        actor: req.user,
+      },
       session
     )
   );
@@ -440,6 +433,23 @@ const createOrder = asyncHandler(async (req, res) => {
  * Re-sending the same status is a no-op, so a duplicate request can't
  * double-decrement.
  */
+/**
+ * Thrown to abort the update transaction when a manager's item edit needs
+ * approving instead of applying.
+ *
+ * A sentinel rather than a flag checked afterwards, because the decision is
+ * made deep inside the transaction callback and the transaction must NOT
+ * commit. Throwing is how you abort one; catching it outside is where the
+ * change request can safely be written.
+ */
+class PendingItemEdit extends Error {
+  constructor(order, items) {
+    super('This edit needs approval');
+    this.order = order;
+    this.items = items;
+  }
+}
+
 const updateOrder = asyncHandler(async (req, res) => {
   const { status, items: rawItems } = req.body;
 
@@ -454,7 +464,10 @@ const updateOrder = asyncHandler(async (req, res) => {
    * snapshot. Loading it outside would reintroduce exactly the read-then-write
    * gap the transaction is here to close.
    */
-  const { order, before: auditBefore } = await withTransaction(async (session) => {
+  let transaction;
+
+  try {
+    transaction = await withTransaction(async (session) => {
     // The customer is populated because the ownership check may need to read
     // its `assignedTo` — a sales rep can edit an order they did not create if
     // it belongs to a customer assigned to them.
@@ -485,6 +498,24 @@ const updateOrder = asyncHandler(async (req, res) => {
         'You can complete or cancel an order assigned to you, but not change what is on it. ' +
           'Ask a manager to amend the items.'
       );
+    }
+
+    /*
+     * A MANAGER MAY PLACE AN ORDER BUT NOT REWRITE ONE.
+     *
+     * Placing is selling and goes through directly — keeping the approver out
+     * of that path is the whole point. Editing the lines afterwards is a change
+     * to a record that already exists and that somebody may have acted on: the
+     * price changes, the stock that will move changes, and if it has been
+     * completed the ledger has already recorded the old figures.
+     *
+     * Thrown from inside the transaction so nothing is half-applied. The
+     * request is submitted after it aborts, in the catch below — submitting
+     * here would write the change request inside a transaction that is about to
+     * roll back, which would lose it.
+     */
+    if (rawItems !== undefined && !isAdmin(req.user)) {
+      throw new PendingItemEdit(found, rawItems);
     }
 
     // --- Item edits: only while the order is still pending -------------------
@@ -529,9 +560,31 @@ const updateOrder = asyncHandler(async (req, res) => {
       }
     }
 
-    await found.save({ session });
-    return { order: found, before };
-  });
+      await found.save({ session });
+      return { order: found, before };
+    });
+  } catch (err) {
+    if (!(err instanceof PendingItemEdit)) throw err;
+
+    const request = await changeRequestService.submit(
+      {
+        entity: 'order',
+        entityId: err.order._id,
+        action: 'update',
+        payload: { items: err.items },
+        label: err.order.orderNumber || String(err.order._id),
+      },
+      req.user
+    );
+
+    return res.status(202).json({
+      success: true,
+      message: 'Sent to an administrator for approval. The order has not been changed.',
+      data: request,
+    });
+  }
+
+  const { order, before: auditBefore } = transaction;
 
   await recordAudit(req, {
     action: 'update',
@@ -556,6 +609,39 @@ const updateOrder = asyncHandler(async (req, res) => {
  * Deleting a completed order restores its stock, so the numbers stay honest.
  */
 const deleteOrder = asyncHandler(async (req, res) => {
+  /*
+   * DELETING AN ORDER IS THE ADMIN'S ALONE.
+   *
+   * It is the most destructive act available here and the least reversible: on
+   * a completed order it restores stock, so the inventory ledger is rewritten
+   * along with the record, and there is no undo. A manager may ask for it; only
+   * the admin does it.
+   *
+   * Note this is checked BEFORE the transaction. The order is loaded twice on
+   * the manager path as a result, which is the right trade — the alternative is
+   * writing a change request from inside a transaction that then has to abort.
+   */
+  if (!isAdmin(req.user)) {
+    const order = await Order.findById(req.params.id);
+    if (!order) throw ApiError.notFound('Order not found');
+
+    const request = await changeRequestService.submit(
+      {
+        entity: 'order',
+        entityId: order._id,
+        action: 'delete',
+        label: order.orderNumber || String(order._id),
+      },
+      req.user
+    );
+
+    return res.status(202).json({
+      success: true,
+      message: 'Sent to an administrator for approval. The order has not been deleted.',
+      data: request,
+    });
+  }
+
   /*
    * Also transactional: restoring the stock and removing the order are one
    * change. Restoring stock and then failing to delete would credit inventory
@@ -626,6 +712,40 @@ function canAccessOrderDocument(user, order) {
 }
 
 /**
+ * Turn an `assignedTo` value from a request body into a user, or null.
+ *
+ * Shared by order creation and reassignment, because "who may be given work"
+ * has to mean the same thing in both places — and it did not, briefly: the
+ * assign endpoint checked the account was active and creation would have
+ * accepted anybody at all.
+ *
+ * Null and undefined both mean "nobody", which is a legitimate answer rather
+ * than a missing one: an order can be placed before anyone has decided who
+ * works it, and an assignment can be cleared.
+ */
+async function resolveAssignee(assignedTo) {
+  if (assignedTo === undefined || assignedTo === null || assignedTo === '') return null;
+
+  if (!mongoose.isValidObjectId(assignedTo)) {
+    throw ApiError.badRequest('assignedTo must be a user id, or null for nobody');
+  }
+
+  const user = await User.findById(assignedTo);
+  if (!user) throw ApiError.badRequest('That user does not exist');
+
+  /*
+   * A deactivated or unapproved account must not be handed work. It cannot sign
+   * in, so the order would land in a list nobody opens — which looks exactly
+   * like the order being handled, and is the opposite.
+   */
+  if (user.status !== USER_STATUS.ACTIVE) {
+    throw ApiError.badRequest('That account is not active, so it cannot be assigned work');
+  }
+
+  return user;
+}
+
+/**
  * Write one order, priced and numbered, inside a caller-supplied transaction.
  *
  * WHY THIS IS A FUNCTION AND NOT JUST THE BODY OF createOrder.
@@ -647,7 +767,10 @@ function canAccessOrderDocument(user, order) {
  * guarantees are decoration; making the caller supply it means they cannot
  * forget to open one.
  */
-async function placeOrder({ customerId, rawItems, status, actorId, actor = null }, session) {
+async function placeOrder(
+  { customerId, rawItems, status, assignedTo = null, actorId, actor = null },
+  session
+) {
   const customer = await Customer.findById(customerId).session(session);
   if (!customer) throw ApiError.notFound('Customer not found');
 
@@ -687,12 +810,14 @@ async function placeOrder({ customerId, rawItems, status, actorId, actor = null 
         completedAt: completing ? new Date() : null,
         createdBy: actorId,
         /*
-         * Left null on creation: null means "follows the customer", which is
-         * what an order should do unless somebody says otherwise. Writing the
-         * creator here instead would freeze an assignment nobody asked for onto
-         * every order, and make moving a customer stop moving their orders.
+         * Whoever the person placing the order named, or nobody.
+         *
+         * Not defaulted to the creator: a manager placing an order is not
+         * thereby working it, and writing themselves in would put every order
+         * in a manager's rep-scoped list and mean nothing was ever visibly
+         * unassigned.
          */
-        assignedTo: null,
+        assignedTo,
       },
     ],
     { session }
@@ -784,9 +909,71 @@ const assignOrder = asyncHandler(async (req, res) => {
   res.json({ success: true, data: order });
 });
 
+/**
+ * POST /api/orders/:id/transfer-request — the assigned sales rep.
+ *
+ * Body: { "assignedTo": "<user id>", "reason": "why" }
+ *
+ * THE ONE WAY A REP CAN MOVE WORK.
+ *
+ * A rep cannot reassign an order — letting them would let them push a difficult
+ * account onto a colleague, which is a staffing decision somebody else should
+ * be making. But they are the person who knows they are on leave next week, or
+ * that the customer is two hours from them and forty minutes from Sara. So they
+ * ask, and an admin decides.
+ *
+ * Deliberately NOT the same endpoint as `assignOrder` with a different
+ * permission. The two produce the same write and mean different things: one is
+ * a decision, the other is a request, and the response has to be able to say
+ * "nothing has happened yet".
+ */
+const requestOrderTransfer = asyncHandler(async (req, res) => {
+  const { assignedTo, reason } = req.body;
+
+  const order = await Order.findById(req.params.id).populate('customer');
+  if (!order) throw ApiError.notFound('Order not found');
+
+  /*
+   * Only the rep HOLDING the order may ask to hand it on. Anyone else asking is
+   * asking about somebody else's work, and a manager or admin can simply do it.
+   */
+  if (!canAccessOrderDocument(req.user, order)) {
+    throw ApiError.forbidden('You do not have access to this order');
+  }
+
+  const assignee = await resolveAssignee(assignedTo);
+
+  if (!assignee) {
+    throw ApiError.badRequest('Name the colleague you would like the order transferred to');
+  }
+
+  if (String(assignee._id) === String(req.user._id)) {
+    throw ApiError.badRequest('That order is already assigned to you');
+  }
+
+  const request = await changeRequestService.submit(
+    {
+      entity: 'order',
+      entityId: order._id,
+      action: 'transfer',
+      payload: { assignedTo: assignee._id, reason: String(reason || '').slice(0, 500) },
+      label: order.orderNumber || String(order._id),
+    },
+    req.user
+  );
+
+  res.status(202).json({
+    success: true,
+    message: `Asked for this order to be transferred to ${assignee.name}. It stays with you until an administrator agrees.`,
+    data: request,
+  });
+});
+
 module.exports = {
   listOrders,
+  requestOrderTransfer,
   placeOrder,
+  buildOrderItems,
   getOrder,
   createOrder,
   updateOrder,

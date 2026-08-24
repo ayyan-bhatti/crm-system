@@ -5,6 +5,7 @@ const {
   createOrder,
   updateOrder,
   assignOrder,
+  requestOrderTransfer,
   deleteOrder,
 } = require('../controllers/orderController');
 const { protect } = require('../middleware/auth');
@@ -62,5 +63,15 @@ router
  * permission check, which is where rules like this go wrong quietly.
  */
 router.patch('/:id/assign', requireManagerOrAdmin, assignOrder);
+
+/*
+ * A rep asking for an order to be handed on.
+ *
+ * No role middleware, because the rule is about the RECORD rather than the
+ * role: whoever holds this order may ask. The handler checks that. A manager or
+ * admin reaching it would simply be taking the long way round to something they
+ * can already do directly, which is harmless.
+ */
+router.post('/:id/transfer-request', requestOrderTransfer);
 
 module.exports = router;

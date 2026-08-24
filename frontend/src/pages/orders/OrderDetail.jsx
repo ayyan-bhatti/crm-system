@@ -13,12 +13,14 @@ import {
 } from '../../components/common';
 import Can from '../../components/Can';
 import SearchSelect from '../../components/SearchSelect';
+import usePermissions from '../../hooks/usePermissions';
 import {
   btnDanger,
   btnPrimary,
   btnSecondary,
   formatDate,
   humanize,
+  input,
   link,
   money,
   orderLabel,
@@ -248,10 +250,38 @@ export default function OrderDetail() {
  */
 function AssignmentPanel({ order, onChanged }) {
   const toast = useToast();
+  const { can } = usePermissions();
   const [saving, setSaving] = useState(false);
   const [editing, setEditing] = useState(false);
 
+  // The rep's transfer request. Separate state from the manager's picker
+  // because they submit to different endpoints and mean different things.
+  const [transferTo, setTransferTo] = useState(null);
+  const [transferReason, setTransferReason] = useState('');
+
   const assignee = order.assignedTo;
+
+  async function requestTransfer() {
+    setSaving(true);
+
+    try {
+      const result = await ordersApi.requestTransfer(
+        order._id,
+        transferTo._id,
+        transferReason
+      );
+
+      toast.success(result.message || 'Transfer requested.');
+      setEditing(false);
+      setTransferTo(null);
+      setTransferReason('');
+      onChanged();
+    } catch (err) {
+      toast.error(errorMessage(err, 'Could not request the transfer'));
+    } finally {
+      setSaving(false);
+    }
+  }
 
   async function assign(userId) {
     setSaving(true);
@@ -299,7 +329,33 @@ function AssignmentPanel({ order, onChanged }) {
           )}
         </div>
 
-        <Can do="reassignRecords">
+        <Can
+          do="reassignRecords"
+          /*
+           * The rep holding the order gets a different control, not nothing.
+           *
+           * They cannot reassign — that would let them push a difficult account
+           * onto a colleague, which is a staffing decision somebody else should
+           * make. But they are the person who knows they are on leave next week.
+           * So the fallback is "ask", and it goes to the admin.
+           */
+          fallback={
+            editing ? (
+              <button
+                type="button"
+                className={btnSecondary}
+                onClick={() => setEditing(false)}
+                disabled={saving}
+              >
+                Cancel
+              </button>
+            ) : (
+              <button type="button" className={btnSecondary} onClick={() => setEditing(true)}>
+                Request transfer
+              </button>
+            )
+          }
+        >
           {editing ? (
             <button
               type="button"
@@ -316,6 +372,49 @@ function AssignmentPanel({ order, onChanged }) {
           )}
         </Can>
       </div>
+
+      {/*
+        The rep's version of the picker: same control, different verb and a
+        reason field, because the person approving it needs to know why.
+      */}
+      {editing && !can.reassignRecords && (
+        <div className="mt-4 space-y-3 border-t border-hairline pt-4">
+          <p className="text-sm text-ink-2">
+            Ask for this order to be handed to a colleague. It stays with you until an
+            administrator agrees.
+          </p>
+
+          <SearchSelect
+            id="order-transfer-to"
+            value={transferTo?._id || ''}
+            selected={transferTo}
+            fetchOptions={(query) => usersApi.assignable(query)}
+            getOptionLabel={(user) => user.name}
+            getOptionMeta={(user) => humanize(user.role)}
+            placeholder="Search colleagues…"
+            emptyMessage="No matching colleague"
+            onChange={(user) => setTransferTo(user)}
+          />
+
+          <input
+            type="text"
+            className={input}
+            aria-label="Reason for the transfer"
+            placeholder="Why? (optional, but it is what the approver reads)"
+            value={transferReason}
+            onChange={(e) => setTransferReason(e.target.value)}
+          />
+
+          <button
+            type="button"
+            className={`${btnPrimary} w-full`}
+            disabled={saving || !transferTo}
+            onClick={requestTransfer}
+          >
+            {saving ? <Spinner /> : 'Send request'}
+          </button>
+        </div>
+      )}
 
       <Can do="reassignRecords">
         {editing && (

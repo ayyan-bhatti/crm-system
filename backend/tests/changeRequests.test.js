@@ -125,8 +125,20 @@ describe('proposing a change', () => {
     });
   });
 
+  /**
+   * PLACING AN ORDER IS NOT A CHANGE REQUEST, AND USED TO BE.
+   *
+   * It queued for an admin, and that was the wrong call: it put the approver in
+   * the critical path of SELLING, so nothing a manager agreed became real — and
+   * no rep could start work — until somebody else acted.
+   *
+   * What still waits is changing or destroying a record that already exists.
+   * The full lifecycle lives in orderWorkflow.test.js; these two pin the
+   * boundary from this side, so the day somebody re-queues order creation, the
+   * test that fails says why it should not be.
+   */
   describe('a manager placing an order', () => {
-    it('places no order', async () => {
+    it('places it directly, with nothing queued', async () => {
       const customer = await createCustomer(admin);
       const product = await createProduct({ stockQty: 10 });
 
@@ -135,42 +147,28 @@ describe('proposing a change', () => {
         .set(manager.headers)
         .send({ customer: customer._id, items: [{ product: product._id, quantity: 2 }] });
 
-      expect(res.status).toBe(202);
-      expect(await Order.countDocuments({})).toBe(0);
-    });
-
-    /**
-     * Checked before queueing even though nothing is written: a request against
-     * a customer that does not exist can only ever be rejected, so refusing it
-     * now puts the problem in front of the person who can still fix the input.
-     */
-    it('refuses a request for a customer that does not exist', async () => {
-      const product = await createProduct({ stockQty: 10 });
-
-      const res = await api()
-        .post('/api/orders')
-        .set(manager.headers)
-        .send({
-          customer: '650000000000000000000099',
-          items: [{ product: product._id, quantity: 1 }],
-        });
-
-      expect(res.status).toBe(404);
+      expect(res.status).toBe(201);
+      expect(await Order.countDocuments({})).toBe(1);
       expect(await ChangeRequest.countDocuments({})).toBe(0);
     });
 
-    /** Stock is not reserved by a proposal, so nothing is held hostage. */
-    it('does not touch stock', async () => {
+    /** Editing one afterwards is a different act, and does wait. */
+    it('queues a later edit to the same order', async () => {
       const customer = await createCustomer(admin);
       const product = await createProduct({ stockQty: 10 });
 
-      await api()
+      const created = await api()
         .post('/api/orders')
         .set(manager.headers)
         .send({ customer: customer._id, items: [{ product: product._id, quantity: 2 }] });
 
-      const { stockQty } = await require('../src/models/Product').findById(product._id);
-      expect(stockQty).toBe(10);
+      const res = await api()
+        .patch(`/api/orders/${created.body.data._id}`)
+        .set(manager.headers)
+        .send({ items: [{ product: product._id, quantity: 5 }] });
+
+      expect(res.status).toBe(202);
+      expect(await ChangeRequest.countDocuments({ entity: 'order' })).toBe(1);
     });
   });
 
@@ -325,20 +323,37 @@ describe('deciding on a change', () => {
       expect(await Customer.findById(customer._id)).toBeNull();
     });
 
-    it('places a proposed order, with a number and priced items', async () => {
+    /**
+     * An approved EDIT to an order has to be priced exactly as a direct one is.
+     *
+     * The payload holds `{ product, quantity }` and an order line needs
+     * `priceAtOrder` with a total recomputed from the lines — assigning the raw
+     * payload produced a 400 from the schema. Priced at APPROVAL time rather
+     * than when it was asked for, so a request that sits in the queue over a
+     * price rise applies the new price rather than the stale one.
+     */
+    it('prices an approved edit to an order', async () => {
       const customer = await createCustomer(admin);
       const product = await createProduct({ stockQty: 10, price: 250 });
 
-      await api()
+      const created = await api()
         .post('/api/orders')
         .set(manager.headers)
-        .send({ customer: customer._id, items: [{ product: product._id, quantity: 2 }] });
+        .send({ customer: customer._id, items: [{ product: product._id, quantity: 1 }] });
 
-      const request = await ChangeRequest.findOne({ entity: 'order' });
+      await api()
+        .patch(`/api/orders/${created.body.data._id}`)
+        .set(manager.headers)
+        .send({ items: [{ product: product._id, quantity: 3 }] });
+
+      const request = await ChangeRequest.findOne({ entity: 'order', action: 'update' });
       const res = await approve(request._id);
 
       expect(res.status).toBe(200);
-      expect(await Order.countDocuments({})).toBe(1);
+
+      const order = await Order.findById(created.body.data._id);
+      expect(order.total).toBe(750);
+      expect(order.items[0].priceAtOrder).toBe(250);
     });
 
     it('refuses to approve the same request twice', async () => {
