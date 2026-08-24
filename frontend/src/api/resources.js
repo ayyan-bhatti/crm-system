@@ -138,6 +138,27 @@ export const ordersApi = {
   remove: (id) => client.delete(`/orders/${id}`).then((r) => r.data),
 };
 
+// --- activity ---------------------------------------------------------------
+
+/**
+ * The notes timeline on a customer or an order.
+ *
+ * There is no `update` and no `remove`, and that is the feature rather than an
+ * omission. Notes are append-only — a correction is another note, the way it
+ * would be in a paper ledger. The backend refuses the write at the model as
+ * well as not routing it, so adding them here would only produce a button that
+ * always fails.
+ *
+ * The URL is nested under the record because the permission is the record's:
+ * whoever may open this order may read and write its notes.
+ */
+export const activityApi = {
+  list: (entity, id) => client.get(`/${entity}s/${id}/activity`).then((r) => r.data.data),
+
+  add: (entity, id, body) =>
+    client.post(`/${entity}s/${id}/activity`, { body }).then((r) => r.data.data),
+};
+
 // --- users ------------------------------------------------------------------
 export const usersApi = {
   // Available to every authenticated user — used to fill "assign to" dropdowns.

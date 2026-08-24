@@ -8,6 +8,10 @@ const {
   requestOrderTransfer,
   deleteOrder,
 } = require('../controllers/orderController');
+const {
+  listOrderActivity,
+  addOrderActivity,
+} = require('../controllers/activityController');
 const { protect } = require('../middleware/auth');
 const { requireManagerOrAdmin } = require('../middleware/roles');
 const { idempotency } = require('../middleware/idempotency');
@@ -73,5 +77,20 @@ router.patch('/:id/assign', requireManagerOrAdmin, assignOrder);
  * can already do directly, which is harmless.
  */
 router.post('/:id/transfer-request', requestOrderTransfer);
+
+/*
+ * The notes timeline.
+ *
+ * No role middleware, for the same reason as the transfer request above: the
+ * rule is about the record. Whoever may open this order may read and add its
+ * notes, which the handler resolves with the same helper the order's own
+ * endpoints use — so the assigned rep can write down what happened on a
+ * delivery, and a rep holding no claim to the order gets the same 403 they get
+ * from the order itself.
+ *
+ * No PATCH, no DELETE. Notes are append-only and the model enforces it as well
+ * as the routes omitting it — see models/Activity.
+ */
+router.route('/:id/activity').get(listOrderActivity).post(addOrderActivity);
 
 module.exports = router;

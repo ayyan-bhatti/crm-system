@@ -10,6 +10,10 @@ const {
 const { protect } = require('../middleware/auth');
 const { requireManagerOrAdmin } = require('../middleware/roles');
 
+const {
+  listCustomerActivity,
+  addCustomerActivity,
+} = require('../controllers/activityController');
 const { getCustomerSummary } = require('../controllers/customerInsightsController');
 const { aiSearchLimiter, aiPerUserLimiter } = require('../middleware/rateLimit');
 
@@ -63,6 +67,21 @@ router.route('/').get(listCustomers).post(createCustomer);
  */
 router.get('/options', listCustomerOptions);
 router.route('/:id').get(getCustomer).patch(updateCustomer).delete(deleteCustomer);
+
+/*
+ * The notes timeline.
+ *
+ * Mounted here rather than on a top-level /api/activity router so it inherits
+ * this file's gating for free: `requireManagerOrAdmin` above has already run,
+ * which is the rule that keeps the customer book away from sales reps. A
+ * separate router would need that rule restated, and a restated rule is one
+ * that can drift.
+ *
+ * There is deliberately no PATCH and no DELETE. Notes are append-only, and the
+ * model refuses the write as well as the route not offering it — see
+ * models/Activity.
+ */
+router.route('/:id/activity').get(listCustomerActivity).post(addCustomerActivity);
 
 /*
  * The AI-backed account summary.

@@ -13,6 +13,7 @@ import {
   StatusBadge,
 } from '../../components/common';
 import CustomerSummaryCard from '../../components/CustomerSummaryCard';
+import ActivityTimeline from '../../components/ActivityTimeline';
 import { btnDanger, btnPrimary, btnSecondary, formatDate, link, money, td, th } from '../../ui';
 
 /** A single customer, their details, and every order placed for them. */
@@ -155,6 +156,15 @@ export default function CustomerDetail() {
             </div>
           )}
         </Card>
+
+        {/*
+         * The timeline sits alongside the orders rather than under the fields,
+         * because it is read for the same reason the orders are: to work out
+         * where this account stands before picking up the phone.
+         */}
+        <div className="lg:col-span-2">
+          <ActivityTimeline entity="customer" id={customer._id} title="Account notes" />
+        </div>
       </div>
     </div>
   );

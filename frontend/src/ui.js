@@ -140,6 +140,25 @@ export function formatDate(value) {
   });
 }
 
+/**
+ * Date AND time, for the notes timeline.
+ *
+ * `formatDate` is deliberately date-only, because a table of records does not
+ * need the minute a customer was created. A timeline does: two notes on the
+ * same day are the common case, and "14 Mar 2026" three times in a row tells
+ * the reader nothing about the order of a morning.
+ */
+export function formatDateTime(value) {
+  if (!value) return '—';
+  return new Date(value).toLocaleString('en-GB', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
 /** Turn `sales_rep` into `Sales rep` for display. */
 export function humanize(value) {
   if (!value) return '';

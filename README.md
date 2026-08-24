@@ -462,6 +462,43 @@ completed. The first attempt inserted the proposed payload directly and got a 40
 from the schema, because a proposal holds `{ product, quantity }` and an order needs
 rather more than that.
 
+### Notes are append-only
+
+Customers and orders each carry a timeline of notes — what was said on a call, what was
+promised, why somebody is annoyed. **A note cannot be edited or deleted once saved.**
+
+That is the feature, not a missing screen. The value of this record is that it says what was
+known at the time; a timeline anyone can quietly reword is not a history of the account, it is
+a draft of one, and the question "did this say something different yesterday?" stops having an
+answer. It also breaks the thing notes are most used for — reading back a conversation before
+ringing a customer — because what you read back is the tidied version rather than the one that
+would explain why the customer is annoyed.
+
+**A correction is another note**, exactly as it would be in a paper ledger. Slightly less
+convenient, considerably more honest.
+
+Enforced in three places rather than one: there is no edit route, the model refuses every
+mutating write Mongoose offers (so a later generic admin screen or a well-meant bulk fix hits
+a hard error rather than succeeding quietly), and the screen has no edit control and says why.
+
+**The author is a snapshot.** Each note keeps the writer's name and role as they were when it
+was written, like the audit trail — a history that rewrites itself when somebody is renamed,
+demoted or deleted is not a history.
+
+**Permissions are the record's own.** Whoever may open a customer or an order may read and
+write its notes; nothing here defines "yours" a second time. So a rep can write up a delivery
+on an order assigned to them, gets a `403` on a colleague's order, and cannot reach customer
+notes at all — because a rep has no access to the customer book.
+
+**A manager's note is not a change request.** Their customer *edits* queue for approval and
+their notes do not, which is deliberate: approval exists because an edit overwrites what was
+there. A note overwrites nothing, and one that appears whenever an administrator gets round to
+it is a note nobody will bother writing.
+
+Notes are **not** the audit log. The audit log records what the system did, field by field,
+automatically, for administrators. This records what a person chose to say, in their words,
+for everyone working the account.
+
 ### One browser holds one session
 
 Signing in as a second user replaces the first, **in every tab of that browser**. This is
@@ -999,7 +1036,7 @@ The refresh token is **never** in a response body; it exists only as a cookie.
 
 | Method | Path | Access | Description |
 | --- | --- | --- | --- |
-| `GET` | `/users/assignable` | any | Trimmed list (id, name, email, role) for dropdowns |
+| `GET` | `/users/assignable` | any | Trimmed list for dropdowns. **What comes back depends on the caller**: a sales rep gets id, name and role; manager and admin also get `email`. A rep needs the picker (to request a transfer) and has no use for anybody's address |
 | `GET` | `/users` | admin | Filters: `?role=` `?search=` |
 | `POST` | `/users` | admin | Create a user directly, with a password. Retained for scripts; the UI uses the invite flow |
 | `POST` | `/users/invite` | admin, **manager** | Creates a pending account and emails a single-use link. A manager may not grant `admin` |
@@ -1012,15 +1049,17 @@ The refresh token is **never** in a response body; it exists only as a cookie.
 
 | Method | Path | Access | Description |
 | --- | --- | --- | --- |
-| `GET` | `/customers` | any (scoped) | Filters: `?status=` `?assignedTo=` `?city=` `?search=` · Paging: `?page=` `?limit=` `?sort=` or `?cursor=` |
-| `GET` | `/customers/options` | any (scoped) | Minimal id/label rows for the searchable picker. `?search=`, capped at 25 |
-| `POST` | `/customers` | any | Defaults `assignedTo` to the creator |
-| `GET` | `/customers/:id` | owner / manager / admin | |
-| `GET` | `/customers/:id/summary` | owner / manager / admin | Computed figures + health score + an AI narrative. Rate limited |
-| `PATCH` | `/customers/:id` | owner / manager / admin | `assignedTo` requires manager or admin |
-| `DELETE` | `/customers/:id` | owner / manager / admin | |
+| `GET` | `/customers` | manager, admin | Filters: `?status=` `?assignedTo=` `?city=` `?search=` · Paging: `?page=` `?limit=` `?sort=` or `?cursor=` |
+| `GET` | `/customers/options` | manager, admin | Minimal id/label rows for the searchable picker. `?search=`, capped at 25 |
+| `POST` | `/customers` | admin direct, manager **queues** | Defaults `assignedTo` to the creator |
+| `GET` | `/customers/:id` | manager, admin | |
+| `GET` | `/customers/:id/summary` | manager, admin | Computed figures + health score + an AI narrative. Rate limited |
+| `PATCH` | `/customers/:id` | admin direct, manager **queues** | `assignedTo` requires manager or admin |
+| `DELETE` | `/customers/:id` | admin direct, manager **queues** | |
 
 `?search=` matches name, email or company, case-insensitively.
+
+The access column above is not a summary of the middleware — it is the audited result. Every row was verified by hitting the route as all three roles; see [ROLE_AUDIT.md](ROLE_AUDIT.md) and `npm run audit-roles`.
 
 ### Products
 
@@ -1042,12 +1081,23 @@ global number.
 | Method | Path | Access | Description |
 | --- | --- | --- | --- |
 | `GET` | `/orders` | any (scoped) | Filters: `?status=` `?customer=` `?from=` `?to=` · Paging as above |
-| `POST` | `/orders` | any (own customers) | Optional `status: "completed"` to record an already-fulfilled sale. Accepts an optional `Idempotency-Key` header |
-| `GET` | `/orders/:id` | owner / manager / admin | |
-| `PATCH` | `/orders/:id` | owner / manager / admin | Change `status`, or `items` while still pending |
-| `DELETE` | `/orders/:id` | owner / manager / admin | Restores stock if the order was completed |
+| `POST` | `/orders` | manager, admin | Optional `status: "completed"` to record an already-fulfilled sale. Accepts an optional `Idempotency-Key` header |
+| `GET` | `/orders/:id` | assigned rep, manager, admin | |
+| `PATCH` | `/orders/:id` | assigned rep (status only), manager, admin | Change `status`, or `items` while still pending |
+| `DELETE` | `/orders/:id` | admin direct, manager **queues** | Restores stock if the order was completed |
 
 The date range is inclusive: `?to=2026-01-31` includes orders placed on the 31st.
+
+### Notes (activity timeline)
+
+| Method | Path | Access | Description |
+| --- | --- | --- | --- |
+| `GET` | `/customers/:id/activity` | manager, admin | The account's notes, newest first. `?limit=` capped at 200 |
+| `POST` | `/customers/:id/activity` | manager, admin | Adds a note. `{ body }`, up to 2000 characters |
+| `GET` | `/orders/:id/activity` | assigned rep, manager, admin | The order's notes, newest first |
+| `POST` | `/orders/:id/activity` | assigned rep, manager, admin | Adds a note |
+
+**There is no `PATCH` and no `DELETE`, and there will not be.** See below.
 
 **`Idempotency-Key`** makes order creation safe to retry. Send a fresh id per logical
 submission and reuse it on every retry; the server executes at most once per key and

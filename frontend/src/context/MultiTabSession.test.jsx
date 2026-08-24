@@ -55,7 +55,30 @@ const openTabAs = async (who) => {
   return rendered;
 };
 
-beforeEach(() => {
+/*
+ * DRAIN THE CHANNEL BEFORE EACH TEST, OR ANNOUNCEMENTS LEAK BETWEEN THEM.
+ *
+ * Every test in this file shares one realm and one channel name, and a
+ * BroadcastChannel delivers on a later task rather than synchronously. So an
+ * announcement posted at the end of one test can still be queued when the next
+ * one mounts its tab — and that tab, being a fresh subscriber, does exactly
+ * what it should: re-reads /auth/me. Which is precisely what the "does nothing"
+ * test asserts must not happen. It failed about one full-suite run in four.
+ *
+ * A real browser does not have this problem: a tab is not delivered a message
+ * posted before it subscribed, and if it somehow were, re-checking would simply
+ * converge it on the truth. This is a boundary between tests, not a bug in the
+ * app — but a suite that fails one run in four teaches people to re-run it,
+ * which is how a real failure gets waved through.
+ *
+ * Yielding a macrotask here flushes any pending delivery while no tab is
+ * mounted, so it lands on nobody.
+ */
+beforeEach(async () => {
+  await new Promise((resolve) => {
+    setTimeout(resolve, 0);
+  });
+
   vi.clearAllMocks();
 });
 

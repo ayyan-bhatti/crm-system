@@ -2747,4 +2747,83 @@ is not a leak; it is a screen telling somebody the business has no customers.
 
 ---
 
-**Final totals: 835 backend + 203 frontend + 11 end-to-end**, lint clean on both packages.
+## Notes, and why they cannot be edited
+
+An append-only timeline on customers and orders. One `Activity` collection for both, because
+every rule about them — ordering, authorship, immutability — is identical and only the record
+they hang off differs; two collections would mean maintaining that twice and watching it
+drift.
+
+### The append-only part is the feature
+
+A timeline anyone can quietly reword is not a history of an account, it is a draft of one. Its
+whole value is that it says what was known at the time, and the moment a note can be edited
+the question "did this say something different yesterday?" stops having an answer.
+
+It also breaks what notes are most used for. Somebody reads back a conversation before ringing
+a customer; if the previous rep tidied their note afterwards, what gets read back is the tidy
+version rather than the one that would explain why the customer is annoyed.
+
+Corrections are made the way they are in a paper ledger — by writing another line.
+
+### Enforced three times, on purpose
+
+Not routing a `PATCH` is how it is enforced today, and that holds exactly as long as nobody
+adds one. "We simply won't build that" is a convention, not a guarantee: a later generic admin
+screen or a well-meant bulk fix walks straight through it without anyone noticing the rule
+existed.
+
+So the **model** refuses every mutating path Mongoose offers — `updateOne`, `updateMany`,
+`findOneAndUpdate`, `findOneAndReplace`, `replaceOne`, the three delete forms, and `save()` on
+a document that already exists. A write attempt fails loudly at the point of the write with a
+message saying what to do instead. The **routes** offer no edit or delete. The **screen** has
+no edit control and states the reason, because a missing button reads as unfinished software
+unless the interface says the absence is deliberate.
+
+### Permissions are the record's own, and that is the whole design
+
+Whether you may read or write notes on something is exactly whether you may read that thing,
+resolved by loading the record and asking the same helper its own endpoints ask. A separate
+rule here would be a second definition of "yours" to keep in step with the first — and notes
+on an account are often franker than its fields.
+
+That produces the right answers without stating any of them separately: the assigned rep can
+write up a delivery, a rep gets a `403` on a colleague's order exactly as they do on the order
+itself, and no rep reaches customer notes at all.
+
+### Two judgment calls worth recording
+
+**A manager's note is not a change request.** Their customer edits queue for approval; their
+notes do not. Approval exists because an edit overwrites what was there and an overwrite needs
+a second pair of eyes. A note overwrites nothing — it is additive, attributed and immutable,
+so the worst a bad one does is be wrong in public with someone's name on it. Queueing them
+would also make the feature pointless: the moment to write down what a customer said is
+straight after the call, and a note that appears when an admin gets round to it is one nobody
+writes.
+
+**Notes outlive the record they describe.** Deleting an order does not erase what people wrote
+about it, for the same reason the audit trail has no TTL: a history that disappears with the
+record cannot answer anything about why the record was deleted.
+
+### A flaky test that was a test-boundary problem, not an app one
+
+Adding these tests surfaced an intermittent failure in the multi-tab suite — about one
+full-suite run in four, in a file I had not touched.
+
+Every test in that file shares one realm and one channel name, and a `BroadcastChannel`
+delivers on a later task rather than synchronously. So an announcement posted at the end of
+one test could still be queued when the next mounted its tab, and that tab did exactly what it
+should: re-read `/auth/me`. Which is precisely what the "does nothing when the announced
+session is the one it already has" test asserts must not happen.
+
+A real browser does not have this problem — a tab is not delivered a message posted before it
+subscribed, and if it somehow were, re-checking would converge it on the truth. Fixed by
+draining the channel before each test, while no tab is mounted. Worth chasing rather than
+re-running: a suite that fails one run in four teaches people to re-run it, which is how a
+real failure gets waved through.
+
+**16 new backend tests and 8 new frontend tests.**
+
+---
+
+**Final totals: 851 backend + 211 frontend + 11 end-to-end**, lint clean on both packages.

@@ -13,6 +13,7 @@ import {
 } from '../../components/common';
 import Can from '../../components/Can';
 import SearchSelect from '../../components/SearchSelect';
+import ActivityTimeline from '../../components/ActivityTimeline';
 import usePermissions from '../../hooks/usePermissions';
 import {
   btnDanger,
@@ -225,6 +226,14 @@ export default function OrderDetail() {
           shown are those recorded at the time of the order.
         </p>
       </Card>
+
+      {/*
+       * Last on the page on purpose. The order itself — what was sold, to
+       * whom, who holds it — is the fact; the notes are the story around it,
+       * and reading the story first is how people end up acting on a comment
+       * about an order that has since been cancelled.
+       */}
+      <ActivityTimeline entity="order" id={order._id} title="Order notes" />
     </div>
   );
 }
