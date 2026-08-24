@@ -2614,4 +2614,82 @@ is exactly when a test wants the next one.
 
 ---
 
-**Final totals: 831 backend + 195 frontend + 11 end-to-end**, lint clean on both packages.
+## Three tabs, three roles, one browser
+
+Reported as: sign in as a rep, a manager and an admin in three tabs, reload, and all three
+show the same role.
+
+### The reported symptom is browser behaviour and is not fixable
+
+A cookie is keyed on `(name, domain, path)`. There is no tab dimension in that key, and the
+session is cookies — `simplecrm_access` at `/` and `simplecrm_refresh` at `/api/auth`, no
+`domain` set, so host-only and shared by every tab of the origin. Signing in anywhere
+replaces the session everywhere. Three simultaneous identities in one browser profile on one
+origin is not something cookie authentication can express, and no amount of code changes
+that.
+
+I ruled out the code-side possibilities before concluding that: there is no
+`BroadcastChannel`, no `storage` listener, no WebSocket, no service worker and no shared
+store anywhere in the frontend. React context is per-tab by construction — each tab is a
+separate JS realm. The cookies were, genuinely, the only shared state.
+
+The honest recommendation is separate browser profiles, an incognito window, or different
+browsers, and the README now says so.
+
+### The bug worth fixing was a different one, and worse
+
+The report describes what happens after a RELOAD. Before the reload, the tab does not get
+signed out at all — it goes on rendering the previous user's name, role and navigation while
+its requests are authenticated as somebody else.
+
+It never finds out, because **replacing a session does not produce a 401**. The new cookie is
+perfectly valid, so every request comes back `200` with the new user's data behind the old
+user's interface. `onSessionExpired` only fires on a 401 that a refresh could not rescue, and
+there is no 401 here. `/auth/me` ran once, on mount, and nothing revalidated afterwards.
+
+So the failure mode is not "logged out silently" — it is "silently acting as a different
+person", which is worse, because nothing about the screen suggests anything has changed.
+
+**Not a privilege escalation, and worth saying so plainly.** The backend authenticates the
+cookie on every request and is the only authority on what may be read; the human at the
+keyboard is necessarily whoever just typed the newer credentials. Nobody reaches data they
+could not already reach. What is wrong is honesty rather than authorisation.
+
+### The fix: converge, and say why
+
+Signing in or out broadcasts the new user id; a tab holding a different one re-reads
+`/auth/me` and re-renders as the truth with a message explaining it. A focus/visibility check
+covers what the channel cannot — browsers without `BroadcastChannel`, a message posted while
+the tab was discarded, a session replaced from another window — and it fires at the moment it
+matters, when somebody is about to look at the tab.
+
+**Convergence rather than signing the tab out.** There is one live session and the person
+created it deliberately; signing them out of a tab they did not touch, to protest their own
+action, is theatre, and they would sign straight back in as the user the tab was about to
+become. Converging is also what a reload does, so a tab left open and a tab reloaded end up
+in the same state rather than two.
+
+Only the user **id** goes on the channel. It is readable by any script on the origin, and
+there is nothing to gain from putting a name or role on it when the receiving tab asks the
+server anyway.
+
+### Two bugs in my own fix, both caught by the test
+
+The test failed about two runs in five, and both causes were real rather than test artefacts:
+
+**The announcement channel was closed in the same tick as the post**, which can drop the
+message before delivery. Replaced with one long-lived sender per tab.
+
+**The subscription depended on a callback.** Any change to it re-subscribed, and
+re-subscribing tears down a `BroadcastChannel` and builds a new one — losing whatever was in
+flight. That is not a test-only problem: in a browser it would mean a tab occasionally
+missing the announcement and going on lying, which is precisely the bug being fixed. The
+listener is now registered once and calls through a ref. Eight consecutive clean runs.
+
+**8 new frontend tests**, driving the real scenario: a tab open as a rep, an announcement
+that the browser now belongs to an admin, and assertions that the tab stops claiming to be
+the rep, adopts the admin, and says why.
+
+---
+
+**Final totals: 831 backend + 203 frontend + 11 end-to-end**, lint clean on both packages.

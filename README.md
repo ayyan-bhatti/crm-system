@@ -462,6 +462,44 @@ completed. The first attempt inserted the proposed payload directly and got a 40
 from the schema, because a proposal holds `{ product, quantity }` and an order needs
 rather more than that.
 
+### One browser holds one session
+
+Signing in as a second user replaces the first, **in every tab of that browser**. This is
+not a bug and it cannot be fixed: a cookie is keyed on `(name, domain, path)`, there is no
+tab dimension in that key, and the session is cookies. Three simultaneous identities in one
+browser profile on one origin is not something cookie authentication can express.
+
+**To test several roles at once, use separate browser profiles**, an incognito window, or
+different browsers. Each has its own cookie jar, which is the actual unit of isolation.
+
+What the app *can* do — and now does — is refuse to lie about it. A tab that signed in
+earlier keeps its own React state, so before this it went on rendering the previous user's
+name, role and navigation while its requests were authenticated as somebody else. It never
+found out, because **replacing a session does not produce a 401**: the new cookie is
+perfectly valid, so every request came back `200` with the new user's data behind the old
+user's interface. `onSessionExpired` only fires on a 401, and there was none.
+
+So tabs now converge:
+
+- Signing in or out broadcasts the new user id on a `BroadcastChannel`, and any tab holding
+  a different one re-reads `/auth/me` and re-renders as the truth, with a message saying
+  why.
+- Bringing a tab to the front re-checks as well — covering browsers without
+  `BroadcastChannel`, messages posted while a tab was discarded, and sessions replaced from
+  another window. That is the moment it matters, because somebody is about to read it.
+
+**It converges rather than signing the tab out.** There is one live session and the person
+at the keyboard just created it deliberately; signing them out of a tab they did not touch,
+to protest their own action, is theatre — and they would sign straight back in as the user
+the tab was about to become. Converging is also exactly what a reload does, so a tab left
+open and a tab reloaded end in the same state instead of two.
+
+**None of this is a security boundary.** Nobody gains access they did not have: the backend
+authenticates the cookie on every request and is the only authority on what may be read, and
+whoever typed the newer credentials already holds them. The problem being fixed is honesty,
+not authorisation — an interface claiming to be one person while acting as another is wrong
+even when nothing leaks.
+
 ### Role-based UI
 
 The API enforces all of the above. The frontend's job is a different one: not to
