@@ -2692,4 +2692,59 @@ the rep, adopts the admin, and says why.
 
 ---
 
-**Final totals: 831 backend + 203 frontend + 11 end-to-end**, lint clean on both packages.
+## The role audit
+
+Every route hit as each of the three roles against the real backend with a genuine session,
+rather than sampled or reasoned about from the middleware. The full matrix, per-role sections
+and findings live in **[ROLE_AUDIT.md](ROLE_AUDIT.md)**; reproduce with `npm run audit-roles`
+in `backend/`.
+
+**Role separation holds.** Every denial is a proper `403` — there is no `200`-with-filtered-data
+where a refusal was intended, and nothing `500`s. A rep calling every admin-only and
+manager-only endpoint directly with a valid session was refused every time; a manager
+inviting an admin was refused while an ordinary invite succeeded; a rep reading another rep's
+order by id was refused, consistent with it being absent from their list.
+
+### The audit's own bug, which mattered more than it sounds
+
+The first run showed `POST /api/orders` returning `404` for all three roles, which looks
+exactly like a permission bug. It was not. The routes ran in order against one shared
+fixture, and the destructive ones poisoned everything after them — the admin deleted the
+customer, and every later call referenced a customer that no longer existed.
+
+Worth recording because of which results survived that: **the 403s were still trustworthy**,
+since a permission decision is made before any data is touched. Everything else was not. The
+script now rebuilds the world before every single (route, role) pair.
+
+### The one finding worth fixing
+
+`GET /api/users/assignable` returned `name`, `email` and `role` to any authenticated caller,
+including a sales rep — an internal staff directory any rep could enumerate. Not an
+escalation, and there is a legitimate need behind it: the transfer-request picker is a
+rep-facing feature and has to list colleagues.
+
+So the projection narrowed rather than the route closing. A rep gets `name` and `role`, which
+is all a picker displays; anyone who can actually manage people still gets the address,
+because the screens that identify a colleague by email are theirs. **4 new backend tests**
+covering both halves.
+
+Two further findings were recorded as deliberate rather than fixed — admins and managers
+being able to file a transfer request they could simply carry out (harmless, and refusing a
+strictly-less-powerful action would be a rule with an edge case for no gain), and the
+dashboard being scoped correctly but shaped identically for every role. The second is the
+substance of the dashboards work and is handled there.
+
+### The dashboard question, answered decisively
+
+The brief suspected the dashboard might be hidden with frontend conditionals rather than
+scoped on the server. **It is scoped on the server**, and the proof is not a code reading: with
+two completed £100 orders where only one belongs to the rep, the rep's `totalRevenue` comes
+back `100` and the admin's `200`. Customers and recent orders scope the same way.
+
+What is wrong is the shape — all three roles receive an identical payload, so a sales rep is
+shown a "Total customers" tile reading `0` because they have no customer access at all. That
+is not a leak; it is a screen telling somebody the business has no customers.
+
+---
+
+**Final totals: 835 backend + 203 frontend + 11 end-to-end**, lint clean on both packages.

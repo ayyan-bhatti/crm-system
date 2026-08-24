@@ -1,7 +1,7 @@
 {
   "name": "simplecrm-backend",
   "version": "1.0.0",
-  "description": "SimpleCRM backend — Express + MongoDB REST API with JWT auth and AI-assisted search",
+  "description": "SimpleCRM backend \u2014 Express + MongoDB REST API with JWT auth and AI-assisted search",
   "main": "src/server.js",
   "type": "commonjs",
   "scripts": {
@@ -13,7 +13,8 @@
     "lint": "eslint .",
     "indexes": "node scripts/syncIndexes.js",
     "prune-audit": "node scripts/pruneAuditLog.js",
-    "backfill-order-numbers": "node scripts/backfillOrderNumbers.js"
+    "backfill-order-numbers": "node scripts/backfillOrderNumbers.js",
+    "audit-roles": "node scripts/roleAudit.js"
   },
   "dependencies": {
     "@google/genai": "^2.18.0",

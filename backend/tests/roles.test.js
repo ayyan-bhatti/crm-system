@@ -628,3 +628,58 @@ describe('GET /api/users/assignable', () => {
     });
   });
 });
+
+/**
+ * What the colleague picker hands out, and to whom.
+ *
+ * A sales rep reaches `/users/assignable` legitimately — the transfer-request
+ * picker has to list colleagues — so the route cannot simply be closed to them.
+ * What they have no use for is anybody's email address, and returning it made
+ * this an internal staff directory that any rep could enumerate.
+ *
+ * Not an escalation. Worth fixing anyway: an endpoint handing out more than its
+ * caller can use is how internal details leave the building.
+ */
+describe('GET /api/users/assignable — what each role is shown', () => {
+  it('gives a sales rep names to pick from, and no email addresses', async () => {
+    const rep = await createRep();
+    await createManager({ name: 'Bilal Ahmed', email: 'bilal@example.com' });
+
+    const res = await api().get('/api/users/assignable').set(rep.headers);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.length).toBeGreaterThan(0);
+
+    for (const user of res.body.data) {
+      expect(user.name).toEqual(expect.any(String));
+      expect(user.email).toBeUndefined();
+    }
+  });
+
+  /** The picker is still usable — a name to show and a role to qualify it. */
+  it('still returns enough for a rep to choose somebody', async () => {
+    const rep = await createRep();
+    await createManager({ name: 'Bilal Ahmed', email: 'bilal@example.com' });
+
+    const res = await api()
+      .get('/api/users/assignable')
+      .query({ search: 'Bilal' })
+      .set(rep.headers);
+
+    expect(res.body.data).toHaveLength(1);
+    expect(res.body.data[0]).toMatchObject({ name: 'Bilal Ahmed', role: 'manager' });
+  });
+
+  /** Anyone who manages people identifies them by address, so they keep it. */
+  it.each([['admin'], ['manager']])('gives %s the email address', async (role) => {
+    const actor = role === 'admin' ? await createAdmin() : await createManager();
+    await createRep({ name: 'Sara Iqbal', email: 'sara@example.com' });
+
+    const res = await api()
+      .get('/api/users/assignable')
+      .query({ search: 'Sara' })
+      .set(actor.headers);
+
+    expect(res.body.data[0].email).toBe('sara@example.com');
+  });
+});

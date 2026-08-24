@@ -9,6 +9,7 @@ const inviteService = require('../services/inviteService');
 const { revokeAllForUser } = require('../services/sessionService');
 const { ROLE_VALUES, ROLES, USER_STATUS } = require('../config/constants');
 const { containsRegex } = require('../utils/queryHelpers');
+const { hasFullRecordAccess } = require('../middleware/roles');
 
 const log = componentLogger('users');
 
@@ -68,7 +69,23 @@ const listAssignableUsers = asyncHandler(async (req, res) => {
     filter.$or = [{ name: rx }, { email: rx }];
   }
 
-  const users = await User.find(filter).select('name email role').sort({ name: 1 }).limit(25);
+  /*
+   * WHAT COMES BACK DEPENDS ON WHO IS ASKING.
+   *
+   * A sales rep reaches this route legitimately — the transfer-request picker
+   * has to list colleagues to pick from, and that is a rep-facing feature. What
+   * they have no use for is anybody's email address, and returning it made this
+   * a staff directory any rep could enumerate.
+   *
+   * Not an escalation, and worth fixing anyway: a name is all a picker needs,
+   * and an endpoint that hands out more than its caller can use is how internal
+   * details leave the building. Anyone who can actually manage people still
+   * gets the address, because the screens that identify a colleague by email
+   * are theirs.
+   */
+  const fields = hasFullRecordAccess(req.user) ? 'name email role' : 'name role';
+
+  const users = await User.find(filter).select(fields).sort({ name: 1 }).limit(25);
 
   res.json({ success: true, count: users.length, data: users });
 });
