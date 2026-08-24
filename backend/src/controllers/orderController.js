@@ -6,8 +6,13 @@ const User = require('../models/User');
 const ApiError = require('../utils/ApiError');
 const asyncHandler = require('../utils/asyncHandler');
 const { ORDER_STATUS, USER_STATUS } = require('../config/constants');
-const { hasFullRecordAccess, canAccessCustomer } = require('../middleware/roles');
-const { customerScopeFilter } = require('./customerController');
+const {
+  hasFullRecordAccess,
+  canAccessCustomer,
+  canWriteOrders,
+  isAdmin,
+} = require('../middleware/roles');
+const changeRequestService = require('../services/changeRequestService');
 const {
   getPagination,
   getSort,
@@ -21,6 +26,20 @@ const { recordAudit } = require('../services/auditService');
 const { nextOrderNumber, parseOrderNumber } = require('../services/orderNumber');
 
 const SORTABLE_FIELDS = ['total', 'status', 'createdAt'];
+
+/**
+ * What of the customer travels with an order.
+ *
+ * Includes `phone` and `address`, which is the ONLY route by which a sales rep
+ * sees customer contact details — they have no access to the customer book. A
+ * rep holding an order has to be able to ring the customer and deliver to
+ * them; withholding that would leave them able to see the work and unable to
+ * do it.
+ *
+ * Deliberately narrow all the same: no notes, no owner, no status history. One
+ * customer, reachable only through an order assigned to the person asking.
+ */
+const CUSTOMER_FIELDS_ON_ORDER = 'name email company city status phone address';
 
 /*
  * A value no order number can hold, used when `?search=` is not an order
@@ -207,37 +226,20 @@ async function restoreStock(items, session = null) {
 async function orderScopeFilter(user) {
   if (hasFullRecordAccess(user)) return {};
 
-  const customerIds = await Customer.find(customerScopeFilter(user)).distinct('_id');
-
   /*
-   * `assignedTo` is an OVERRIDE, not another way in.
+   * A sales rep gets exactly the orders ASSIGNED to them, and nothing else.
    *
-   * The first two branches are the inherited rule: you see an order you placed,
-   * or one belonging to a customer you own. The third is the explicit
-   * assignment, which is what makes "hand this one deal to a specialist" work
-   * without handing over the account.
+   * This replaced a three-branch rule — orders they created, OR orders for a
+   * customer they owned, OR orders explicitly assigned. Both of the first two
+   * are now impossible: a rep cannot create an order, and has no customers.
+   * Leaving them in would be dead branches that still cost an index lookup and
+   * still had to be reasoned about every time this was read.
    *
-   * The override has to cut both ways or it is not an override — an order
-   * assigned AWAY from you must leave your list even when the customer is still
-   * yours, or reassignment moves the record for the recipient and changes
-   * nothing for the person who gave it up. So the two inherited branches are
-   * qualified: they only apply while nobody else has been named.
-   *
-   * `assignedTo: null` covers both an explicit null and the field being absent
-   * entirely, which is what every order created before this existed looks like.
-   * MongoDB treats a missing field as null for equality, so historical orders
-   * keep exactly the behaviour they had.
+   * One fact, one branch. Assignment is the whole of a rep's world.
    */
-  const unassigned = { assignedTo: null };
-
-  return {
-    $or: [
-      { assignedTo: user._id },
-      { createdBy: user._id, ...unassigned },
-      { customer: { $in: customerIds }, ...unassigned },
-    ],
-  };
+  return { assignedTo: user._id };
 }
+
 
 // ---------------------------------------------------------------------------
 // Handlers
@@ -282,7 +284,7 @@ const listOrders = asyncHandler(async (req, res) => {
 
   const withRelations = (query) =>
     query
-      .populate('customer', 'name email company city status')
+      .populate('customer', CUSTOMER_FIELDS_ON_ORDER)
       .populate('createdBy', 'name email role')
       .populate('assignedTo', 'name email role')
       .populate('items.product', 'name sku price');
@@ -341,7 +343,47 @@ const createOrder = asyncHandler(async (req, res) => {
     throw ApiError.badRequest('A new order must be created as pending or completed');
   }
 
-  const completing = status === ORDER_STATUS.COMPLETED;
+  /*
+   * A MANAGER'S ORDER WAITS FOR AN ADMIN.
+   *
+   * The customer is checked first even though nothing is being written yet:
+   * queueing a request against a customer that does not exist, or that the
+   * proposer cannot see, would put a request in the admin's queue that can only
+   * ever be rejected. Better to refuse it at the point somebody can still fix
+   * the input.
+   *
+   * Stock is deliberately NOT touched or reserved here. Nothing moves until an
+   * order exists, and no order exists until approval — so two pending requests
+   * for the last item in stock both queue happily, and whichever is approved
+   * second fails the atomic decrement on completion. That is the same guard
+   * that already protects two people completing two orders at once, so there is
+   * no new race to reason about.
+   */
+  if (!canWriteOrders(req.user) || !isAdmin(req.user)) {
+    const customer = await Customer.findById(customerId);
+    if (!customer) throw ApiError.notFound('Customer not found');
+
+    const request = await changeRequestService.submit(
+      {
+        entity: 'order',
+        action: 'create',
+        payload: {
+          customer: customerId,
+          items: rawItems,
+          status: status || ORDER_STATUS.PENDING,
+          createdBy: req.user._id,
+        },
+        label: `New order for ${customer.name}`,
+      },
+      req.user
+    );
+
+    return res.status(202).json({
+      success: true,
+      message: 'Sent to an administrator for approval. The order is not placed yet.',
+      data: request,
+    });
+  }
 
   /*
    * The whole sequence — validate the customer, price the lines, write the
@@ -354,63 +396,12 @@ const createOrder = asyncHandler(async (req, res) => {
    * outside the transaction and quietly loses the guarantee, which is the
    * standard way a transaction ends up being decoration.
    */
-  const order = await withTransaction(async (session) => {
-    const customer = await Customer.findById(customerId).session(session);
-    if (!customer) throw ApiError.notFound('Customer not found');
-
-    // A sales rep may only place orders for their own customers.
-    if (!canAccessCustomer(req.user, customer)) {
-      throw ApiError.forbidden('You do not have access to this customer');
-    }
-
-    const { items, total } = await buildOrderItems(rawItems, session);
-
-    /*
-     * The human-readable number, allocated atomically.
-     *
-     * Inside the transaction, so an order that is never written does not burn
-     * a number — an abort rolls the counter back with everything else, and the
-     * sequence stays dense.
-     *
-     * Deliberately NOT `countDocuments() + 1`: two orders created in the same
-     * moment would both read the same count and both claim the same number.
-     * See models/Counter.js — it is the same shape of race as the stock
-     * decrement a few lines below, and it is closed the same way, by making the
-     * read and the write a single operation.
-     */
-    const orderNumber = await nextOrderNumber(session);
-
-    // Order.create with a session takes an array — the single-document form
-    // does not accept options.
-    const [created] = await Order.create(
-      [
-        {
-          orderNumber,
-          customer: customer._id,
-          items,
-          total,
-          status: completing ? ORDER_STATUS.COMPLETED : ORDER_STATUS.PENDING,
-          completedAt: completing ? new Date() : null,
-          createdBy: req.user._id,
-          /*
-           * Left null on creation: null means "follows the customer", which is
-           * what an order should do unless somebody says otherwise. Writing the
-           * creator here instead would freeze an assignment nobody asked for
-           * onto every order, and make moving a customer stop moving their
-           * orders.
-           */
-          assignedTo: null,
-        },
-      ],
-      { session }
-    );
-
-    // Stock moves last. If it fails, throwing here aborts the transaction and
-    // the order above is never written — no compensation to remember.
-    if (completing) await decrementStock(items, session);
-
-    return created;
-  });
+  const order = await withTransaction((session) =>
+    placeOrder(
+      { customerId, rawItems, status, actorId: req.user._id, actor: req.user },
+      session
+    )
+  );
 
   /*
    * Audited AFTER the transaction commits, not inside it.
@@ -430,7 +421,7 @@ const createOrder = asyncHandler(async (req, res) => {
   });
 
   await order.populate([
-    { path: 'customer', select: 'name email company city status' },
+    { path: 'customer', select: CUSTOMER_FIELDS_ON_ORDER },
     { path: 'items.product', select: 'name sku price' },
   ]);
 
@@ -477,6 +468,24 @@ const updateOrder = asyncHandler(async (req, res) => {
     // Snapshotted before the status transition, so the trail shows what the
     // order moved FROM — the part a reviewer actually needs.
     const before = found.toObject({ depopulate: true });
+
+    /*
+     * A SALES REP MAY MOVE AN ORDER, NOT REWRITE IT.
+     *
+     * Completing or cancelling is the step the assignment exists to let them
+     * take. Changing what was sold is a different act — it alters the price and
+     * the stock that will move — and it belongs to whoever agreed the deal.
+     *
+     * Refused explicitly rather than by silently dropping `items`: a rep who
+     * edited quantities and got a 200 back would reasonably believe it had
+     * worked, and would find out otherwise from the customer.
+     */
+    if (rawItems !== undefined && !canWriteOrders(req.user)) {
+      throw ApiError.forbidden(
+        'You can complete or cancel an order assigned to you, but not change what is on it. ' +
+          'Ask a manager to amend the items.'
+      );
+    }
 
     // --- Item edits: only while the order is still pending -------------------
     if (rawItems !== undefined) {
@@ -617,6 +626,86 @@ function canAccessOrderDocument(user, order) {
 }
 
 /**
+ * Write one order, priced and numbered, inside a caller-supplied transaction.
+ *
+ * WHY THIS IS A FUNCTION AND NOT JUST THE BODY OF createOrder.
+ *
+ * Two paths produce an order: a direct creation by an admin, and a manager's
+ * proposal being approved. They must produce the SAME thing — same pricing,
+ * same atomic number, same stock behaviour — and the way to guarantee that is
+ * for there to be one definition of it. The first attempt at the approval path
+ * inserted the proposed payload directly and got a 400 from the schema, because
+ * a proposal holds `{ product, quantity }` and an order needs each line priced
+ * at the price of the day and a total computed from those lines.
+ *
+ * `actor` is optional and only used for the access check. The approval path
+ * passes none, because the check was already made when the request was accepted
+ * and the approver is an admin who can reach every customer anyway.
+ *
+ * The session is REQUIRED rather than defaulted. Every step here — pricing,
+ * numbering, writing, moving stock — has to be in one transaction or the
+ * guarantees are decoration; making the caller supply it means they cannot
+ * forget to open one.
+ */
+async function placeOrder({ customerId, rawItems, status, actorId, actor = null }, session) {
+  const customer = await Customer.findById(customerId).session(session);
+  if (!customer) throw ApiError.notFound('Customer not found');
+
+  if (actor && !canAccessCustomer(actor, customer)) {
+    throw ApiError.forbidden('You do not have access to this customer');
+  }
+
+  const completing = status === ORDER_STATUS.COMPLETED;
+
+  const { items, total } = await buildOrderItems(rawItems, session);
+
+  /*
+   * The human-readable number, allocated atomically.
+   *
+   * Inside the transaction, so an order that is never written does not burn a
+   * number — an abort rolls the counter back with everything else, and the
+   * sequence stays dense.
+   *
+   * Deliberately NOT `countDocuments() + 1`: two orders created in the same
+   * moment would both read the same count and both claim the same number. See
+   * models/Counter.js — it is the same shape of race as the stock decrement
+   * below, and it is closed the same way, by making the read and the write a
+   * single operation.
+   */
+  const orderNumber = await nextOrderNumber(session);
+
+  // Order.create with a session takes an array — the single-document form does
+  // not accept options.
+  const [created] = await Order.create(
+    [
+      {
+        orderNumber,
+        customer: customer._id,
+        items,
+        total,
+        status: completing ? ORDER_STATUS.COMPLETED : ORDER_STATUS.PENDING,
+        completedAt: completing ? new Date() : null,
+        createdBy: actorId,
+        /*
+         * Left null on creation: null means "follows the customer", which is
+         * what an order should do unless somebody says otherwise. Writing the
+         * creator here instead would freeze an assignment nobody asked for onto
+         * every order, and make moving a customer stop moving their orders.
+         */
+        assignedTo: null,
+      },
+    ],
+    { session }
+  );
+
+  // Stock moves last. If it fails, throwing here aborts the transaction and the
+  // order above is never written — no compensation to remember.
+  if (completing) await decrementStock(items, session);
+
+  return created;
+}
+
+/**
  * PATCH /api/orders/:id/assign — manager and admin only.
  *
  * Body: { "assignedTo": "<user id>" } or { "assignedTo": null } to clear it.
@@ -697,6 +786,7 @@ const assignOrder = asyncHandler(async (req, res) => {
 
 module.exports = {
   listOrders,
+  placeOrder,
   getOrder,
   createOrder,
   updateOrder,

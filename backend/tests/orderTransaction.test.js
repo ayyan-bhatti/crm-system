@@ -1,5 +1,5 @@
 const mongoose = require('mongoose');
-const { api, createManager, createCustomer, createProduct } = require('./helpers');
+const { api, createAdmin, createCustomer, createProduct } = require('./helpers');
 const Order = require('../src/models/Order');
 const Product = require('../src/models/Product');
 const Customer = require('../src/models/Customer');
@@ -15,13 +15,21 @@ const { withTransaction } = require('../src/utils/transaction');
  * observe it is to break something in the middle on purpose.
  */
 
+/*
+ * These use an ADMIN as the actor, not a manager.
+ *
+ * A manager's order is a proposal that waits for approval, so it never reaches
+ * the code these tests are about — the responses came back 202 and the stock
+ * was never touched. An admin's order is placed immediately, which is what puts
+ * two writers in the same transaction at the same moment.
+ */
 describe('Order creation is atomic', () => {
-  let manager;
+  let admin;
   let customer;
 
   beforeEach(async () => {
-    manager = await createManager();
-    customer = await createCustomer(manager);
+    admin = await createAdmin();
+    customer = await createCustomer(admin);
   });
 
   /**
@@ -35,7 +43,7 @@ describe('Order creation is atomic', () => {
 
     const res = await api()
       .post('/api/orders')
-      .set(manager.headers)
+      .set(admin.headers)
       .send({
         customer: customer._id,
         status: 'completed',
@@ -57,7 +65,7 @@ describe('Order creation is atomic', () => {
 
     await api()
       .post('/api/orders')
-      .set(manager.headers)
+      .set(admin.headers)
       .send({
         customer: customer._id,
         status: 'completed',
@@ -77,7 +85,7 @@ describe('Order creation is atomic', () => {
 
     await api()
       .post('/api/orders')
-      .set(manager.headers)
+      .set(admin.headers)
       .send({
         customer: customer._id,
         status: 'completed',
@@ -93,7 +101,7 @@ describe('Order creation is atomic', () => {
 
     const res = await api()
       .post('/api/orders')
-      .set(manager.headers)
+      .set(admin.headers)
       .send({
         customer: customer._id,
         status: 'completed',
@@ -111,7 +119,7 @@ describe('Order creation is atomic', () => {
 
     await api()
       .post('/api/orders')
-      .set(manager.headers)
+      .set(admin.headers)
       .send({ customer: customer._id, items: [{ product: product._id, quantity: 4 }] });
 
     expect((await Product.findById(product._id)).stockQty).toBe(10);
@@ -127,7 +135,7 @@ describe('Order creation is atomic', () => {
 
     const res = await api()
       .post('/api/orders')
-      .set(manager.headers)
+      .set(admin.headers)
       .send({
         customer: new mongoose.Types.ObjectId(),
         status: 'completed',
@@ -140,12 +148,12 @@ describe('Order creation is atomic', () => {
 });
 
 describe('Status transitions are atomic', () => {
-  let manager;
+  let admin;
   let customer;
 
   beforeEach(async () => {
-    manager = await createManager();
-    customer = await createCustomer(manager);
+    admin = await createAdmin();
+    customer = await createCustomer(admin);
   });
 
   /** Create a pending order for `quantity` of a product with `stockQty` on hand. */
@@ -153,7 +161,7 @@ describe('Status transitions are atomic', () => {
     const product = await createProduct({ stockQty });
     const res = await api()
       .post('/api/orders')
-      .set(manager.headers)
+      .set(admin.headers)
       .send({ customer: customer._id, items: [{ product: product._id, quantity }] });
 
     return { product, orderId: res.body.data._id };
@@ -172,7 +180,7 @@ describe('Status transitions are atomic', () => {
 
     const res = await api()
       .patch(`/api/orders/${orderId}`)
-      .set(manager.headers)
+      .set(admin.headers)
       .send({ status: 'completed' });
 
     expect(res.status).toBe(400);
@@ -190,7 +198,7 @@ describe('Status transitions are atomic', () => {
 
     await api()
       .patch(`/api/orders/${orderId}`)
-      .set(manager.headers)
+      .set(admin.headers)
       .send({ status: 'completed' });
 
     const order = await Order.findById(orderId);
@@ -204,11 +212,11 @@ describe('Status transitions are atomic', () => {
 
     await api()
       .patch(`/api/orders/${orderId}`)
-      .set(manager.headers)
+      .set(admin.headers)
       .send({ status: 'completed' });
     await api()
       .patch(`/api/orders/${orderId}`)
-      .set(manager.headers)
+      .set(admin.headers)
       .send({ status: 'cancelled' });
 
     expect((await Product.findById(product._id)).stockQty).toBe(10);
@@ -225,9 +233,9 @@ describe('Status transitions are atomic', () => {
 
     await api()
       .patch(`/api/orders/${orderId}`)
-      .set(manager.headers)
+      .set(admin.headers)
       .send({ status: 'completed' });
-    await api().delete(`/api/orders/${orderId}`).set(manager.headers);
+    await api().delete(`/api/orders/${orderId}`).set(admin.headers);
 
     expect(await Order.countDocuments({})).toBe(0);
     expect((await Product.findById(product._id)).stockQty).toBe(10);
@@ -237,9 +245,14 @@ describe('Status transitions are atomic', () => {
     const { product, orderId } = await pendingOrder(10, 4);
     await api()
       .patch(`/api/orders/${orderId}`)
-      .set(manager.headers)
+      .set(admin.headers)
       .send({ status: 'completed' });
 
+    /*
+     * A sales rep, not a second admin. The point is that the delete is REFUSED
+     * and the transaction leaves nothing half-done; a second admin would be
+     * allowed to delete it, and the test would pass for the wrong reason.
+     */
     const { createRep } = require('./helpers');
     const stranger = await createRep();
 
@@ -268,8 +281,8 @@ describe('Status transitions are atomic', () => {
  */
 describe('the transaction wrapper itself', () => {
   it('discards writes to every collection when the work throws', async () => {
-    const manager = await createManager();
-    const customer = await createCustomer(manager);
+    const admin = await createAdmin();
+    const customer = await createCustomer(admin);
     const product = await createProduct({ stockQty: 10 });
 
     await expect(
@@ -285,7 +298,7 @@ describe('the transaction wrapper itself', () => {
               customer: customer._id,
               items: [{ product: product._id, quantity: 5, priceAtOrder: 10 }],
               total: 50,
-              createdBy: manager.user._id,
+              createdBy: admin.user._id,
             },
           ],
           { session }
@@ -301,13 +314,13 @@ describe('the transaction wrapper itself', () => {
   });
 
   it('commits writes to every collection when the work returns', async () => {
-    const manager = await createManager();
+    const admin = await createAdmin();
     const product = await createProduct({ stockQty: 10 });
 
     await withTransaction(async (session) => {
       await Product.updateOne({ _id: product._id }, { $inc: { stockQty: -5 } }, { session });
       await Customer.create(
-        [{ name: 'Committed Co', email: 'committed@test.com', createdBy: manager.user._id }],
+        [{ name: 'Committed Co', email: 'committed@test.com', createdBy: admin.user._id }],
         { session }
       );
     });

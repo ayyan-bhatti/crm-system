@@ -86,6 +86,15 @@ export default function CustomerDetail() {
             <Detail label="Phone">{customer.phone || '—'}</Detail>
             <Detail label="Company">{customer.company || '—'}</Detail>
             <Detail label="City">{customer.city || '—'}</Detail>
+            {/*
+              `whitespace-pre-line` so the line breaks somebody typed into the
+              address are the line breaks that show. An address collapsed onto
+              one line is technically the same string and unreadable as a
+              delivery instruction.
+            */}
+            <Detail label="Address">
+              <span className="whitespace-pre-line">{customer.address || '—'}</span>
+            </Detail>
             <Detail label="Assigned to">{customer.assignedTo?.name || 'Unassigned'}</Detail>
             <Detail label="Added by">{customer.createdBy?.name || '—'}</Detail>
             <Detail label="Added">{formatDate(customer.createdAt)}</Detail>

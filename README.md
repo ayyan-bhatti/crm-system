@@ -352,6 +352,188 @@ update because it is a different kind of change: editing an order alters what wa
 reassigning alters who is accountable. A rep may do the first to their own order and must not
 do the second. The audit entry names both people rather than logging two ObjectIds.
 
+### Who can do what
+
+| Capability | admin | manager | sales rep |
+| --- | :---: | :---: | :---: |
+| Customers — see the list and detail | yes | yes | **no** |
+| Customers — create, edit, delete | yes | **proposes** | no |
+| Customers — contact details on an order assigned to them | yes | yes | **yes** |
+| Products — see | yes | yes | yes |
+| Products — create, edit, delete | yes | yes | no |
+| Orders — see | all | all | **only assigned to them** |
+| Orders — create, and change what is on one | yes | **proposes** | no |
+| Orders — complete or cancel | yes | yes | **yes, on their own** |
+| Orders — reassign to a rep | yes | yes | no |
+| Approvals, user management, audit, internals | yes | no | no |
+
+**A sales rep has no access to the customer book at all** — not a filtered slice
+of it, none of it. A rep's job here is to fulfil the orders assigned to them, and
+this is the most commercially sensitive collection in the system: every name,
+address and buying history in the business. "Only my customers" is still a slice
+of that, and a slice is enough to walk out with.
+
+What a rep does get is the **contact details of the customer on an order assigned
+to them**, which they need in order to deliver it. That arrives with the order
+rather than from the customer endpoints, and the hole is deliberately narrow: one
+customer, only while an order for them is open, only for the rep holding it.
+
+**A rep's scope is assignment and nothing else.** It used to be three overlapping
+rules — orders they created, orders for a customer they owned, orders assigned to
+them. The first two are now impossible, so `assignedTo` is the whole of it, which
+makes a rep's access one fact to reason about rather than three that have to
+agree. An unassigned order is in nobody's list.
+
+**A rep may move an order forward, not rewrite it.** Completing or cancelling is
+the step the assignment exists to let them take; changing what was sold alters the
+price and the stock that will move, and belongs to whoever agreed the deal. Sending
+`items` as a rep is refused explicitly rather than silently dropped — a rep who
+edited quantities and got a 200 back would find out from the customer.
+
+### Proposing a change, and approving it
+
+**A manager runs the business; an admin owns the record.** A manager's create,
+edit or delete of a customer or an order is recorded as a change request and
+applied only when an admin approves it. The response is `202 Accepted`: something
+was created, but not the thing the caller asked for.
+
+```
+Manager submits          -> 202, nothing written, request queued
+Admin approves           -> the change is applied, inside a transaction
+Admin rejects            -> nothing to undo, because nothing was applied
+```
+
+**Nothing is written when the change is proposed.** Not written-and-hidden, not
+written-and-reverted-on-rejection — not written. The alternative is simpler and
+wrong: between the write and the rejection the record is live, and a live order can
+be completed and move stock, a live customer address is the one a delivery goes to.
+"Approved" has to mean "took effect", which means nothing can take effect first.
+
+**An admin's own changes apply immediately.** Requiring them to approve themselves
+would be theatre, and a queue that fills with your own requests is a queue you stop
+reading.
+
+**A sales rep completing their own order is outside this entirely.** It is a status
+transition rather than a change to what was sold, and gating it would leave a rep
+able to see work and unable to do it.
+
+**One outstanding request per record.** Two managers queueing conflicting edits and
+an admin approving both would mean the second silently overwriting the first,
+having been written against a version that no longer exists. The second submission
+is refused with a 409, which puts the conflict in front of the person making it.
+
+An approved order goes through the **same** function a directly-created one does —
+priced lines, a total, an atomically-allocated number, stock moved if it is being
+completed. The first attempt inserted the proposed payload directly and got a 400
+from the schema, because a proposal holds `{ product, quantity }` and an order needs
+rather more than that.
+
+### Role-based UI
+
+The API enforces all of the above. The frontend's job is a different one: not to
+OFFER actions that will be refused, so a user never learns to read a 403 as normal.
+
+That logic lives in one place, `frontend/src/hooks/usePermissions.js`, as a table
+mapping an ACTION to the roles allowed to perform it. Consumed as a hook
+(`const { can } = usePermissions()`) or as a wrapper:
+
+```jsx
+<Can do="manageProducts">
+  <Link to="/products/new">New product</Link>
+</Can>
+```
+
+**Permissions are named by action, not by role.** With a role list, every call site
+restates the policy, so changing who may do something means finding and editing all
+of them consistently — which was not being done: the app had the same rule spelled
+three different ways, and the customer and order detail pages had no checks at all.
+
+Each entry names the server-side rule it mirrors, so a drift is visible in the table
+rather than discovered by a user hitting a wall. An unknown action throws in
+development rather than quietly denying, because a misspelling would otherwise hide
+the control from everyone, admin included, and look exactly like a deliberate rule.
+
+The customer section is hidden from a sales rep in the nav and guarded at the route.
+Nav is where an absence is least confusing: a missing section reads as "not my job",
+where a section that opens and then fills with 403s reads as broken.
+
+**None of this is a security boundary.** A hidden button is hidden from someone
+using the app, not from someone using curl.
+
+### Order numbers
+
+Orders carry a human-readable number alongside their `_id`:
+
+```
+ORD-000142
+```
+
+`_id` remains the primary key and remains what URLs and every relation use. The number is a
+display and lookup field, not a replacement — swapping the key for a sequential integer would
+leak the order volume of the business to anyone who can see one, and invalidate every existing
+reference.
+
+It is allocated **atomically**, from a counter document with a `$inc`, and the reason is the
+same one behind the atomic stock decrement:
+
+```js
+const n = await Order.countDocuments();      // two requests both read 41
+await Order.create({ orderNumber: n + 1 });  // both write ORD-000042
+```
+
+The window is exactly the gap between the read and the write, which is where every race of
+this shape lives. `findOneAndUpdate` with `$inc` closes it by making the read and the write
+one operation. `count()` is also not a sequence on its own terms — delete order 42 and the
+next one is numbered 42 again, so the number stops identifying anything.
+
+Allocation happens inside the order's transaction, so an order that is never written does not
+burn a number. Search accepts whatever someone types: `ORD-000142`, `ord-142` and `142` all
+find the same order.
+
+**Existing deployments:** orders created before this field have no number, which is handled
+everywhere (the field is optional; the UI falls back to a short id). To close the gap:
+
+```bash
+cd backend && npm run backfill-order-numbers        # report
+cd backend && npm run backfill-order-numbers --yes  # assign, oldest first
+```
+
+### Order assignment
+
+An order can be assigned to a specific rep, independently of its customer.
+
+**Why not just inherit the customer's rep?** Inheriting is right most of the time and was the
+previous behaviour. Two ordinary things it cannot express:
+
+- **One deal handled by someone else** — a specialist brought in for a large order, or cover
+  during leave. Reassigning the *customer* to move one order hands over the whole relationship.
+- **History.** Moving a customer to a new rep silently rewrites who owned every order that
+  customer ever placed, including ones closed years ago by someone who has since left.
+  Commission and credit are attached to those.
+
+`assignedTo` is therefore stored per order, and **null means "follows the customer"** — the
+common case, and the default, so nothing is frozen onto historical rows.
+
+The scope filter treats it as an **override, and it cuts both ways**:
+
+```js
+$or: [
+  { assignedTo: user._id },                              // explicitly mine
+  { createdBy: user._id, assignedTo: null },             // mine unless handed over
+  { customer: { $in: myCustomers }, assignedTo: null },  // ditto
+]
+```
+
+The second half is the part that is easy to miss: an order assigned *away* from you has to
+leave your list even though the customer is still yours. Without that, a hand-off adds the
+order to the recipient's list and changes nothing for the person who gave it up, and both of
+them believe they own it.
+
+`PATCH /api/orders/:id/assign` — manager and admin only, a separate route from the general
+update because it is a different kind of change: editing an order alters what was sold,
+reassigning alters who is accountable. A rep may do the first to their own order and must not
+do the second. The audit entry names both people rather than logging two ObjectIds.
+
 ### Role-based UI
 
 Authorisation is enforced by the API. The frontend's job is a different one: not to OFFER

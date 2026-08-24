@@ -4,9 +4,9 @@ const Customer = require('../src/models/Customer');
 describe('Customer CRUD', () => {
   describe('POST /api/customers', () => {
     it('creates a customer', async () => {
-      const rep = await createRep();
+      const admin = await createAdmin();
 
-      const res = await api().post('/api/customers').set(rep.headers).send({
+      const res = await api().post('/api/customers').set(admin.headers).send({
         name: 'Karachi Textiles',
         email: 'hello@karachitextiles.com',
         company: 'Karachi Textiles Ltd',
@@ -20,55 +20,55 @@ describe('Customer CRUD', () => {
     });
 
     it('defaults the status to lead', async () => {
-      const rep = await createRep();
+      const admin = await createAdmin();
 
       const res = await api()
         .post('/api/customers')
-        .set(rep.headers)
+        .set(admin.headers)
         .send({ name: 'A', email: 'a@test.com' });
 
       expect(res.body.data.status).toBe('lead');
     });
 
     it('records who created it and assigns it to them by default', async () => {
-      const rep = await createRep();
+      const admin = await createAdmin();
 
       const res = await api()
         .post('/api/customers')
-        .set(rep.headers)
+        .set(admin.headers)
         .send({ name: 'A', email: 'a@test.com' });
 
-      expect(String(res.body.data.assignedTo._id)).toBe(String(rep.user._id));
+      expect(String(res.body.data.assignedTo._id)).toBe(String(admin.user._id));
 
       const stored = await Customer.findById(res.body.data._id);
-      expect(String(stored.createdBy)).toBe(String(rep.user._id));
+      expect(String(stored.createdBy)).toBe(String(admin.user._id));
     });
 
     it('rejects a missing name with 400', async () => {
-      const rep = await createRep();
+      const admin = await createAdmin();
 
-      const res = await api().post('/api/customers').set(rep.headers).send({ email: 'a@test.com' });
+      const res = await api().post('/api/customers').set(admin.headers).send({ email: 'a@test.com' });
 
       expect(res.status).toBe(400);
     });
 
     it('rejects an invalid email with 400', async () => {
-      const rep = await createRep();
+      const admin = await createAdmin();
 
       const res = await api()
         .post('/api/customers')
-        .set(rep.headers)
+        .set(admin.headers)
         .send({ name: 'A', email: 'nope' });
 
       expect(res.status).toBe(400);
     });
 
     it('rejects an unknown status with 400', async () => {
-      const rep = await createRep();
+      const admin = await createAdmin();
 
       const res = await api()
         .post('/api/customers')
-        .set(rep.headers)
+        .set(admin.headers)
         .send({ name: 'A', email: 'a@test.com', status: 'vip' });
 
       expect(res.status).toBe(400);
@@ -173,16 +173,26 @@ describe('Customer CRUD', () => {
       expect(res.body.data[0].name).toBe('a.c');
     });
 
-    it('combines a search with the sales-rep scope rather than replacing it', async () => {
-      const owner = await createRep();
-      const other = await createRep();
-      await createCustomer(owner, { name: 'Shared Name' });
-      await createCustomer(other, { name: 'Shared Name' });
+    /**
+     * There is no longer a sales-rep scope on customers to combine a search
+     * with, because there is no sales-rep ACCESS to customers. The test that
+     * used to live here checked that a search narrowed within a rep's own
+     * records; the rule it was testing has been replaced by a flat refusal,
+     * which is asserted in roles.test.js.
+     *
+     * What is still worth pinning is that a search narrows a MANAGER's view
+     * without widening it beyond the book they are allowed to read.
+     */
+    it('narrows a search without escaping the caller’s permitted scope', async () => {
+      const admin = await createAdmin();
+      const manager = await createManager();
+      await createCustomer(admin, { name: 'Shared Name' });
+      await createCustomer(admin, { name: 'Shared Name' });
+      await createCustomer(admin, { name: 'Something Else' });
 
-      const res = await api().get('/api/customers?search=Shared').set(owner.headers);
+      const res = await api().get('/api/customers?search=Shared').set(manager.headers);
 
-      // Both match the search; only one is inside this rep's scope.
-      expect(res.body.total).toBe(1);
+      expect(res.body.total).toBe(2);
     });
 
     it('sorts by an allowed field', async () => {
@@ -301,11 +311,13 @@ describe('Customer CRUD', () => {
   });
 
   describe('DELETE /api/customers/:id', () => {
+    // Admin, not manager: deleting a customer is a write to the customer book,
+    // and a manager may read it and propose changes to it but not change it.
     it('deletes the customer', async () => {
-      const manager = await createManager();
-      const customer = await createCustomer(manager);
+      const admin = await createAdmin();
+      const customer = await createCustomer(admin);
 
-      const res = await api().delete(`/api/customers/${customer._id}`).set(manager.headers);
+      const res = await api().delete(`/api/customers/${customer._id}`).set(admin.headers);
 
       expect(res.status).toBe(200);
       expect(await Customer.findById(customer._id)).toBeNull();

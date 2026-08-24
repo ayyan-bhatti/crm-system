@@ -23,8 +23,32 @@ router.use(protect);
  * mid-request or a double-click then produces one order instead of two. The
  * middleware runs after `protect` because keys are scoped per user.
  */
-router.route('/').get(listOrders).post(idempotency, createOrder);
-router.route('/:id').get(getOrder).patch(updateOrder).delete(deleteOrder);
+/*
+ * Reading is scoped, not gated: everyone reaches this route and a sales rep
+ * sees only the orders assigned to them (see orderScopeFilter).
+ *
+ * CREATING is manager-or-admin. An order is a commercial commitment — it
+ * prices the lines and reserves what will become stock movement — and a rep
+ * fulfils orders rather than agreeing them. They also have no customer book to
+ * choose a customer from, so the form could not be completed even if the route
+ * allowed it.
+ */
+router.route('/').get(listOrders).post(requireManagerOrAdmin, idempotency, createOrder);
+/*
+ * PATCH is open to the assigned rep on purpose, and narrowed inside the
+ * handler: they may move the order to completed or cancelled, and are refused
+ * if they try to change the items. That split cannot be expressed as route
+ * middleware, because it depends on which FIELDS the body carries — see the
+ * note in updateOrder.
+ *
+ * DELETE is manager-or-admin. Deleting a completed order restores stock, which
+ * is a correction to the ledger rather than a step in fulfilling an order.
+ */
+router
+  .route('/:id')
+  .get(getOrder)
+  .patch(updateOrder)
+  .delete(requireManagerOrAdmin, deleteOrder);
 
 /*
  * Reassigning an order to a different rep.

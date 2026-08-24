@@ -26,6 +26,7 @@ export default function CustomerForm() {
     name: '',
     email: '',
     phone: '',
+    address: '',
     company: '',
     city: '',
     status: 'lead',
@@ -67,6 +68,7 @@ export default function CustomerForm() {
       name: existing.name || '',
       email: existing.email || '',
       phone: existing.phone || '',
+      address: existing.address || '',
       company: existing.company || '',
       city: existing.city || '',
       status: existing.status || 'lead',
@@ -152,6 +154,31 @@ export default function CustomerForm() {
               onChange={(e) => update('company', e.target.value)}
             />
             <Field label="City" value={form.city} onChange={(e) => update('city', e.target.value)} />
+
+            {/*
+              A textarea and one free-text block, not street/postcode/country
+              boxes. Address formats differ by country — postcodes are optional
+              in some and structured differently in others — so a fixed set of
+              fields forces every address that does not fit into the wrong one.
+              Nothing here sorts or validates on the parts, so splitting them
+              would buy nothing and cost a class of unenterable addresses.
+
+              Spans both columns because an address is the one field on this
+              form that genuinely needs the width.
+            */}
+            <div className="sm:col-span-2">
+              <Field
+                label="Address"
+                hint="Where deliveries go. Shown to the rep working an order for this customer."
+              >
+                <textarea
+                  rows={3}
+                  className={input}
+                  value={form.address}
+                  onChange={(e) => update('address', e.target.value)}
+                />
+              </Field>
+            </div>
 
             <Field label="Status">
               <select

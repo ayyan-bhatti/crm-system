@@ -306,13 +306,22 @@ describe('GET /api/customers/:id/summary', () => {
     expect(res.status).toBe(403);
   });
 
-  it('allows a sales rep their own customer', async () => {
+  /**
+   * The summary is a view of a customer, so it follows the customer rules: a
+   * sales rep has no access to it at all. It used to be allowed for a rep's own
+   * customer, back when a rep had customers.
+   *
+   * Worth its own test rather than assuming: this endpoint hangs off the
+   * customer router but has its own path and its own rate limiters, which is
+   * precisely the kind of route that keeps its old permissions by accident.
+   */
+  it('is refused to a sales rep', async () => {
     const rep = await createRep();
-    const own = await createCustomer(rep);
+    const customer = await createCustomer(manager, { assignedTo: rep.user._id });
 
-    const res = await api().get(`/api/customers/${own._id}/summary`).set(rep.headers);
+    const res = await api().get(`/api/customers/${customer._id}/summary`).set(rep.headers);
 
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(403);
   });
 
   it('requires authentication', async () => {

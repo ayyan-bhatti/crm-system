@@ -24,6 +24,7 @@ const dashboardRoutes = require('./routes/dashboardRoutes');
 const aiSearchRoutes = require('./routes/aiSearchRoutes');
 const auditRoutes = require('./routes/auditRoutes');
 const internalRoutes = require('./routes/internalRoutes');
+const changeRequestRoutes = require('./routes/changeRequestRoutes');
 
 /**
  * The Express application.
@@ -335,6 +336,7 @@ app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/ai-search', aiSearchRoutes);
 app.use('/api/audit-logs', auditRoutes);
 app.use('/api/internal', internalRoutes);
+app.use('/api/change-requests', changeRequestRoutes);
 
 // --- Error handling --------------------------------------------------------
 // Registered last so they see errors from every route above.

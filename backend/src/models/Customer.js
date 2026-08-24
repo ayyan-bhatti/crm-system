@@ -20,6 +20,27 @@ const customerSchema = new mongoose.Schema({
     trim: true,
     default: '',
   },
+
+  /**
+   * Where to deliver, as one free-text block rather than parsed fields.
+   *
+   * No street/city/postcode/country columns, deliberately. Address formats are
+   * not the same shape across countries — postcodes are optional in some and
+   * structured differently in others, and "state" does not exist everywhere —
+   * so a fixed set of boxes forces every address that does not fit into the
+   * wrong one. This app displays the address and never sorts, groups or
+   * validates on its parts, so there is nothing to gain from splitting it and a
+   * whole class of unenterable addresses to lose.
+   *
+   * The city field stays separate because the AI search filters on it, which is
+   * a real reason for a field to exist on its own.
+   */
+  address: {
+    type: String,
+    trim: true,
+    default: '',
+    maxlength: [500, 'An address cannot be longer than 500 characters'],
+  },
   company: {
     type: String,
     trim: true,

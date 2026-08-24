@@ -41,3 +41,16 @@ export const REQUESTABLE_ROLES = [ROLES.MANAGER, ROLES.SALES_REP];
 
 /** Account statuses, mirrored from the backend. */
 export const USER_STATUSES = ['pending', 'active', 'rejected', 'deactivated'];
+
+/**
+ * Roles that may reach the customer section at all. A sales rep may not.
+ *
+ * Mirrors `canViewCustomers` on the server, and the router-level
+ * `requireManagerOrAdmin` in backend/src/routes/customerRoutes.js. Kept as a
+ * role list rather than an action name because `ProtectedRoute` takes roles —
+ * component-level gating uses `<Can do="viewCustomers">` instead.
+ */
+export const CUSTOMER_VIEW_ROLES = [ROLES.ADMIN, ROLES.MANAGER];
+
+/** Roles that may create an order and decide what is on it. */
+export const ORDER_WRITE_ROLES = [ROLES.ADMIN, ROLES.MANAGER];

@@ -137,17 +137,50 @@ describe('Navigation', () => {
   it.each([['manager'], ['sales_rep']])('hides them from %s', async (role) => {
     renderAs(role, <DashboardLayout />);
 
-    await screen.findAllByRole('link', { name: /customers/i });
+    // Anchored on Orders, which every role has. Customers used to serve as the
+    // anchor and no longer can — a sales rep does not get that section at all.
+    await screen.findAllByRole('link', { name: /orders/i });
     expect(navLinks(/^users$/i)).toHaveLength(0);
     expect(navLinks(/audit log/i)).toHaveLength(0);
+    expect(navLinks(/approvals/i)).toHaveLength(0);
   });
 
   /** Everyone gets the working parts of the app. */
   it.each(ROLES.map((r) => [r]))('shows the core sections to %s', async (role) => {
     renderAs(role, <DashboardLayout />);
 
-    await screen.findAllByRole('link', { name: /customers/i });
+    await screen.findAllByRole('link', { name: /orders/i });
     expect(navLinks(/products/i).length).toBeGreaterThan(0);
-    expect(navLinks(/orders/i).length).toBeGreaterThan(0);
+  });
+
+  /**
+   * THE CUSTOMER SECTION IS NOT THERE FOR A SALES REP.
+   *
+   * Nav is where an absence is least confusing: a missing section reads as "not
+   * my job", where a section that opens and then fills with 403s reads as
+   * broken. So the section is removed rather than left to fail on arrival.
+   */
+  it.each([['admin'], ['manager']])('shows Customers to %s', async (role) => {
+    renderAs(role, <DashboardLayout />);
+
+    expect((await screen.findAllByRole('link', { name: /customers/i })).length).toBeGreaterThan(
+      0
+    );
+  });
+
+  it('hides Customers from a sales rep entirely', async () => {
+    renderAs('sales_rep', <DashboardLayout />);
+
+    await screen.findAllByRole('link', { name: /orders/i });
+    expect(navLinks(/customers/i)).toHaveLength(0);
+  });
+
+  /** The approvals queue is the admin's, and only the admin's. */
+  it('shows Approvals to an admin only', async () => {
+    renderAs('admin', <DashboardLayout />);
+
+    expect((await screen.findAllByRole('link', { name: /approvals/i })).length).toBeGreaterThan(
+      0
+    );
   });
 });

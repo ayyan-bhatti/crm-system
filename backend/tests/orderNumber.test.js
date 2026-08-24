@@ -279,7 +279,7 @@ describe('order numbers appear in the audit trail', () => {
 
     const created = await api()
       .post('/api/orders')
-      .set(manager.headers)
+      .set(admin.headers)
       .send({ customer: customer._id, items: [{ product: product._id, quantity: 1 }] });
 
     const rep = await createRep();

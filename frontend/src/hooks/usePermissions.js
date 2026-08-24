@@ -58,6 +58,47 @@ export const PERMISSIONS = {
   viewAllRecords: [ADMIN, MANAGER],
 
   /**
+   * Reach the customer book at all.
+   *
+   * A sales rep cannot — not a filtered slice of it, none of it. Their job is
+   * to fulfil the orders assigned to them, and this is the most commercially
+   * sensitive collection in the system. What they DO get is the contact details
+   * of the customer on an order assigned to them, which arrives with the order
+   * rather than from here.
+   *
+   * Mirrors `canViewCustomers`, and the router-level `requireManagerOrAdmin` on
+   * every customer route.
+   */
+  viewCustomers: [ADMIN, MANAGER],
+
+  /**
+   * Change the customer book directly.
+   *
+   * Admin only. A manager's create, edit or delete becomes a change request for
+   * an admin to approve — so a manager still SEES these controls, and using
+   * them queues a proposal rather than writing. Mirrors `canWriteCustomers`.
+   */
+  writeCustomers: [ADMIN],
+
+  /**
+   * Create an order and decide what is on it.
+   *
+   * Not a sales rep: an order is a commercial commitment, and a rep fulfils
+   * orders rather than agreeing them. A manager may, and it queues for
+   * approval. Mirrors `canWriteOrders`.
+   */
+  writeOrders: [ADMIN, MANAGER],
+
+  /**
+   * Decide on a proposed change to a customer or an order.
+   *
+   * Admin only, and deliberately not delegated: managers are where these
+   * requests come from, and an approver who can approve their own request is
+   * not an approver.
+   */
+  approveChanges: [ADMIN],
+
+  /**
    * Reassign a customer or order to a different sales rep.
    * Mirrors the explicit check in customerController's updateCustomer.
    */

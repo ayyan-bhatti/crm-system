@@ -1,6 +1,6 @@
 const request = require('supertest');
 const app = require('../src/app');
-const { api, createRep } = require('./helpers');
+const { api, createAdmin } = require('./helpers');
 const { ACCESS_COOKIE } = require('../src/utils/cookies');
 const { CSRF_COOKIE, CSRF_HEADER } = require('../src/middleware/csrf');
 
@@ -148,11 +148,13 @@ describe('CSRF protection', () => {
      * demanding a token from a script would be ceremony with no security value.
      */
     it('allows a bearer-authenticated write without a CSRF token', async () => {
-      const rep = await createRep();
+      // An admin, because creating a customer is now an admin-only write. The
+      // point of the test is the CSRF exemption, not who may create customers.
+      const admin = await createAdmin();
 
       const res = await api()
         .post('/api/customers')
-        .set(rep.headers)
+        .set(admin.headers)
         .send({ name: 'Script Co', email: 'script@example.com' });
 
       expect(res.status).toBe(201);

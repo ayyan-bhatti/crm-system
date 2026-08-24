@@ -1,4 +1,4 @@
-const { api, createManager, createCustomer, createProduct } = require('./helpers');
+const { api, createAdmin, createCustomer, createProduct } = require('./helpers');
 const Order = require('../src/models/Order');
 const Product = require('../src/models/Product');
 const IdempotencyKey = require('../src/models/IdempotencyKey');
@@ -17,19 +17,27 @@ const IdempotencyKey = require('../src/models/IdempotencyKey');
  * tests fire requests in parallel and replay them.
  */
 
+/*
+ * These use an ADMIN as the actor, not a manager.
+ *
+ * A manager's order is a proposal that waits for approval, so it never reaches
+ * the code these tests are about — the responses came back 202 and the stock
+ * was never touched. An admin's order is placed immediately, which is what puts
+ * two writers in the same transaction at the same moment.
+ */
 describe('Concurrent stock', () => {
-  let manager;
+  let admin;
   let customer;
 
   beforeEach(async () => {
-    manager = await createManager();
-    customer = await createCustomer(manager);
+    admin = await createAdmin();
+    customer = await createCustomer(admin);
   });
 
   const buy = (productId, quantity) =>
     api()
       .post('/api/orders')
-      .set(manager.headers)
+      .set(admin.headers)
       .send({
         customer: customer._id,
         status: 'completed',
@@ -95,7 +103,7 @@ describe('Concurrent stock', () => {
 
     const res = await api()
       .post('/api/orders')
-      .set(manager.headers)
+      .set(admin.headers)
       .send({
         customer: customer._id,
         status: 'completed',
@@ -116,11 +124,11 @@ describe('Concurrent stock', () => {
     const pending = await Promise.all([
       api()
         .post('/api/orders')
-        .set(manager.headers)
+        .set(admin.headers)
         .send({ customer: customer._id, items: [{ product: product._id, quantity: 1 }] }),
       api()
         .post('/api/orders')
-        .set(manager.headers)
+        .set(admin.headers)
         .send({ customer: customer._id, items: [{ product: product._id, quantity: 1 }] }),
     ]);
 
@@ -128,7 +136,7 @@ describe('Concurrent stock', () => {
       pending.map((res) =>
         api()
           .patch(`/api/orders/${res.body.data._id}`)
-          .set(manager.headers)
+          .set(admin.headers)
           .send({ status: 'completed' })
       )
     );
@@ -139,18 +147,18 @@ describe('Concurrent stock', () => {
 });
 
 describe('Idempotent order creation', () => {
-  let manager;
+  let admin;
   let customer;
   let product;
 
   beforeEach(async () => {
-    manager = await createManager();
-    customer = await createCustomer(manager);
+    admin = await createAdmin();
+    customer = await createCustomer(admin);
     product = await createProduct({ stockQty: 100 });
   });
 
   const create = (key, quantity = 2) => {
-    const request = api().post('/api/orders').set(manager.headers);
+    const request = api().post('/api/orders').set(admin.headers);
     if (key) request.set('Idempotency-Key', key);
     return request.send({
       customer: customer._id,
@@ -228,7 +236,7 @@ describe('Idempotent order creation', () => {
 
   /** Keys are per user, so one user cannot read another's stored response. */
   it('scopes keys to the user who used them', async () => {
-    const other = await createManager();
+    const other = await createAdmin();
     const otherCustomer = await createCustomer(other);
 
     await create(KEY);

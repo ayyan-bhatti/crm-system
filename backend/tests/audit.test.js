@@ -32,7 +32,7 @@ describe('Audit logging', () => {
     it('records a creation with the resulting document', async () => {
       const res = await api()
         .post('/api/customers')
-        .set(manager.headers)
+        .set(admin.headers)
         .send({ name: 'Acme Ltd', email: 'acme@example.com', city: 'Karachi' });
 
       const log = await AuditLog.findOne({ entity: 'customer', action: 'create' });
@@ -52,7 +52,7 @@ describe('Audit logging', () => {
 
       await api()
         .patch(`/api/customers/${customer._id}`)
-        .set(manager.headers)
+        .set(admin.headers)
         .send({ name: 'New Name', status: 'active' });
 
       const log = await AuditLog.findOne({ entity: 'customer', action: 'update' });
@@ -69,7 +69,7 @@ describe('Audit logging', () => {
 
       await api()
         .patch(`/api/customers/${customer._id}`)
-        .set(manager.headers)
+        .set(admin.headers)
         .send({ name: 'Acme', city: 'Lahore' }); // name resent unchanged
 
       const log = await AuditLog.findOne({ entity: 'customer', action: 'update' });
@@ -85,7 +85,7 @@ describe('Audit logging', () => {
     it('records a deletion with the document and a readable label', async () => {
       const customer = await createCustomer(manager, { name: 'Doomed Ltd' });
 
-      await api().delete(`/api/customers/${customer._id}`).set(manager.headers);
+      await api().delete(`/api/customers/${customer._id}`).set(admin.headers);
 
       const log = await AuditLog.findOne({ entity: 'customer', action: 'delete' });
 
@@ -124,7 +124,7 @@ describe('Audit logging', () => {
 
       const res = await api()
         .post('/api/orders')
-        .set(manager.headers)
+        .set(admin.headers)
         .send({ customer: customer._id, items: [{ product: product._id, quantity: 2 }] });
 
       const log = await AuditLog.findOne({ entity: 'order', action: 'create' });
@@ -138,7 +138,7 @@ describe('Audit logging', () => {
 
       const created = await api()
         .post('/api/orders')
-        .set(manager.headers)
+        .set(admin.headers)
         .send({ customer: customer._id, items: [{ product: product._id, quantity: 2 }] });
 
       await api()
@@ -175,9 +175,9 @@ describe('Audit logging', () => {
   describe('what is captured about the actor and the request', () => {
     it('snapshots the actor rather than only referencing them', async () => {
       await api()
-        .post('/api/customers')
+        .post('/api/products')
         .set(manager.headers)
-        .send({ name: 'Acme', email: 'acme@example.com' });
+        .send({ name: 'Widget', sku: 'AUDIT-1', price: 10, stockQty: 5 });
 
       const log = await AuditLog.findOne({});
 
@@ -192,13 +192,13 @@ describe('Audit logging', () => {
      */
     it('keeps the actor readable after their account is deleted', async () => {
       await api()
-        .post('/api/customers')
+        .post('/api/products')
         .set(manager.headers)
-        .send({ name: 'Acme', email: 'acme@example.com' });
+        .send({ name: 'Widget', sku: 'AUDIT-1', price: 10, stockQty: 5 });
 
       await api().delete(`/api/users/${manager.user._id}`).set(admin.headers);
 
-      const log = await AuditLog.findOne({ entity: 'customer' });
+      const log = await AuditLog.findOne({ entity: 'product' });
 
       expect(log.actor.name).toBe(manager.user.name);
       expect(log.actor.role).toBe('manager');
@@ -206,15 +206,15 @@ describe('Audit logging', () => {
 
     it('records the request metadata', async () => {
       await api()
-        .post('/api/customers')
+        .post('/api/products')
         .set(manager.headers)
         .set('User-Agent', 'jest-test-agent')
-        .send({ name: 'Acme', email: 'acme@example.com' });
+        .send({ name: 'Widget', sku: 'AUDIT-1', price: 10, stockQty: 5 });
 
       const log = await AuditLog.findOne({});
 
       expect(log.method).toBe('POST');
-      expect(log.path).toBe('/api/customers');
+      expect(log.path).toBe('/api/products');
       expect(log.userAgent).toBe('jest-test-agent');
       expect(log.ip).toBeTruthy();
     });
@@ -257,7 +257,7 @@ describe('Audit logging', () => {
 
       await api()
         .post('/api/orders')
-        .set(manager.headers)
+        .set(admin.headers)
         .send({
           customer: customer._id,
           status: 'completed',
@@ -272,7 +272,7 @@ describe('Audit logging', () => {
     beforeEach(async () => {
       await api()
         .post('/api/customers')
-        .set(manager.headers)
+        .set(admin.headers)
         .send({ name: 'Acme', email: 'acme@example.com' });
       await api()
         .post('/api/products')
@@ -316,12 +316,25 @@ describe('Audit logging', () => {
       expect(res.body.data[0].entity).toBe('product');
     });
 
+    /**
+     * One entry per actor in the setup above, which makes this a better test
+     * than it was: it previously filtered a trail where every entry belonged to
+     * the same person, so it would have passed against a filter that did
+     * nothing at all.
+     */
     it('filters by actor', async () => {
-      const res = await api()
+      const byManager = await api()
         .get(`/api/audit-logs?actor=${manager.user._id}`)
         .set(admin.headers);
+      const byAdmin = await api()
+        .get(`/api/audit-logs?actor=${admin.user._id}`)
+        .set(admin.headers);
 
-      expect(res.body.total).toBe(2);
+      expect(byManager.body.total).toBe(1);
+      expect(byManager.body.data[0].entity).toBe('product');
+
+      expect(byAdmin.body.total).toBe(1);
+      expect(byAdmin.body.data[0].entity).toBe('customer');
     });
 
     it('returns the newest first', async () => {

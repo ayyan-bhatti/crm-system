@@ -1,4 +1,11 @@
-const { api, createAdmin, createRep, createCustomer, createProduct } = require('./helpers');
+const {
+  api,
+  createAdmin,
+  createManager,
+  createRep,
+  createCustomer,
+  createProduct,
+} = require('./helpers');
 const Product = require('../src/models/Product');
 const Order = require('../src/models/Order');
 
@@ -552,26 +559,41 @@ describe('Order CRUD and stock handling', () => {
   });
 
   describe('Sales-rep scoping', () => {
-    it('shows a rep only their own orders', async () => {
-      const owner = await createRep();
-      const other = await createRep();
+    /**
+     * A rep's list is now exactly what has been ASSIGNED to them. Orders are
+     * created by a manager and handed over; a rep cannot place one, and has no
+     * customers to place it for.
+     */
+    it('shows a rep only the orders assigned to them', async () => {
+      const manager = await createManager();
+      const mine = await createRep({ email: 'mine@example.com' });
+      const theirs = await createRep({ email: 'theirs@example.com' });
+      const admin = await createAdmin();
       const product = await createProduct({ stockQty: 50 });
+      const customer = await createCustomer(manager);
 
-      const ownersCustomer = await createCustomer(owner);
-      const othersCustomer = await createCustomer(other);
+      const place = async () => {
+        const created = await api()
+          .post('/api/orders')
+          .set(admin.headers)
+          .send({ customer: customer._id, items: [{ product: product._id, quantity: 1 }] });
+        return created.body.data._id;
+      };
 
-      await api()
-        .post('/api/orders')
-        .set(owner.headers)
-        .send({ customer: ownersCustomer._id, items: [{ product: product._id, quantity: 1 }] });
-      await api()
-        .post('/api/orders')
-        .set(other.headers)
-        .send({ customer: othersCustomer._id, items: [{ product: product._id, quantity: 1 }] });
+      const assign = (id, to) =>
+        api()
+          .patch(`/api/orders/${id}/assign`)
+          .set(manager.headers)
+          .send({ assignedTo: to.user._id });
 
-      const res = await api().get('/api/orders').set(owner.headers);
+      await assign(await place(), mine);
+      await assign(await place(), theirs);
+      await place(); // left unassigned, so it belongs to neither
 
-      expect(res.body.total).toBe(1);
+      expect((await api().get('/api/orders').set(mine.headers)).body.total).toBe(1);
+      expect((await api().get('/api/orders').set(theirs.headers)).body.total).toBe(1);
+      // The manager sees all three, including the one nobody holds.
+      expect((await api().get('/api/orders').set(manager.headers)).body.total).toBe(3);
     });
   });
 });

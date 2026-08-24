@@ -259,7 +259,7 @@ function AssignmentPanel({ order, onChanged }) {
     try {
       await ordersApi.assign(order._id, userId);
       toast.success(
-        userId ? 'Order reassigned.' : 'Assignment cleared — the order follows its customer again.'
+        userId ? 'Order reassigned.' : 'Assignment cleared. No rep holds this order now.'
       );
       setEditing(false);
       onChanged();
@@ -283,16 +283,17 @@ function AssignmentPanel({ order, onChanged }) {
             </>
           ) : (
             /*
-             * Unassigned is not "nobody" — it means the order follows whoever
-             * owns the customer, which is the normal case. Saying "Unassigned"
-             * alone would read as an oversight and invite someone to "fix" it.
+             * Unassigned now genuinely means nobody, and the copy says so.
+             *
+             * It used to mean "follows whoever owns the customer", and this
+             * block used to show that rep's name. Sales reps no longer have
+             * customers, so an unassigned order is in nobody's list — saying
+             * otherwise would name a person who cannot actually see it.
              */
             <>
-              <p className="mt-1 text-sm text-ink">
-                {order.customer?.assignedTo?.name || 'Follows the customer'}
-              </p>
+              <p className="mt-1 text-sm text-ink">Not yet assigned</p>
               <p className="text-xs text-muted">
-                No specific rep — this order follows whoever owns the account
+                No rep can see this order until somebody is given it
               </p>
             </>
           )}
@@ -343,7 +344,7 @@ function AssignmentPanel({ order, onChanged }) {
                 onClick={() => assign(null)}
                 disabled={saving}
               >
-                {saving ? <Spinner /> : 'Clear assignment — let it follow the customer'}
+                {saving ? <Spinner /> : 'Clear assignment'}
               </button>
             )}
           </div>

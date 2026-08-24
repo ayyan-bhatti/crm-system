@@ -28,12 +28,16 @@ const icons = {
 
 const NAV_ITEMS = [
   { to: '/', label: 'Dashboard', icon: 'dashboard', end: true },
-  { to: '/customers', label: 'Customers', icon: 'customers' },
+  // Hidden from a sales rep entirely — they have no customer book. Nav is
+  // where an absence is least confusing: a missing section reads as "not my
+  // job", where a section that 403s reads as broken.
+  { to: '/customers', label: 'Customers', icon: 'customers', requires: 'viewCustomers' },
   { to: '/products', label: 'Products', icon: 'products' },
   { to: '/orders', label: 'Orders', icon: 'orders' },
   // `requires` names an ACTION, not a role. See hooks/usePermissions for why:
   // the role list is an implementation detail of the permission, and repeating
   // it here is how the app ended up with the same policy spelled three ways.
+  { to: '/approvals', label: 'Approvals', icon: 'users', requires: 'approveChanges' },
   { to: '/users', label: 'Users', icon: 'users', requires: 'manageUsers' },
   { to: '/audit', label: 'Audit log', icon: 'audit', requires: 'viewAuditLog' },
 ];

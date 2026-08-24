@@ -241,15 +241,39 @@ describe('cursor pagination', () => {
     expect(res.body.data).toHaveLength(5);
   });
 
+  /**
+   * Cursor paging has to respect scope, and it is asserted on ORDERS now.
+   *
+   * It used to use the customer list, which a sales rep can no longer reach at
+   * all — so the test was passing on a 403 with no `data` at all, which proves
+   * nothing about paging. Orders are where a rep genuinely has a narrowed view,
+   * which makes them the only place this property can still be observed.
+   */
   it('still applies permission scoping', async () => {
     const { createRep } = require('./helpers');
-    const rep = await createRep();
-    await createCustomer(rep, { name: 'Rep Own Customer' });
+    const admin = await createAdmin();
+    const mine = await createRep({ email: 'mine@example.com' });
+    const customer = await createCustomer(manager);
+    const product = await createProduct({ stockQty: 500 });
 
-    const res = await api().get('/api/customers?cursor=&limit=50').set(rep.headers);
+    const place = async () => {
+      const created = await api()
+        .post('/api/orders')
+        .set(admin.headers)
+        .send({ customer: customer._id, items: [{ product: product._id, quantity: 1 }] });
+      return created.body.data._id;
+    };
 
+    await api()
+      .patch(`/api/orders/${await place()}/assign`)
+      .set(admin.headers)
+      .send({ assignedTo: mine.user._id });
+    await place(); // assigned to nobody
+
+    const res = await api().get('/api/orders?cursor=&limit=50').set(mine.headers);
+
+    expect(res.status).toBe(200);
     expect(res.body.data).toHaveLength(1);
-    expect(res.body.data[0].name).toBe('Rep Own Customer');
   });
 
   describe('on the other list endpoints', () => {
@@ -265,13 +289,16 @@ describe('cursor pagination', () => {
     });
 
     it('works for orders', async () => {
+      // An admin places them: a manager's order queues for approval instead of
+      // existing, which would leave nothing to paginate.
+      const admin = await createAdmin();
       const customer = await createCustomer(manager);
       const product = await createProduct({ stockQty: 500 });
 
       for (let i = 0; i < 4; i += 1) {
         await api()
           .post('/api/orders')
-          .set(manager.headers)
+          .set(admin.headers)
           .send({ customer: customer._id, items: [{ product: product._id, quantity: 1 }] });
       }
 
@@ -284,10 +311,12 @@ describe('cursor pagination', () => {
     it('works for audit logs, the endpoint it exists for', async () => {
       const admin = await createAdmin();
 
+      // The admin creates them: a manager's create is a change request, which
+      // writes nothing and so audits nothing — leaving no trail to page over.
       for (let i = 0; i < 5; i += 1) {
         await api()
           .post('/api/customers')
-          .set(manager.headers)
+          .set(admin.headers)
           .send({ name: `Audited ${i}`, email: `audited${i}@test.com` });
       }
 

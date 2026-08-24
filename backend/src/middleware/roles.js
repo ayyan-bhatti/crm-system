@@ -45,54 +45,103 @@ const requireManagerOrAdmin = requireRole(ROLES.ADMIN, ROLES.MANAGER);
 /** Convenience predicates used inside controllers. */
 const isAdmin = (user) => user.role === ROLES.ADMIN;
 const isSalesRep = (user) => user.role === ROLES.SALES_REP;
-/** Admins and managers see and edit every record. */
+
+/**
+ * Sees every customer and order rather than a subset.
+ *
+ * Admins and managers both do. Note what this does NOT grant: a manager sees
+ * every customer and may change none of them — reading and writing are
+ * separate questions and are answered by separate helpers below.
+ */
 const hasFullRecordAccess = (user) =>
   user.role === ROLES.ADMIN || user.role === ROLES.MANAGER;
 
 /**
- * Can this user read/modify this customer?
- * Sales reps are limited to customers they created or are assigned to.
+ * THE CUSTOMER RULES.
+ *
+ * A sales rep has no access to the customer book at all — not a filtered view
+ * of it, none of it. The reasoning is that a rep's job here is to fulfil orders
+ * assigned to them, and the customer list is the most commercially sensitive
+ * thing in the system: names, addresses and buying history for the whole
+ * business. Being able to see "only my customers" still means being able to
+ * export a slice of it.
+ *
+ * What a rep CAN see is the contact details of the customer on an order
+ * assigned to them, which they need in order to deliver it. That is served by
+ * the order endpoints, not by these, and it is a deliberately narrow hole: one
+ * customer at a time, only while an order for them is open, only for the rep
+ * holding it.
  */
-function canAccessCustomer(user, customer) {
-  if (hasFullRecordAccess(user)) return true;
+const canViewCustomers = (user) => hasFullRecordAccess(user);
 
-  const userId = user._id.toString();
-  // These refs may be populated documents or raw ObjectIds depending on the
-  // query, so normalise before comparing.
-  const assignedTo = customer.assignedTo?._id || customer.assignedTo;
-  const createdBy = customer.createdBy?._id || customer.createdBy;
+/**
+ * Only an admin may change the customer book.
+ *
+ * A manager may look and may PROPOSE a change, which an admin approves — see
+ * services/changeRequestService. Splitting it this way is what makes "managers
+ * run the business, admins own the record" true rather than aspirational.
+ */
+const canWriteCustomers = (user) => isAdmin(user);
 
-  return (
-    (assignedTo && assignedTo.toString() === userId) ||
-    (createdBy && createdBy.toString() === userId)
-  );
+/**
+ * Can this user read/modify this customer?
+ *
+ * Now simply "does this user have the customer book", because the per-record
+ * ownership rule it used to apply only ever narrowed a sales rep's view — and
+ * a sales rep no longer has one.
+ */
+function canAccessCustomer(user, _customer) {
+  return canViewCustomers(user);
 }
 
 /**
  * Can this user read/modify this order?
- * Sales reps are limited to orders they created, or orders belonging to a
- * customer assigned to them.
+ *
+ * A sales rep gets exactly the orders ASSIGNED to them. Not orders they
+ * created (they cannot create any) and not orders belonging to "their"
+ * customers (they have none) — assignment is now the whole of a rep's scope,
+ * which makes it a single fact to reason about rather than three overlapping
+ * ones.
  */
-function canAccessOrder(user, order, customer = null) {
+function canAccessOrder(user, order) {
   if (hasFullRecordAccess(user)) return true;
 
-  const userId = user._id.toString();
-  const createdBy = order.createdBy?._id || order.createdBy;
-  if (createdBy && createdBy.toString() === userId) return true;
+  const assignedTo = order.assignedTo?._id || order.assignedTo;
 
-  // The order's customer, either passed in or already populated on the order.
-  const linkedCustomer = customer || (order.customer?.assignedTo ? order.customer : null);
-  if (linkedCustomer) return canAccessCustomer(user, linkedCustomer);
+  return Boolean(assignedTo) && assignedTo.toString() === user._id.toString();
+}
 
-  return false;
+/**
+ * May this user create orders and change what is on them?
+ *
+ * Not a sales rep. A rep moves an order they hold FORWARD — completed or
+ * cancelled — and that is a different act from deciding what was sold: it is
+ * the step the assignment exists to let them take. See `canAdvanceOrder`.
+ */
+const canWriteOrders = (user) => hasFullRecordAccess(user);
+
+/**
+ * May this user move this order's status forward?
+ *
+ * The assigned rep may, on their own order, and this is the one write a rep
+ * has. Withholding it would leave them able to see work and unable to do it,
+ * which is not a permission model, it is a waiting room.
+ */
+function canAdvanceOrder(user, order) {
+  return canAccessOrder(user, order);
 }
 
 module.exports = {
   requireRole,
   requireManagerOrAdmin,
+  requireAdmin: requireRole(ROLES.ADMIN),
   isAdmin,
   isSalesRep,
   hasFullRecordAccess,
+  canViewCustomers,
+  canWriteCustomers,
+  canWriteOrders,
+  canAdvanceOrder,
   canAccessCustomer,
   canAccessOrder,
 };

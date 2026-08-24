@@ -171,6 +171,18 @@ export const aiSearchApi = {
   search: (query, entity) => client.post('/ai-search', { query, entity }).then((r) => r.data),
 };
 
+// --- change requests (admin only) -------------------------------------------
+export const changeRequestsApi = {
+  /** Proposed customer and order changes waiting on a decision. */
+  list: () => client.get('/change-requests').then((r) => r.data.data),
+
+  approve: (id) => client.patch(`/change-requests/${id}/approve`).then((r) => r.data),
+
+  /** `note` is optional; offered because "rejected" with no reason gets resubmitted. */
+  reject: (id, note) =>
+    client.patch(`/change-requests/${id}/reject`, note ? { note } : {}).then((r) => r.data),
+};
+
 // --- internals (admin only) -------------------------------------------------
 export const internalApi = {
   /**

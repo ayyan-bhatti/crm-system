@@ -92,29 +92,33 @@ const orderSchema = new mongoose.Schema({
   },
 
   /**
-   * The rep responsible for this order, which is NOT necessarily whoever
-   * created it.
+   * The rep responsible for this order. Null means nobody yet.
    *
-   * WHY ORDERS NEED THEIR OWN ASSIGNMENT RATHER THAN INHERITING THE CUSTOMER'S.
+   * THIS IS THE WHOLE OF A REP'S ACCESS, AND IT USED NOT TO BE.
    *
-   * Inheriting was the previous behaviour and it is right most of the time: an
-   * order belongs to the rep who owns the account. Two things it cannot
-   * express, both ordinary:
+   * Assignment began as an OVERRIDE of an inherited rule: a rep saw orders they
+   * created, orders belonging to a customer they owned, and orders assigned to
+   * them. Both of the first two are now impossible — a rep cannot place an
+   * order and has no customers — so this field is the only route, and null
+   * means the order is in nobody's list rather than "follows the customer".
    *
-   *   - One deal on a shared account handled by someone else — a specialist
-   *     brought in for a large order, cover during leave. Reassigning the
-   *     CUSTOMER to move one order hands over the whole relationship.
-   *   - History. Moving a customer to a new rep silently rewrites who owned
-   *     every order that customer ever placed, including ones closed years ago
-   *     by someone who has since left. Commission and credit are attached to
+   * That is a real change in meaning and worth stating plainly, because the
+   * comment that used to be here said the opposite and three tests were
+   * asserting it.
+   *
+   * WHY IT IS STILL PER-ORDER RATHER THAN DERIVED FROM THE CUSTOMER.
+   *
+   *   - One deal on an account handled by somebody else — a specialist brought
+   *     in for a large order, cover during leave — without handing over the
+   *     whole relationship.
+   *   - History. Moving a customer to a new rep would otherwise rewrite who
+   *     handled every order that customer ever placed, including ones closed
+   *     years ago by someone who has since left. Commission is attached to
    *     those.
    *
-   * So assignment is stored per order, and left null to mean "follows the
-   * customer". Null is the common case and the sensible default: most orders
-   * should follow the account, and defaulting to the creator would freeze an
-   * answer nobody asked for onto every historical row.
-   *
-   * The scope filter reads it as an override — see orderScopeFilter.
+   * Left null on creation on purpose: an order arrives before anyone has
+   * decided who works it, and defaulting to the creator would freeze an answer
+   * nobody gave.
    */
   assignedTo: {
     type: mongoose.Schema.Types.ObjectId,

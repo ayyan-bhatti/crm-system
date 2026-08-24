@@ -62,9 +62,19 @@ const auditLogSchema = new mongoose.Schema({
     type: String,
     required: true,
   },
+  /**
+   * The record this entry is about, or null when there is not one.
+   *
+   * Required until a rejected CREATE needed logging — an event about a thing
+   * that was never made, and so has no id to point at. Requiring one meant
+   * `recordAudit` threw, and because it swallows its own failures to avoid
+   * breaking the user's write, the entry simply never appeared. A silently
+   * missing audit entry is the worst outcome available here, so the field
+   * became optional rather than the event going unrecorded.
+   */
   entityId: {
     type: mongoose.Schema.Types.ObjectId,
-    required: true,
+    default: null,
   },
   /**
    * A human-readable name for the record, captured at the time.

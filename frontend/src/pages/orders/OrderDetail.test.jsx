@@ -89,15 +89,17 @@ describe('the assignment panel', () => {
   });
 
   /**
-   * Unassigned is not "nobody" — it means the order follows whoever owns the
-   * customer, which is the normal case. Saying "Unassigned" alone would read as
-   * an oversight and invite someone to "fix" it.
+   * Unassigned now genuinely means nobody, and the copy has to say so.
+   *
+   * It used to mean "follows whoever owns the customer", and this panel showed
+   * that rep's name. Reps no longer have customers, so naming one would name a
+   * person who cannot actually see the order — worse than saying nothing.
    */
-  it('explains an unassigned order rather than calling it unassigned', async () => {
+  it('says plainly that nobody holds an unassigned order', async () => {
     renderAs('manager');
 
-    expect(await screen.findByText(/follows whoever owns the account/i)).toBeInTheDocument();
-    expect(screen.getByText('Owning Rep')).toBeInTheDocument();
+    expect(await screen.findByText(/not yet assigned/i)).toBeInTheDocument();
+    expect(screen.getByText(/no rep can see this order/i)).toBeInTheDocument();
   });
 
   it.each([['admin'], ['manager']])('offers %s the reassign control', async (role) => {

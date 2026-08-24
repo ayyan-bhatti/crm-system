@@ -23,6 +23,7 @@ const {
  */
 
 describe('order assignment', () => {
+  let admin;
   let manager;
   let owner;
   let specialist;
@@ -31,6 +32,7 @@ describe('order assignment', () => {
   let order;
 
   beforeEach(async () => {
+    admin = await createAdmin();
     manager = await createManager();
     owner = await createRep({ name: 'Owning Rep', email: 'owner@example.com' });
     specialist = await createRep({ name: 'Specialist', email: 'spec@example.com' });
@@ -39,9 +41,14 @@ describe('order assignment', () => {
     customer = await createCustomer(manager, { assignedTo: owner.user._id });
     product = await createProduct({ price: 100, stockQty: 500 });
 
+    /*
+     * Placed by an ADMIN, not by the rep who will end up holding it. A rep
+     * cannot place an order any more, and a manager's would queue for approval
+     * rather than existing — neither gives this suite an order to reassign.
+     */
     const created = await api()
       .post('/api/orders')
-      .set(owner.headers)
+      .set(admin.headers)
       .send({ customer: customer._id, items: [{ product: product._id, quantity: 1 }] });
 
     order = created.body.data;
@@ -90,13 +97,15 @@ describe('order assignment', () => {
     });
 
     /**
-     * THE HALF THAT IS EASY TO MISS.
+     * MOVING AN ORDER TAKES IT AWAY FROM THE PREVIOUS HOLDER.
      *
-     * The customer still belongs to `owner`, so the inherited rule would still
-     * grant them the order. An override that only adds access is not an
-     * override — both reps would believe the order was theirs.
+     * An assignment that only ever adds access is not an assignment — both reps
+     * would believe the order was theirs. This used to be phrased against the
+     * inherited rule ("even though they still own the customer"); reps no longer
+     * own customers, so the property is simply that a hand-off is a hand-off.
      */
-    it('removes it from the previous rep’s list, even though they still own the customer', async () => {
+    it('removes it from the previous rep’s list', async () => {
+      await assign(owner.user._id);
       const before = await listAs(owner);
       expect(before.body.data.map((row) => row._id)).toContain(order._id);
 
@@ -125,19 +134,30 @@ describe('order assignment', () => {
   });
 
   describe('clearing the assignment', () => {
-    /** A real operation: it returns the order to following its customer. */
-    it('hands the order back to the customer’s rep', async () => {
+    /**
+     * A real operation, and it returns the order to NOBODY rather than to the
+     * customer's rep. Reps have no customers to inherit from any more, so an
+     * unassigned order waits for somebody to be given it — which is the honest
+     * state for work nobody has picked up.
+     */
+    it('takes the order out of every rep’s list', async () => {
       await assign(specialist.user._id);
       const res = await assign(null);
 
       expect(res.status).toBe(200);
       expect(res.body.data.assignedTo).toBeNull();
 
-      const back = await listAs(owner);
-      expect(back.body.data.map((row) => row._id)).toContain(order._id);
+      expect((await listAs(specialist)).body.data.map((row) => row._id)).not.toContain(order._id);
+      expect((await listAs(owner)).body.data.map((row) => row._id)).not.toContain(order._id);
+    });
 
-      const gone = await listAs(specialist);
-      expect(gone.body.data.map((row) => row._id)).not.toContain(order._id);
+    /** Still visible to the people who run the business, or it is lost. */
+    it('leaves it visible to a manager', async () => {
+      await assign(specialist.user._id);
+      await assign(null);
+
+      const res = await api().get('/api/orders').set(manager.headers);
+      expect(res.body.data.map((row) => row._id)).toContain(order._id);
     });
   });
 
@@ -224,7 +244,17 @@ describe('order assignment', () => {
    * permission migration.
    */
   describe('orders predating the field', () => {
-    it('still follows the customer when the field is absent entirely', async () => {
+    /**
+     * An order written before `assignedTo` existed has the field ABSENT rather
+     * than null. MongoDB treats the two the same for equality, so such an order
+     * is simply unassigned — waiting to be given to somebody, and meanwhile
+     * visible to the people who run the business.
+     *
+     * It used to be visible to the customer's rep instead. Worth a test either
+     * way: "absent" and "null" being equivalent is the kind of assumption that
+     * is true until somebody writes a query with `$exists`.
+     */
+    it('is treated as unassigned rather than disappearing', async () => {
       const legacy = await Order.create({
         customer: customer._id,
         items: [{ product: product._id, quantity: 1, priceAtOrder: 100 }],
@@ -234,8 +264,14 @@ describe('order assignment', () => {
 
       await Order.collection.updateOne({ _id: legacy._id }, { $unset: { assignedTo: '' } });
 
-      const res = await listAs(owner);
-      expect(res.body.data.map((row) => row._id)).toContain(String(legacy._id));
+      // In nobody's rep list...
+      expect((await listAs(owner)).body.data.map((row) => row._id)).not.toContain(
+        String(legacy._id)
+      );
+
+      // ...and not lost: a manager still sees it.
+      const asManager = await api().get('/api/orders').set(manager.headers);
+      expect(asManager.body.data.map((row) => row._id)).toContain(String(legacy._id));
     });
   });
 });

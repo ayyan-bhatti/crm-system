@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react';
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { BrowserRouter, Navigate, Outlet, Route, Routes } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import DashboardLayout from './components/DashboardLayout';
@@ -13,7 +13,12 @@ import ForgotPassword from './pages/ForgotPassword';
 import ResetPassword from './pages/ResetPassword';
 import AcceptInvite from './pages/AcceptInvite';
 
-import { PRODUCT_WRITE_ROLES, ROLES } from './constants';
+import {
+  CUSTOMER_VIEW_ROLES,
+  ORDER_WRITE_ROLES,
+  PRODUCT_WRITE_ROLES,
+  ROLES,
+} from './constants';
 
 /**
  * Route table.
@@ -50,6 +55,7 @@ const OrderForm = lazy(() => import('./pages/orders/OrderForm'));
 
 const UserList = lazy(() => import('./pages/users/UserList'));
 const AuditLog = lazy(() => import('./pages/AuditLog'));
+const Approvals = lazy(() => import('./pages/Approvals'));
 const Account = lazy(() => import('./pages/Account'));
 
 export default function App() {
@@ -93,7 +99,25 @@ export default function App() {
               {/* Every signed-in user has one, whatever their role. */}
               <Route path="account" element={<Account />} />
 
-                  <Route path="customers">
+                  {/*
+                    The whole customer section is behind a guard, not just its
+                    write screens. A sales rep typing /customers into the
+                    address bar has to land somewhere sensible rather than on a
+                    page that renders and then fills with 403s.
+
+                    The write screens are NOT separately gated: a manager reaches
+                    them and submitting queues a change request for an admin to
+                    approve. Hiding them would turn "needs approval" into "not
+                    allowed", which is a different rule.
+                  */}
+                  <Route
+                    path="customers"
+                    element={
+                      <ProtectedRoute roles={CUSTOMER_VIEW_ROLES}>
+                        <Outlet />
+                      </ProtectedRoute>
+                    }
+                  >
                     <Route index element={<CustomerList />} />
                     <Route path="new" element={<CustomerForm />} />
                     <Route path=":id" element={<CustomerDetail />} />
@@ -123,9 +147,28 @@ export default function App() {
 
                   <Route path="orders">
                     <Route index element={<OrderList />} />
-                    <Route path="new" element={<OrderForm />} />
+                    {/*
+                      A rep fulfils orders rather than agreeing them, and has no
+                      customer book to choose a customer from — the form could
+                      not be completed even if the route allowed it.
+                    */}
+                    <Route
+                      path="new"
+                      element={
+                        <ProtectedRoute roles={ORDER_WRITE_ROLES}>
+                          <OrderForm />
+                        </ProtectedRoute>
+                      }
+                    />
                     <Route path=":id" element={<OrderDetail />} />
-                    <Route path=":id/edit" element={<OrderForm />} />
+                    <Route
+                      path=":id/edit"
+                      element={
+                        <ProtectedRoute roles={ORDER_WRITE_ROLES}>
+                          <OrderForm />
+                        </ProtectedRoute>
+                      }
+                    />
                   </Route>
 
                   <Route
@@ -145,6 +188,15 @@ export default function App() {
                     element={
                       <ProtectedRoute roles={[ROLES.ADMIN]}>
                         <AuditLog />
+                      </ProtectedRoute>
+                    }
+                  />
+
+                  <Route
+                    path="approvals"
+                    element={
+                      <ProtectedRoute roles={[ROLES.ADMIN]}>
+                        <Approvals />
                       </ProtectedRoute>
                     }
                   />

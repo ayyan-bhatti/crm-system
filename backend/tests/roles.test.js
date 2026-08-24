@@ -6,6 +6,7 @@ const {
   createCustomer,
   createProduct,
 } = require('./helpers');
+const Customer = require('../src/models/Customer');
 
 /**
  * Role-based access control.
@@ -151,184 +152,359 @@ describe('Role-based access control', () => {
     });
   });
 
-  describe('Customers — sales reps are limited to their own records', () => {
-    it("blocks a rep from reading another rep's customer", async () => {
-      const owner = await createRep();
-      const other = await createRep();
-      const customer = await createCustomer(owner);
-
-      const res = await api().get(`/api/customers/${customer._id}`).set(other.headers);
-
-      expect(res.status).toBe(403);
-    });
-
-    it("blocks a rep from editing another rep's customer", async () => {
-      const owner = await createRep();
-      const other = await createRep();
-      const customer = await createCustomer(owner);
-
-      const res = await api()
-        .patch(`/api/customers/${customer._id}`)
-        .set(other.headers)
-        .send({ name: 'Renamed' });
-
-      expect(res.status).toBe(403);
-    });
-
-    it("blocks a rep from deleting another rep's customer", async () => {
-      const owner = await createRep();
-      const other = await createRep();
-      const customer = await createCustomer(owner);
-
-      const res = await api().delete(`/api/customers/${customer._id}`).set(other.headers);
-
-      expect(res.status).toBe(403);
-    });
-
-    it("keeps another rep's customers out of the list entirely", async () => {
-      const owner = await createRep();
-      const other = await createRep();
-      await createCustomer(owner);
-      await createCustomer(other);
-
-      const res = await api().get('/api/customers').set(other.headers);
-
-      expect(res.body.total).toBe(1);
-    });
-
-    it('lets a manager read any customer', async () => {
-      const owner = await createRep();
-      const manager = await createManager();
-      const customer = await createCustomer(owner);
-
-      const res = await api().get(`/api/customers/${customer._id}`).set(manager.headers);
-
-      expect(res.status).toBe(200);
-    });
-
-    it('lets a rep read a customer assigned to them but created by someone else', async () => {
-      const manager = await createManager();
-      const rep = await createRep();
-      const customer = await createCustomer(manager, { assignedTo: rep.user._id });
-
-      const res = await api().get(`/api/customers/${customer._id}`).set(rep.headers);
-
-      expect(res.status).toBe(200);
-    });
-
-    it('blocks a rep from reassigning a customer', async () => {
-      const rep = await createRep();
-      const other = await createRep();
-      const customer = await createCustomer(rep);
-
-      const res = await api()
-        .patch(`/api/customers/${customer._id}`)
-        .set(rep.headers)
-        .send({ assignedTo: other.user._id });
-
-      expect(res.status).toBe(403);
-    });
-
-    it('lets a manager reassign a customer', async () => {
-      const manager = await createManager();
-      const rep = await createRep();
-      const customer = await createCustomer(manager);
-
-      const res = await api()
-        .patch(`/api/customers/${customer._id}`)
-        .set(manager.headers)
-        .send({ assignedTo: rep.user._id });
-
-      expect(res.status).toBe(200);
-      expect(String(res.body.data.assignedTo._id)).toBe(String(rep.user._id));
-    });
-  });
-
-  describe('Orders — sales reps are limited to their own records', () => {
-    it("blocks a rep from ordering for another rep's customer", async () => {
-      const owner = await createRep();
-      const other = await createRep();
-      const customer = await createCustomer(owner);
-      const product = await createProduct();
-
-      const res = await api()
-        .post('/api/orders')
-        .set(other.headers)
-        .send({ customer: customer._id, items: [{ product: product._id, quantity: 1 }] });
-
-      expect(res.status).toBe(403);
-    });
-
-    it("blocks a rep from reading another rep's order", async () => {
-      const owner = await createRep();
-      const other = await createRep();
-      const customer = await createCustomer(owner);
-      const product = await createProduct();
-
-      const created = await api()
-        .post('/api/orders')
-        .set(owner.headers)
-        .send({ customer: customer._id, items: [{ product: product._id, quantity: 1 }] });
-
-      const res = await api().get(`/api/orders/${created.body.data._id}`).set(other.headers);
-
-      expect(res.status).toBe(403);
-    });
-
-    it("keeps another rep's orders out of the list", async () => {
-      const owner = await createRep();
-      const other = await createRep();
-      const customer = await createCustomer(owner);
-      const product = await createProduct();
-
-      await api()
-        .post('/api/orders')
-        .set(owner.headers)
-        .send({ customer: customer._id, items: [{ product: product._id, quantity: 1 }] });
-
-      const res = await api().get('/api/orders').set(other.headers);
-
-      expect(res.body.total).toBe(0);
-    });
-
-    it('lets an admin read any order', async () => {
+  /**
+   * THE CUSTOMER BOOK, WHICH A SALES REP CANNOT SEE AT ALL.
+   *
+   * This block used to test that a rep was limited to their OWN customers.
+   * That rule is gone, replaced by a flat refusal: the customer list is the
+   * most commercially sensitive collection in the system, and "only my
+   * customers" is still a slice of it — a slice is enough to walk out with.
+   *
+   * Reading and writing are now separate questions, which is the other half of
+   * the change. A manager sees the whole book and may change none of it.
+   */
+  describe('Customers — no access for a sales rep', () => {
+    it('refuses a rep the customer list outright', async () => {
       const admin = await createAdmin();
       const rep = await createRep();
-      const customer = await createCustomer(rep);
-      const product = await createProduct();
+      await createCustomer(admin);
 
-      const created = await api()
-        .post('/api/orders')
-        .set(rep.headers)
-        .send({ customer: customer._id, items: [{ product: product._id, quantity: 1 }] });
+      const res = await api().get('/api/customers').set(rep.headers);
 
-      const res = await api().get(`/api/orders/${created.body.data._id}`).set(admin.headers);
-
-      expect(res.status).toBe(200);
+      expect(res.status).toBe(403);
     });
 
     /**
-     * A rep who did not place the order can still work it if the customer is
-     * theirs — this is the "assigned to" half of the ownership rule, and the
-     * easy one to break when refactoring.
+     * Not an empty list — a refusal. An empty list would tell a rep the
+     * feature exists and they have no records, which invites them to go
+     * looking for the ones they think they should have.
      */
-    it("lets a rep update an order on their customer that a manager created", async () => {
-      const manager = await createManager();
+    it('refuses rather than returning an empty list', async () => {
+      const admin = await createAdmin();
       const rep = await createRep();
-      const customer = await createCustomer(manager, { assignedTo: rep.user._id });
-      const product = await createProduct({ stockQty: 10 });
+      await createCustomer(admin);
+
+      const res = await api().get('/api/customers').set(rep.headers);
+
+      expect(res.status).toBe(403);
+      expect(res.body.data).toBeUndefined();
+    });
+
+    it('refuses a rep a single customer by id, even one assigned to them', async () => {
+      const admin = await createAdmin();
+      const rep = await createRep();
+      const customer = await createCustomer(admin, { assignedTo: rep.user._id });
+
+      const res = await api().get(`/api/customers/${customer._id}`).set(rep.headers);
+
+      expect(res.status).toBe(403);
+    });
+
+    it('refuses a rep the customer picker used by forms', async () => {
+      const rep = await createRep();
+
+      expect((await api().get('/api/customers/options').set(rep.headers)).status).toBe(403);
+    });
+
+    it('refuses a rep the creation of a customer', async () => {
+      const rep = await createRep();
+
+      const res = await api()
+        .post('/api/customers')
+        .set(rep.headers)
+        .send({ name: 'Back Door Ltd', email: 'back@door.com' });
+
+      expect(res.status).toBe(403);
+    });
+  });
+
+  /**
+   * A manager runs the business and does not own the record.
+   *
+   * The split is the point: full sight of the customer book, no ability to
+   * change it. What they can do instead is propose a change for an admin to
+   * approve — covered in changeRequests.test.js.
+   */
+  describe('Customers — a manager may read, and may only propose a write', () => {
+    it('lets a manager list every customer', async () => {
+      const admin = await createAdmin();
+      const manager = await createManager();
+      await createCustomer(admin);
+      await createCustomer(admin);
+
+      const res = await api().get('/api/customers').set(manager.headers);
+
+      expect(res.status).toBe(200);
+      expect(res.body.total).toBe(2);
+    });
+
+    it('lets a manager read one customer', async () => {
+      const admin = await createAdmin();
+      const manager = await createManager();
+      const customer = await createCustomer(admin);
+
+      expect(
+        (await api().get(`/api/customers/${customer._id}`).set(manager.headers)).status
+      ).toBe(200);
+    });
+
+    /**
+     * A manager is NOT refused — their write becomes a proposal.
+     *
+     * 202, not 403, and the distinction is the feature rather than a detail:
+     * refusing would mean a manager cannot get a customer added at all, which
+     * is not what "an admin owns the record" should cost them. The record is
+     * untouched until an admin approves; see changeRequests.test.js for the
+     * approval itself.
+     */
+    it('turns a manager’s creation into a request, writing nothing', async () => {
+      const manager = await createManager();
+
+      const res = await api()
+        .post('/api/customers')
+        .set(manager.headers)
+        .send({ name: 'Manager Made This', email: 'mm@example.com' });
+
+      expect(res.status).toBe(202);
+      expect(await Customer.countDocuments({ email: 'mm@example.com' })).toBe(0);
+    });
+
+    it('turns a manager’s edit into a request, changing nothing', async () => {
+      const admin = await createAdmin();
+      const manager = await createManager();
+      const customer = await createCustomer(admin, { name: 'Untouched' });
+
+      const res = await api()
+        .patch(`/api/customers/${customer._id}`)
+        .set(manager.headers)
+        .send({ name: 'Renamed by a manager' });
+
+      expect(res.status).toBe(202);
+      expect((await Customer.findById(customer._id)).name).toBe('Untouched');
+    });
+
+    it('turns a manager’s deletion into a request, deleting nothing', async () => {
+      const admin = await createAdmin();
+      const manager = await createManager();
+      const customer = await createCustomer(admin);
+
+      const res = await api().delete(`/api/customers/${customer._id}`).set(manager.headers);
+
+      expect(res.status).toBe(202);
+      expect(await Customer.findById(customer._id)).not.toBeNull();
+    });
+
+    /** And the admin can do all three, or the rule above is just an outage. */
+    it('lets an admin create, edit and delete', async () => {
+      const admin = await createAdmin();
+
+      const created = await api()
+        .post('/api/customers')
+        .set(admin.headers)
+        .send({ name: 'Admin Made This', email: 'am@example.com' });
+      expect(created.status).toBe(201);
+
+      const id = created.body.data._id;
+
+      expect(
+        (await api().patch(`/api/customers/${id}`).set(admin.headers).send({ city: 'Lahore' }))
+          .status
+      ).toBe(200);
+
+      expect((await api().delete(`/api/customers/${id}`).set(admin.headers)).status).toBe(200);
+    });
+  });
+
+  /**
+   * ORDERS ARE THE WHOLE OF A SALES REP'S WORLD, AND ONLY BY ASSIGNMENT.
+   *
+   * This block used to test three overlapping ownership rules: orders a rep
+   * created, orders for a customer they owned, orders assigned to them. The
+   * first two are now impossible — a rep cannot create an order and has no
+   * customers — so assignment is the only route, which makes a rep's access a
+   * single fact rather than three that have to agree.
+   */
+  describe('Orders — a sales rep sees only what is assigned to them', () => {
+    /**
+     * Build an order and hand it to `assignee`, or to nobody.
+     *
+     * Placed by an ADMIN: a manager's order is a proposal that waits for
+     * approval, so posting as one returns a change request rather than an order
+     * and leaves this suite nothing to assign.
+     */
+    const placeOrder = async (admin, customer, assignee = null) => {
+      const product = await createProduct({ stockQty: 50 });
 
       const created = await api()
         .post('/api/orders')
-        .set(manager.headers)
+        .set(admin.headers)
         .send({ customer: customer._id, items: [{ product: product._id, quantity: 1 }] });
 
+      if (assignee) {
+        await api()
+          .patch(`/api/orders/${created.body.data._id}/assign`)
+          .set(admin.headers)
+          .send({ assignedTo: assignee.user._id });
+      }
+
+      return created.body.data;
+    };
+
+    it('refuses a rep the creation of an order', async () => {
+      const admin = await createAdmin();
+      const rep = await createRep();
+      const customer = await createCustomer(admin);
+      const product = await createProduct();
+
       const res = await api()
-        .patch(`/api/orders/${created.body.data._id}`)
+        .post('/api/orders')
+        .set(rep.headers)
+        .send({ customer: customer._id, items: [{ product: product._id, quantity: 1 }] });
+
+      expect(res.status).toBe(403);
+    });
+
+    it('shows a rep an order assigned to them', async () => {
+      const admin = await createAdmin();
+      const rep = await createRep();
+      const customer = await createCustomer(admin);
+
+      const order = await placeOrder(admin, customer, rep);
+
+      expect((await api().get(`/api/orders/${order._id}`).set(rep.headers)).status).toBe(200);
+      expect((await api().get('/api/orders').set(rep.headers)).body.total).toBe(1);
+    });
+
+    it('hides an order assigned to a different rep', async () => {
+      const admin = await createAdmin();
+      const mine = await createRep({ email: 'mine@example.com' });
+      const theirs = await createRep({ email: 'theirs@example.com' });
+      const customer = await createCustomer(admin);
+
+      const order = await placeOrder(admin, customer, theirs);
+
+      expect((await api().get(`/api/orders/${order._id}`).set(mine.headers)).status).toBe(403);
+      expect((await api().get('/api/orders').set(mine.headers)).body.total).toBe(0);
+    });
+
+    /**
+     * Unassigned orders belong to nobody in particular, and a rep is nobody in
+     * particular until somebody says otherwise. Leaking them would make
+     * assignment optional in practice.
+     */
+    it('hides an order that has not been assigned to anyone', async () => {
+      const admin = await createAdmin();
+      const rep = await createRep();
+      const customer = await createCustomer(admin);
+
+      await placeOrder(admin, customer);
+
+      expect((await api().get('/api/orders').set(rep.headers)).body.total).toBe(0);
+    });
+
+    it('lets an admin and a manager read any order', async () => {
+      const admin = await createAdmin();
+      const manager = await createManager();
+      const rep = await createRep();
+      const customer = await createCustomer(admin);
+
+      const order = await placeOrder(admin, customer, rep);
+
+      expect((await api().get(`/api/orders/${order._id}`).set(admin.headers)).status).toBe(200);
+      expect((await api().get(`/api/orders/${order._id}`).set(manager.headers)).status).toBe(200);
+    });
+
+    /**
+     * THE ONE WRITE A REP HAS.
+     *
+     * Completing the order is the step the assignment exists to let them take.
+     * Without it a rep can see the work and not do it, which is not a
+     * permission model, it is a waiting room.
+     */
+    it('lets the assigned rep complete their order', async () => {
+      const admin = await createAdmin();
+      const rep = await createRep();
+      const customer = await createCustomer(admin);
+
+      const order = await placeOrder(admin, customer, rep);
+
+      const res = await api()
+        .patch(`/api/orders/${order._id}`)
         .set(rep.headers)
         .send({ status: 'completed' });
 
       expect(res.status).toBe(200);
+      expect(res.body.data.status).toBe('completed');
+    });
+
+    /**
+     * Moving the order is not the same act as rewriting it. Refused explicitly
+     * rather than by silently dropping the field — a rep who edited quantities
+     * and got a 200 back would find out from the customer.
+     */
+    it('refuses the assigned rep a change to the items', async () => {
+      const admin = await createAdmin();
+      const rep = await createRep();
+      const customer = await createCustomer(admin);
+      const other = await createProduct({ stockQty: 50 });
+
+      const order = await placeOrder(admin, customer, rep);
+
+      const res = await api()
+        .patch(`/api/orders/${order._id}`)
+        .set(rep.headers)
+        .send({ items: [{ product: other._id, quantity: 99 }] });
+
+      expect(res.status).toBe(403);
+      expect(res.body.message).toMatch(/not change what is on it/i);
+    });
+
+    it('refuses a rep the reassignment of their own order', async () => {
+      const admin = await createAdmin();
+      const rep = await createRep();
+      const someone = await createRep({ email: 'someone@example.com' });
+      const customer = await createCustomer(admin);
+
+      const order = await placeOrder(admin, customer, rep);
+
+      const res = await api()
+        .patch(`/api/orders/${order._id}/assign`)
+        .set(rep.headers)
+        .send({ assignedTo: someone.user._id });
+
+      expect(res.status).toBe(403);
+    });
+
+    it('refuses a rep the deletion of their own order', async () => {
+      const admin = await createAdmin();
+      const rep = await createRep();
+      const customer = await createCustomer(admin);
+
+      const order = await placeOrder(admin, customer, rep);
+
+      expect((await api().delete(`/api/orders/${order._id}`).set(rep.headers)).status).toBe(403);
+    });
+
+    /**
+     * The narrow hole through which a rep sees a customer at all. They have no
+     * customer book; they need a phone number and an address to deliver the
+     * order they are holding.
+     */
+    it('gives the assigned rep the delivery details on their order', async () => {
+      const admin = await createAdmin();
+      const rep = await createRep();
+      const customer = await createCustomer(admin, {
+        phone: '+92 300 1234567',
+        address: '12 Ledger Road, Karachi',
+      });
+
+      const order = await placeOrder(admin, customer, rep);
+
+      const res = await api().get(`/api/orders/${order._id}`).set(rep.headers);
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.customer.phone).toBe('+92 300 1234567');
+      expect(res.body.data.customer.address).toBe('12 Ledger Road, Karachi');
     });
   });
 

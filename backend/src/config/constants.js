@@ -55,6 +55,19 @@ const USER_STATUS = {
  */
 const REQUESTABLE_ROLES = [ROLES.MANAGER, ROLES.SALES_REP];
 
+/**
+ * A proposed change waiting on an administrator.
+ *
+ * Pending means nothing has happened to the real record yet — which is the
+ * whole design: see models/ChangeRequest for why the change is stored rather
+ * than applied and undone.
+ */
+const CHANGE_REQUEST_STATUS = {
+  PENDING: 'pending',
+  APPROVED: 'approved',
+  REJECTED: 'rejected',
+};
+
 const CUSTOMER_STATUS = {
   LEAD: 'lead',
   ACTIVE: 'active',
@@ -75,6 +88,8 @@ module.exports = {
   REQUESTABLE_ROLES,
   ROLE_VALUES: Object.values(ROLES),
   USER_STATUS,
+  CHANGE_REQUEST_STATUS,
+  CHANGE_REQUEST_STATUS_VALUES: Object.values(CHANGE_REQUEST_STATUS),
   USER_STATUS_VALUES: Object.values(USER_STATUS),
   CUSTOMER_STATUS,
   CUSTOMER_STATUS_VALUES: Object.values(CUSTOMER_STATUS),

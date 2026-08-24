@@ -1,7 +1,12 @@
 const Customer = require('../models/Customer');
 const ApiError = require('../utils/ApiError');
 const asyncHandler = require('../utils/asyncHandler');
-const { hasFullRecordAccess, canAccessCustomer } = require('../middleware/roles');
+const {
+  hasFullRecordAccess,
+  canAccessCustomer,
+  canWriteCustomers,
+} = require('../middleware/roles');
+const changeRequestService = require('../services/changeRequestService');
 const { recordAudit } = require('../services/auditService');
 const {
   containsRegex,
@@ -17,16 +22,19 @@ const SORTABLE_FIELDS = ['name', 'email', 'company', 'status', 'createdAt'];
 /**
  * The slice of the customer collection a user is allowed to see.
  *
- * Admins and managers get `{}` (everything). Sales reps get a filter limiting
- * them to customers they created or are assigned to.
+ * Admins and managers get `{}` — everything — and nobody else reaches these
+ * routes at all: the router requires manager-or-admin before any handler runs.
  *
- * This is applied to the *query*, not to the results after fetching, so the
- * `total` count used for pagination reflects what the user can actually see.
- * Exported because the order controller needs the same rule.
+ * This used to narrow a sales rep to customers they owned. That rule is gone
+ * along with a rep's access to the customer book; keeping a filter for a role
+ * that cannot get here would be dead code pretending to be a safeguard.
+ *
+ * Still a function, and still applied to the QUERY rather than to fetched
+ * results, because the order controller derives its own scope from it and the
+ * `total` used for pagination has to reflect what the caller can actually see.
  */
 function customerScopeFilter(user) {
-  if (hasFullRecordAccess(user)) return {};
-  return { $or: [{ assignedTo: user._id }, { createdBy: user._id }] };
+  return hasFullRecordAccess(user) ? {} : { _id: null };
 }
 
 /**
@@ -174,19 +182,47 @@ const getCustomer = asyncHandler(async (req, res) => {
  * record they just created doesn't immediately fall outside their own scope.
  */
 const createCustomer = asyncHandler(async (req, res) => {
-  const { name, email, phone, company, city, status, notes, assignedTo } = req.body;
+  const { name, email, phone, address, company, city, status, notes, assignedTo } = req.body;
 
-  const customer = await Customer.create({
+  const fields = {
     name,
     email,
     phone,
+    address,
     company,
     city,
     status,
     notes,
     assignedTo: assignedTo || req.user._id,
     createdBy: req.user._id,
-  });
+  };
+
+  /*
+   * A manager PROPOSES; an admin DOES.
+   *
+   * Nothing is written here for a manager — the intended customer is held in a
+   * change request and created on approval. Writing it now and deleting it on
+   * rejection would be simpler and wrong: in between, the customer is live and
+   * an order can be placed against it.
+   *
+   * The admin's own change applies immediately. Requiring them to approve
+   * themselves would be theatre, and a queue that fills with your own requests
+   * is a queue you stop reading.
+   */
+  if (!canWriteCustomers(req.user)) {
+    const request = await changeRequestService.submit(
+      { entity: 'customer', action: 'create', payload: fields, label: name || '(unnamed)' },
+      req.user
+    );
+
+    return res.status(202).json({
+      success: true,
+      message: 'Sent to an administrator for approval. The customer is not created yet.',
+      data: request,
+    });
+  }
+
+  const customer = await Customer.create(fields);
 
   await customer.populate('assignedTo', 'name email role');
 
@@ -218,19 +254,47 @@ const updateCustomer = asyncHandler(async (req, res) => {
   // the new values as the old ones and make the trail actively misleading.
   const before = customer.toObject();
 
-  // Whitelisted fields only: `createdBy` must never be reassigned by a client,
-  // and reassigning `assignedTo` is a manager/admin decision.
-  const editable = ['name', 'email', 'phone', 'company', 'city', 'status', 'notes'];
+  /*
+   * Whitelisted fields only: `createdBy` must never be reassigned by a client,
+   * and `assignedTo` is handled separately below because it is a decision about
+   * people rather than a property of the record.
+   */
+  const editable = ['name', 'email', 'phone', 'address', 'company', 'city', 'status', 'notes'];
+
+  const changes = {};
   editable.forEach((field) => {
-    if (req.body[field] !== undefined) customer[field] = req.body[field];
+    if (req.body[field] !== undefined) changes[field] = req.body[field];
   });
 
   if (req.body.assignedTo !== undefined) {
-    if (!hasFullRecordAccess(req.user)) {
-      throw ApiError.forbidden('Only managers and admins can reassign a customer');
-    }
-    customer.assignedTo = req.body.assignedTo || null;
+    changes.assignedTo = req.body.assignedTo || null;
   }
+
+  /*
+   * A manager's edit becomes a request rather than a write. The payload holds
+   * only the fields that were actually sent, so approving it later changes
+   * exactly what was proposed and nothing that has moved on since.
+   */
+  if (!canWriteCustomers(req.user)) {
+    const request = await changeRequestService.submit(
+      {
+        entity: 'customer',
+        entityId: customer._id,
+        action: 'update',
+        payload: changes,
+        label: customer.name,
+      },
+      req.user
+    );
+
+    return res.status(202).json({
+      success: true,
+      message: 'Sent to an administrator for approval. Nothing has changed yet.',
+      data: request,
+    });
+  }
+
+  Object.assign(customer, changes);
 
   await customer.save();
 
@@ -257,6 +321,30 @@ const deleteCustomer = asyncHandler(async (req, res) => {
   }
 
   const before = customer.toObject();
+
+  /*
+   * Deletion is the one a manager is most likely to want and the one most worth
+   * a second pair of eyes: it takes the record and, with it, the history of
+   * every order that referenced it by name.
+   */
+  if (!canWriteCustomers(req.user)) {
+    const request = await changeRequestService.submit(
+      {
+        entity: 'customer',
+        entityId: customer._id,
+        action: 'delete',
+        label: customer.name,
+      },
+      req.user
+    );
+
+    return res.status(202).json({
+      success: true,
+      message: 'Sent to an administrator for approval. The customer has not been deleted.',
+      data: request,
+    });
+  }
+
   await customer.deleteOne();
 
   // The label matters most here: once the record is gone, nothing can look up

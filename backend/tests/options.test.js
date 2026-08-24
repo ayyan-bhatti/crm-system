@@ -84,26 +84,46 @@ describe('GET /api/customers/options', () => {
    * A picker must not be a back door. A sales rep searching here sees exactly
    * what the list endpoint would have shown them and nothing more.
    */
-  it('applies the same scope rules as the customer list', async () => {
+  /**
+   * The picker follows the same rule as the list it draws from, and that rule
+   * is now a flat refusal for a sales rep rather than a narrowing.
+   *
+   * These two tests used to check that a rep saw only their own customers here.
+   * A rep has no customers and no customer book, so the interesting property is
+   * that the PICKER does not become a side door into it — an endpoint that
+   * returns names and ids is exactly the shape of thing that gets forgotten
+   * when access is locked down at the list.
+   */
+  it('is refused to a sales rep, like the list it draws from', async () => {
     const rep = await createRep();
     await createCustomer(manager, { name: 'Someone Elses Customer' });
-    await createCustomer(rep, { name: 'My Own Customer' });
 
     const res = await api().get('/api/customers/options').set(rep.headers);
 
-    expect(res.body.data).toHaveLength(1);
-    expect(res.body.data[0].name).toBe('My Own Customer');
+    expect(res.status).toBe(403);
   });
 
-  it('does not let a rep find another rep’s customer by searching for it', async () => {
+  it('cannot be used by a rep to search for a customer by name', async () => {
     const rep = await createRep();
     await createCustomer(manager, { name: 'Secret Account' });
 
-    const res = await api()
-      .get('/api/customers/options?search=Secret')
-      .set(rep.headers);
+    const res = await api().get('/api/customers/options?search=Secret').set(rep.headers);
 
-    expect(res.body.data).toHaveLength(0);
+    expect(res.status).toBe(403);
+    expect(res.body.data).toBeUndefined();
+  });
+
+  /** A manager fills forms from it, so it must still work for them. */
+  it('serves a manager the whole book', async () => {
+    const manager2 = await createManager();
+    await createCustomer(manager, { name: 'Findable Account' });
+
+    const res = await api()
+      .get('/api/customers/options?search=Findable')
+      .set(manager2.headers);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data).toHaveLength(1);
   });
 
   /**

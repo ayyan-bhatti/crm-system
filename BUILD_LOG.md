@@ -2432,4 +2432,110 @@ impossible.
 
 ---
 
-**Final totals: 755 backend + 179 frontend + 11 end-to-end**, lint clean on both packages.
+## Reworking who can do what, and adding an approval step
+
+A substantial change to the permission model, asked for directly. Three of the four
+decisions needed clarifying first, because different readings meant materially
+different work — in particular "admin has to approve everything", which could
+reasonably have meant anything from "nothing new" to "a manager cannot finish a
+single task alone".
+
+### The model now
+
+A sales rep has **no access to the customer book at all**. Not a filtered slice —
+none of it. That is the sharpest change and the reasoning is simple: a rep's job is
+to fulfil orders assigned to them, and the customer list is the most commercially
+sensitive collection in the system. "Only my customers" is still a slice of it, and
+a slice is enough to walk out with.
+
+What a rep does get is the customer's **phone and address on an order assigned to
+them**, because they cannot deliver an order without them. That travels with the
+order rather than coming from the customer endpoints — one customer, only while an
+order for them is open, only for the rep holding it.
+
+A rep's scope collapsed from three overlapping rules to one. It used to be orders
+they created, OR orders for a customer they owned, OR orders assigned to them. The
+first two are now impossible, so `assignedTo` is the whole of it. Three branches
+became one, which is one fact to reason about rather than three that have to agree.
+
+A manager reads the whole customer book and writes none of it. Products and orders
+they run; the record itself belongs to the admin.
+
+### The approval layer
+
+A manager's create, edit or delete of a customer or an order is now a **change
+request**. `202 Accepted`, nothing written, an admin decides.
+
+The design decision worth recording is that **nothing is written when the change is
+proposed**. The obvious alternative — write it now, undo it if rejected — is much
+simpler and wrong in a way that matters: between the write and the rejection the
+record is LIVE. A live order can be completed and move stock; a live customer
+address is the one a delivery goes to. "Approved" has to mean "took effect", which
+means nothing can take effect first.
+
+Three smaller decisions inside that:
+
+- **An admin's own changes apply immediately.** Approving yourself is theatre, and a
+  queue full of your own requests is a queue you stop reading.
+- **A rep completing their own order is outside the whole mechanism.** It is a status
+  transition, not a change to what was sold, and gating it would leave a rep able to
+  see work and unable to do it — a waiting room, not a permission model.
+- **One outstanding request per record.** Two managers queueing conflicting edits,
+  both approved, means the second silently overwrites the first having been written
+  against a version that no longer exists. The second submission is refused with a
+  409, in front of the person making it.
+
+### Two mistakes I made and had to correct
+
+**I gated the customer write routes with `requireAdmin` first.** A manager got a 403
+and had no way to propose anything, which turns "needs approval" into "not allowed" —
+a different rule from the one asked for. The decision belongs in the handler, where
+the actor's role picks between applying and queueing, and where the response can say
+which happened.
+
+**Approving an order returned a 400.** `Model.create(payload)` was the right answer
+to the wrong question: a proposal holds `{ product, quantity }`, and a real order
+needs each line priced at the price of the day, a total, an atomically-allocated
+number, and stock moved if it is being completed. Fixed by extracting `placeOrder`
+and having both paths use it — anything else means two definitions of what an order
+is, and the approved kind would be the one nobody tested.
+
+### And a piece of documentation that had quietly become false
+
+`assignedTo: null` used to mean "follows the customer", and the model comment, the
+frontend copy and three tests all said so. With inheritance gone it means "nobody
+holds it". The tests caught it; the comment and the UI copy would have gone on
+lying indefinitely, telling an admin an unassigned order was being handled by a rep
+who could not see it.
+
+`Customer.address` was added as one free-text block rather than
+street/city/postcode/country fields. Address formats are not the same shape across
+countries, so a fixed set of boxes forces every address that does not fit into the
+wrong one — and nothing here sorts or validates on the parts.
+
+### The test migration was most of the work
+
+51 tests failed on the first run, across 11 suites, and almost none of them were
+bugs — they were tests asserting the old model. The interesting part was that
+several could not simply be repointed:
+
+- Tests using a sales rep as a generic "some authenticated user" for customer CRUD
+  had to become admins.
+- The audit tests that assert a NON-ADMIN actor is snapshotted moved to a product
+  write, keeping a manager as the actor. Switching them to an admin would have made
+  them pass while testing something weaker.
+- `filters by actor` had been filtering a trail where every entry belonged to the
+  same person — it would have passed against a filter that did nothing. It now has
+  one entry per actor and checks that the filter discriminates.
+- The cursor-paging scope test had been asserting against a customer list a rep can
+  no longer reach, so it was passing on a 403 with no `data` at all. Moved to orders,
+  where a rep genuinely has a narrowed view.
+- The stock-atomicity suites had to switch to an admin actor: a manager's order is
+  now a proposal, so the responses came back 202 and the stock was never touched —
+  the tests would have passed without exercising the race they exist for.
+
+**43 new backend tests, 4 new frontend tests.**
+
+---
+
+**Final totals: 798 backend + 183 frontend + 11 end-to-end**, lint clean on both packages.

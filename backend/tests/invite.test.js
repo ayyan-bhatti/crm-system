@@ -403,7 +403,15 @@ describe('Deactivating and reactivating', () => {
 
   beforeEach(async () => {
     admin = await createAdmin();
-    victim = await createRep();
+    /*
+     * A MANAGER, not a sales rep.
+     *
+     * The test proves an existing session dies on the next request, and it
+     * proves it by watching a request that used to succeed start failing. A rep
+     * has no access to /api/customers any more, so that request was already a
+     * 403 and the test would have passed whether deactivation worked or not.
+     */
+    victim = await createManager();
   });
 
   const setStatus = (id, status, actor = admin) =>
