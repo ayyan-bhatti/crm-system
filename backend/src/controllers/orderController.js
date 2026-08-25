@@ -42,6 +42,50 @@ const SORTABLE_FIELDS = ['total', 'status', 'createdAt'];
 const CUSTOMER_FIELDS_ON_ORDER = 'name email company city status phone address';
 
 /*
+ * WHAT AN ORDER LOOKS LIKE WHEN IT LEAVES THE API. ONE SPEC, USED EVERYWHERE.
+ *
+ * This was four hand-written populate lists that had drifted apart, and the
+ * drift was visible on screen: the detail response never populated
+ * `assignedTo`, so `order.assignedTo` arrived as a bare id. The assignment
+ * panel then took its "somebody holds this" branch — an id is truthy — and
+ * rendered `assignedTo.name`, which is `undefined`. The result was a heading
+ * reading "ASSIGNED TO" above nothing at all, on the one screen whose job is
+ * to say who has the order. The list endpoint had always populated it, so the
+ * name showed in the table and vanished when you clicked the row.
+ *
+ * The edit form had the same fault from the same cause: it seeds its assignee
+ * picker from the detail response, so the picker opened blank on an order that
+ * was in fact assigned.
+ *
+ * Naming the shape once is the actual fix. Four copies of a projection are
+ * four chances to forget one, and forgetting one fails silently — a missing
+ * populate is not an error, it is a field that renders as nothing.
+ *
+ * NO EMAIL ON THE PEOPLE.
+ *
+ * `name` and `role` are what the screens display; nothing reads an address off
+ * an order. Handing one out anyway would reintroduce, one record at a time,
+ * exactly what narrowing /users/assignable fixed — a sales rep collecting
+ * colleagues' email addresses from records they are entitled to open. See
+ * ROLE_AUDIT.md, F1.
+ */
+const ORDER_POPULATE = [
+  { path: 'customer', select: CUSTOMER_FIELDS_ON_ORDER },
+  { path: 'createdBy', select: 'name role' },
+  { path: 'assignedTo', select: 'name role' },
+  /*
+   * `stockQty` is load-bearing, not padding. The edit form warns you as you
+   * type that a line exceeds stock, and it reads that number off the order's
+   * own populated items. Only the detail response used to carry it, so
+   * unifying on the shorter list would have turned that warning off silently
+   * — the server still refuses to oversell, but you would find out on submit
+   * instead of while typing. Exactly the class of quiet breakage this shared
+   * spec exists to stop, met while writing it.
+   */
+  { path: 'items.product', select: 'name sku price stockQty' },
+];
+
+/*
  * A value no order number can hold, used when `?search=` is not an order
  * number at all. Matching nothing is the honest answer to a search for
  * something that cannot exist; ignoring the parameter and returning every
@@ -284,10 +328,7 @@ const listOrders = asyncHandler(async (req, res) => {
 
   const withRelations = (query) =>
     query
-      .populate('customer', CUSTOMER_FIELDS_ON_ORDER)
-      .populate('createdBy', 'name email role')
-      .populate('assignedTo', 'name email role')
-      .populate('items.product', 'name sku price');
+      .populate(ORDER_POPULATE);
 
   /*
    * Two paging modes on one endpoint, chosen by whether `?cursor=` is present.
@@ -313,10 +354,7 @@ const listOrders = asyncHandler(async (req, res) => {
 
 /** GET /api/orders/:id */
 const getOrder = asyncHandler(async (req, res) => {
-  const order = await Order.findById(req.params.id)
-    .populate('customer')
-    .populate('createdBy', 'name email role')
-    .populate('items.product', 'name sku price stockQty');
+  const order = await Order.findById(req.params.id).populate(ORDER_POPULATE);
 
   if (!order) throw ApiError.notFound('Order not found');
 
@@ -413,10 +451,7 @@ const createOrder = asyncHandler(async (req, res) => {
     after: order,
   });
 
-  await order.populate([
-    { path: 'customer', select: CUSTOMER_FIELDS_ON_ORDER },
-    { path: 'items.product', select: 'name sku price' },
-  ]);
+  await order.populate(ORDER_POPULATE);
 
   res.status(201).json({ success: true, data: order });
 });
@@ -595,10 +630,7 @@ const updateOrder = asyncHandler(async (req, res) => {
     after: order,
   });
 
-  await order.populate([
-    { path: 'customer', select: 'name email company city status' },
-    { path: 'items.product', select: 'name sku price' },
-  ]);
+  await order.populate(ORDER_POPULATE);
 
   res.json({ success: true, data: order });
 });
@@ -885,7 +917,7 @@ const assignOrder = asyncHandler(async (req, res) => {
   order.assignedTo = assignedTo;
   await order.save();
 
-  await order.populate('assignedTo', 'name email role');
+  await order.populate(ORDER_POPULATE);
 
   /*
    * Audited with both names rather than both ids. "assigned: Ayesha -> Bilal"

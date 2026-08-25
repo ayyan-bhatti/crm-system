@@ -2826,4 +2826,53 @@ real failure gets waved through.
 
 ---
 
-**Final totals: 851 backend + 211 frontend + 11 end-to-end**, lint clean on both packages.
+## "ASSIGNED TO" above nothing at all
+
+Reported from the order page: the assignment bar shows its heading and no name.
+
+### One response out of five had drifted
+
+Four hand-written populate lists, and the detail response was the one that never populated
+`assignedTo`. So it arrived as a bare id — which is truthy, so the panel took its "somebody
+holds this" branch and rendered `assignedTo.name`: `undefined`. A heading over two empty
+lines, on the one screen whose job is to answer who has the order.
+
+The list endpoint had always populated it, which is what made this odd to look at rather than
+obviously broken: the name showed in the table and vanished when you clicked the row.
+
+The edit form had the same fault from the same cause — it seeds its assignee picker from the
+detail response, so the picker opened blank on an order that was in fact assigned.
+
+### Naming the shape once is the actual fix
+
+Four copies of a projection are four chances to forget one, and forgetting one fails silently:
+a missing populate is not an error, it is a field that renders as nothing. Every order
+response now shares a single `ORDER_POPULATE`.
+
+Two things came out of writing it:
+
+**`stockQty` is load-bearing.** The edit form warns you as you type that a line exceeds stock,
+reading that number off the order's own populated items — and only the detail response carried
+it. Unifying on the shorter list would have switched that warning off with no error anywhere:
+the server still refuses to oversell, but you would find out on submit rather than while
+typing. Caught before it shipped, and the reason is now written next to the field.
+
+**No email on the people.** `name` and `role` are what the screens display, and nothing reads
+an address off an order. Leaving it in would have reintroduced, one record at a time, exactly
+what narrowing `/users/assignable` fixed — a rep collecting colleagues' addresses from records
+they are perfectly entitled to open.
+
+### A test that pinned the bug in place
+
+`assigns the order at the moment it is placed` asserted `String(data.assignedTo)` equalled the
+id, which passes whether the field is populated or not — so the suite was agreeing with the
+broken behaviour. It now asserts the name and role are present and the address is not, because
+the bare id is what the bug looked like.
+
+The screen is keyed on the name rather than the object as a second line, so the worst future
+outcome is a wrong message instead of a blank one. **7 new tests** across both packages,
+including one that renders the panel with an unpopulated id and requires it to say something.
+
+---
+
+**Final totals: 854 backend + 215 frontend + 11 end-to-end**, lint clean on both packages.

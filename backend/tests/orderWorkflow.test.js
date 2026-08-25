@@ -74,7 +74,70 @@ describe('placing an order', () => {
       const res = await place(manager, { assignedTo: rep.user._id });
 
       expect(res.status).toBe(201);
-      expect(String(res.body.data.assignedTo)).toBe(String(rep.user._id));
+      expect(String(res.body.data.assignedTo._id)).toBe(String(rep.user._id));
+
+      /*
+       * POPULATED, NOT A BARE ID.
+       *
+       * This used to assert the id, which quietly pinned the wrong behaviour
+       * in place: the create and detail responses returned `assignedTo`
+       * unpopulated while the list populated it. The assignment panel reads
+       * `assignedTo.name`, so on the one screen whose job is to say who holds
+       * the order it rendered a heading above nothing — while the same name
+       * showed correctly in the table you clicked to get there.
+       *
+       * Every order response now shares one populate spec, and this asserts
+       * the name is on it, because the id alone is what the bug looked like.
+       */
+      expect(res.body.data.assignedTo.name).toBe(rep.user.name);
+      expect(res.body.data.assignedTo.role).toBe('sales_rep');
+      // Nothing displays a colleague's address off an order. See ROLE_AUDIT F1.
+      expect(res.body.data.assignedTo.email).toBeUndefined();
+    });
+
+    /*
+     * THE REPORTED BUG, AT THE ENDPOINT THE SCREEN ACTUALLY CALLS.
+     *
+     * The detail response is what the order page and the edit form both read,
+     * and it was the one response that never populated `assignedTo`. An id is
+     * truthy, so the assignment panel took its "somebody holds this" branch and
+     * rendered `assignedTo.name` — undefined. A heading reading "ASSIGNED TO"
+     * with nothing under it, on the screen whose entire job is to answer that.
+     */
+    it('names the assignee on the detail response, not just the id', async () => {
+      const created = await place(manager, { assignedTo: rep.user._id });
+
+      const res = await api().get(`/api/orders/${created.body.data._id}`).set(admin.headers);
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.assignedTo).toMatchObject({
+        name: rep.user.name,
+        role: 'sales_rep',
+      });
+    });
+
+    /** The rep opening their own order sees who holds it, which is them. */
+    it('names the assignee for the rep who holds the order', async () => {
+      const created = await place(manager, { assignedTo: rep.user._id });
+
+      const res = await api().get(`/api/orders/${created.body.data._id}`).set(rep.headers);
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.assignedTo.name).toBe(rep.user.name);
+      expect(res.body.data.assignedTo.email).toBeUndefined();
+    });
+
+    /*
+     * The edit form seeds its item lines from this response and warns, as you
+     * type, that a line exceeds stock. It reads that number off the populated
+     * product, so dropping the field turns the warning off without any error.
+     */
+    it('carries product stock on the detail response, for the edit form', async () => {
+      const created = await place(manager, { assignedTo: rep.user._id });
+
+      const res = await api().get(`/api/orders/${created.body.data._id}`).set(admin.headers);
+
+      expect(res.body.data.items[0].product.stockQty).toEqual(expect.any(Number));
     });
 
     /** The whole point of asking at creation: one step, not two. */

@@ -268,7 +268,22 @@ function AssignmentPanel({ order, onChanged }) {
   const [transferTo, setTransferTo] = useState(null);
   const [transferReason, setTransferReason] = useState('');
 
+  /*
+   * Keyed on the NAME, not on the object.
+   *
+   * `assignedTo` is an id until the API populates it, and an id is truthy — so
+   * a branch on the object alone rendered `assignee.name` as `undefined` and
+   * produced an "ASSIGNED TO" heading above two empty lines. That is worse than
+   * either true answer: the screen exists to say who holds this order, and it
+   * said nothing at all while looking like it had.
+   *
+   * The API is fixed and tested (every order response shares one populate
+   * spec), so this is a second line rather than the remedy. Checking the field
+   * actually being displayed means the worst future outcome is a wrong message
+   * instead of a blank one.
+   */
   const assignee = order.assignedTo;
+  const assigneeName = assignee?.name;
 
   async function requestTransfer() {
     setSaving(true);
@@ -315,9 +330,9 @@ function AssignmentPanel({ order, onChanged }) {
         <div>
           <p className="text-xs font-medium uppercase tracking-wide text-muted">Assigned to</p>
 
-          {assignee ? (
+          {assigneeName ? (
             <>
-              <p className="mt-1 text-sm font-medium text-ink">{assignee.name}</p>
+              <p className="mt-1 text-sm font-medium text-ink">{assigneeName}</p>
               <p className="text-xs text-muted">{humanize(assignee.role)}</p>
             </>
           ) : (

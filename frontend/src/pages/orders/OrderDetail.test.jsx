@@ -271,3 +271,46 @@ describe('a rep asking for a transfer', () => {
     expect(await screen.findByText(/not active/i)).toBeInTheDocument();
   });
 });
+
+/**
+ * WHO HOLDS THIS ORDER, ON THE BAR THAT SAYS "ASSIGNED TO".
+ *
+ * Reported as: the heading appears with nothing under it. The cause was in the
+ * API — the detail response was the one order response that never populated
+ * `assignedTo` — but the screen made it invisible rather than obvious, because
+ * an id is truthy, so it took the "somebody holds this" branch and rendered an
+ * undefined name.
+ */
+describe('the assignment bar', () => {
+  it('names the rep holding the order, and their role', async () => {
+    renderAs('sales_rep', order({ assignedTo: SPECIALIST }));
+
+    expect(await screen.findByText('Bilal Ahmed')).toBeInTheDocument();
+    expect(screen.getByText('Assigned to')).toBeInTheDocument();
+    expect(screen.getByText('Sales rep')).toBeInTheDocument();
+  });
+
+  it('names the rep for a manager too', async () => {
+    renderAs('manager', order({ assignedTo: SPECIALIST }));
+
+    expect(await screen.findByText('Bilal Ahmed')).toBeInTheDocument();
+  });
+
+  it('says plainly when nobody holds it', async () => {
+    renderAs('manager', order({ assignedTo: null }));
+
+    expect(await screen.findByText('Not yet assigned')).toBeInTheDocument();
+  });
+
+  /*
+   * The regression guard. If a response ever ships a bare id again, the screen
+   * must say something rather than render a heading over emptiness — a wrong
+   * message is findable, a blank one is not.
+   */
+  it('never renders the heading over nothing, even given an unpopulated id', async () => {
+    renderAs('manager', order({ assignedTo: '650000000000000000000009' }));
+
+    await screen.findByRole('heading', { name: 'ORD-000142' });
+    expect(screen.getByText('Not yet assigned')).toBeInTheDocument();
+  });
+});
