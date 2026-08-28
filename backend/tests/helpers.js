@@ -3,6 +3,7 @@ const app = require('../src/app');
 const User = require('../src/models/User');
 const Customer = require('../src/models/Customer');
 const Product = require('../src/models/Product');
+const Buyer = require('../src/models/Buyer');
 const { signToken } = require('../src/utils/token');
 const { ROLES } = require('../src/config/constants');
 
@@ -74,6 +75,29 @@ async function createProduct(overrides = {}) {
   });
 }
 
+/**
+ * A buyer account, created straight through the model for the same reason
+ * `createUser` bypasses `/api/auth/register`: a test asks for the account it
+ * wants without depending on whatever the real registration endpoint does
+ * (email verification, activation, rate limiting) that has nothing to do with
+ * what the test is checking.
+ *
+ * No `token`/`headers` here, unlike `createUser` — buyer sessions are cookie
+ * based (see the buyer-auth build-log entry), so a test that needs an
+ * authenticated buyer request logs in through the real endpoint to get real
+ * cookies, rather than fabricating a bearer token buyer routes don't accept.
+ */
+async function createBuyer(overrides = {}) {
+  sequence += 1;
+
+  return Buyer.create({
+    name: overrides.name || `Test Buyer ${sequence}`,
+    email: overrides.email || `buyer${sequence}@test.com`,
+    password: overrides.password || 'Karachi-Ledger-72',
+    ...overrides,
+  });
+}
+
 module.exports = {
   api,
   createUser,
@@ -82,4 +106,5 @@ module.exports = {
   createRep,
   createCustomer,
   createProduct,
+  createBuyer,
 };

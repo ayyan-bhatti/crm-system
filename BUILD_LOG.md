@@ -2876,3 +2876,106 @@ including one that renders the panel with an unpopulated id and requires it to s
 ---
 
 **Final totals: 854 backend + 215 frontend + 11 end-to-end**, lint clean on both packages.
+
+---
+
+## Storefront, phase 1: the data models underneath a buyer track
+
+The brief for this round is a full storefront — buyer accounts, a public catalogue, cart,
+checkout, buyer-initiated cancellations, ten AI features, a design pass, all of it. Working
+through it in the phases it was specified in, testing and reporting after each rather than
+landing it as one enormous change. This entry covers phase 1: the schema underneath everything
+else. No route exists yet that uses any of this — the point of doing it first is that every
+later phase is building on a settled shape rather than discovering what the shape needs to be
+while also wiring up an endpoint.
+
+### A buyer is not a smaller staff role
+
+The whole of this app's permission reasoning — `hasFullRecordAccess`, `requireManagerOrAdmin`,
+every check in `usePermissions` — is "which of the three staff roles is this". A buyer is not
+one of those roles held loosely; it is not staff at all. Folding it into `User` as a fourth
+`role` value would mean every one of those checks needed an "and not a buyer" clause added by
+hand, forever, and the one place that got missed is a buyer looking at the customer book. A
+separate `Buyer` model makes that failure structurally impossible instead of merely
+disciplined: nothing in the staff permission table can accidentally grant a buyer anything,
+because a `Buyer` document is never what those checks read. Password hashing, the same
+exponential lockout backoff, and the same `toJSON` stripping all mirror `User.js` line for
+line — a buyer's account deserves exactly the same protection a staff member's does, and nothing
+about being a customer rather than an employee changes that.
+
+### The refresh-token store is deliberately duplicated, not shared
+
+The obvious move for buyer sessions is a `refPath` on the existing `RefreshToken.user`, the
+same technique used below on `ChangeRequest.requestedBy`. Rejected here on purpose: refresh
+rotation and reuse detection is the single most security-sensitive piece of machinery in this
+app, and the buyer and staff tracks are meant to be fully independent — separate cookies,
+separate paths, separate middleware, so a person can be signed into the internal CRM and the
+storefront in the same browser without collision (see the multi-tab cookie entry earlier in
+this log for why that scoping matters). Threading a second actor type through the staff session
+store would mean every future change to staff session logic has to be re-reasoned about for
+buyers too, and a defect in one track's rotation could revoke or leak sessions in the other. A
+second, identically-shaped `BuyerRefreshToken` collection costs a little duplication and buys
+real isolation.
+
+### `ChangeRequest.requestedBy` becomes polymorphic, on purpose, without a migration
+
+A buyer will eventually be able to request cancellation of their own pending order, and that
+request has to sit in the same approval queue a manager's customer edit sits in — the brief is
+explicit that it should be the *same* queue, just labelled differently, not a second mechanism.
+The requester was always `ref: 'User'`; a buyer is not one. Rather than a second
+`requestedByBuyer` field — which would let both be set, or neither, on a request that has
+exactly one requester — `requestedBy` now uses `refPath: 'requestedByModel'`, a new field
+defaulting to `'User'`.
+
+The default is what keeps this backward compatible with zero migration: every change request
+written before this field existed has nothing stored there, and Mongoose applies a schema
+default when hydrating a document that is missing the field — not only on `.create()`, on every
+read. A test inserts a request directly into the collection with no `requestedByModel` at all,
+the way a genuinely old document would look, and confirms it still `populate()`s its requester
+as a `User`.
+
+Also added: a `cancel` action, distinct from the existing `delete`. Mechanically they look
+similar, but a manager's `delete` removes the order document; a buyer's `cancel` — the only
+change a buyer will ever be able to request — moves a still-`pending` order to `cancelled` and
+leaves the document standing, because a buyer's own order history has to keep showing an order
+they cancelled, not lose it. Same reasoning as why `transfer` is separate from `update`,
+recorded when that field was written: two different requesters asking for two different things
+read as one row apiece in a queue, not as one action a reader has to infer the meaning of.
+
+### Order gets `source` and `buyerId`, both nullable-safe by default
+
+`source: 'internal' | 'storefront'` defaults to `'internal'` — not because every existing order
+needs backfilling, but because the default states the truth: an order placed before the
+storefront existed really was placed by staff, through this app. `buyerId` is separate from
+`customer` rather than replacing it: every order has a `Customer` — that record is what a sales
+rep follows up with, and matching a storefront order to one by email is the entire reason to
+build this on the CRM rather than a generic cart plugin — but only an order placed by a
+signed-in buyer also has a `Buyer`. A guest checkout will create or match a `Customer` and leave
+`buyerId` null, exactly like a staff-placed order does today.
+
+### Product.imageUrl, and category was already there
+
+The brief asked for both `imageUrl` and `category` on `Product`. `category` already exists —
+indexed, defaulted to `'Uncategorised'` — so only `imageUrl` was new: optional, empty-string
+default, so a product created before the storefront existed falls back to a placeholder image
+in the UI rather than failing validation or needing a backfill.
+
+### Cart is buyer-only and price-free
+
+`Cart` holds a buyer id (unique — one cart per buyer, enforced by the index rather than a
+lookup-then-create, which is what actually stops two concurrent "first add to cart" requests
+from creating two carts) and `{ product, quantity }` lines. No price is stored on a cart line:
+price is resolved fresh at checkout from the product's current price, the same as every other
+order path in this app — a cart is not a quote and was never meant to lock one in. A guest's
+cart never reaches this collection at all; it is client-side state until someone signs in,
+which is also why there is no cleanup job for abandoned guest carts here — there is nothing
+server-side to clean up.
+
+**13 new backend tests**, covering the buyer account (hashing, duplicate email, lockout), the
+one-cart-per-buyer constraint, `Order.source`/`buyerId` defaults and validation, and — the part
+worth the most scrutiny — that a `ChangeRequest` with no stored `requestedByModel` still reads
+back correctly as a `User`. Full suite re-run clean after the `ChangeRequest` change, since a
+polymorphic reference on an approval queue used throughout the app was the one edit in this
+phase with real regression risk.
+
+**Final totals: 867 backend + 215 frontend + 11 end-to-end**, lint clean on both packages.

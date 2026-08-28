@@ -131,6 +131,38 @@ const orderSchema = new mongoose.Schema({
     type: Date,
     default: null,
   },
+
+  /**
+   * Where this order came from. Defaults to `internal` so every order placed
+   * before the storefront existed reads correctly with no backfill: it really
+   * was placed by staff, through this app, and the default states that
+   * truthfully rather than leaving it to be inferred from the absence of a
+   * `buyerId`.
+   */
+  source: {
+    type: String,
+    enum: {
+      values: ['internal', 'storefront'],
+      message: 'Source must be internal or storefront',
+    },
+    default: 'internal',
+  },
+
+  /**
+   * The buyer account that placed this order, if any.
+   *
+   * Deliberately separate from `customer`. Every order has a `Customer` — that
+   * is the CRM record a sales rep follows up with — but only a storefront
+   * order placed by a signed-in buyer also has a `Buyer`: a guest checkout
+   * creates or matches a `Customer` and leaves this null, exactly like an
+   * order placed by staff does.
+   */
+  buyerId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Buyer',
+    default: null,
+  },
+
   createdAt: {
     type: Date,
     default: Date.now,

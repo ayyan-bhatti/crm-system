@@ -38,6 +38,17 @@ const productSchema = new mongoose.Schema({
     min: [0, 'Threshold cannot be negative'],
     default: DEFAULT_LOW_STOCK_THRESHOLD,
   },
+  /**
+   * A picture for the storefront catalogue. Optional and untrusted content:
+   * this is a URL, not an upload, so nothing here is validated beyond shape —
+   * the storefront falls back to a placeholder image for any product that
+   * has none, which every product created before this field existed will.
+   */
+  imageUrl: {
+    type: String,
+    trim: true,
+    default: '',
+  },
   createdAt: {
     type: Date,
     default: Date.now,

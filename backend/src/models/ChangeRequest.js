@@ -65,12 +65,21 @@ const changeRequestSchema = new mongoose.Schema({
    * a list of "update order ORD-000142" rows would have to open each one to
    * tell those apart.
    */
+  /**
+   * `cancel` is a fifth action, separate from `delete`, for the same reason
+   * `transfer` is separate from `update`: it is a different write asked by a
+   * different kind of requester. A manager's `delete` removes the order
+   * document outright. A buyer's `cancel` — the only change a buyer can ever
+   * request — moves a still-`pending` order to `cancelled` and leaves the
+   * document in place, because a buyer's order history has to keep showing
+   * the order they cancelled, not lose it.
+   */
   action: {
     type: String,
     required: true,
     enum: {
-      values: ['create', 'update', 'delete', 'transfer'],
-      message: 'A change request must be a create, an update, a delete or a transfer',
+      values: ['create', 'update', 'delete', 'transfer', 'cancel'],
+      message: 'A change request must be a create, an update, a delete, a transfer or a cancel',
     },
   },
 
@@ -103,9 +112,37 @@ const changeRequestSchema = new mongoose.Schema({
     default: CHANGE_REQUEST_STATUS.PENDING,
   },
 
+  /**
+   * Which collection `requestedBy` points into.
+   *
+   * Every request used to come from staff, so `requestedBy` was a plain
+   * `ref: 'User'`. A buyer requesting their own order's cancellation is not a
+   * `User` — buyers are intentionally a separate collection with no access to
+   * the staff role table (see the buyer-auth build-log entry) — so the
+   * reference now needs to say which model to follow. `refPath` rather than a
+   * second `requestedByBuyer` field, because a request has exactly one
+   * requester and modelling that as two mutually-exclusive optional fields
+   * would let both be set, or neither, which a single polymorphic reference
+   * cannot do.
+   *
+   * Defaulting to `'User'` is what keeps this backward compatible: every
+   * change request written before this field existed has no value stored
+   * here, and Mongoose applies the schema default when hydrating a document
+   * that is missing it — so an old request still `populate()`s its requester
+   * as a `User`, correctly, with no migration.
+   */
+  requestedByModel: {
+    type: String,
+    enum: {
+      values: ['User', 'Buyer'],
+      message: 'requestedByModel must be User or Buyer',
+    },
+    default: 'User',
+  },
+
   requestedBy: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
+    refPath: 'requestedByModel',
     required: true,
   },
 
