@@ -45,6 +45,24 @@ function signAccessToken(user) {
   });
 }
 
+/**
+ * Sign a short-lived access JWT for a buyer.
+ *
+ * Carries `kind: 'buyer'`, never `role` — a buyer has no role in the staff
+ * table, and the deliberate absence is what stops this token being mistaken
+ * for a staff one. `protect` (the staff middleware) loads `User.findById`
+ * with whatever id a token carries; a buyer's id resolves against the wrong
+ * collection and simply matches nothing, so a buyer token presented to a
+ * staff route fails closed even without `kind` being checked there at all.
+ * `kind` exists so `protectBuyer` can reject a staff token just as plainly,
+ * rather than relying on the same accidental non-collision in reverse.
+ */
+function signBuyerAccessToken(buyer) {
+  return jwt.sign({ id: buyer._id.toString(), kind: 'buyer' }, env.jwtSecret, {
+    expiresIn: env.accessTokenTtl,
+  });
+}
+
 /** Verify an access token, throwing if it is expired, tampered with, or malformed. */
 function verifyToken(token) {
   return jwt.verify(token, env.jwtSecret);
@@ -73,6 +91,7 @@ function refreshTokenExpiry() {
 
 module.exports = {
   signAccessToken,
+  signBuyerAccessToken,
   // Kept under the old name so existing callers (tests/helpers.js, seed.js)
   // keep working; it now mints the short-lived access token.
   signToken: signAccessToken,

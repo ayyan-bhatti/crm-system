@@ -25,6 +25,7 @@ const aiSearchRoutes = require('./routes/aiSearchRoutes');
 const auditRoutes = require('./routes/auditRoutes');
 const internalRoutes = require('./routes/internalRoutes');
 const changeRequestRoutes = require('./routes/changeRequestRoutes');
+const shopRoutes = require('./routes/shopRoutes');
 
 /**
  * The Express application.
@@ -221,7 +222,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
 /**
- * CSRF protection.
+ * CSRF protection — the STAFF session's half of it.
  *
  * Registered immediately after the cookie parser and before every route, so a
  * forged request is rejected before it can reach anything that acts on it.
@@ -230,9 +231,22 @@ app.use(cookieParser());
  * a header on every state-changing, cookie-authenticated request. See
  * middleware/csrf.js for why this became necessary the moment the session moved
  * into cookies, and why requests using an Authorization header are exempt.
+ *
+ * EXCLUDED FROM `/api/shop`, DELIBERATELY.
+ *
+ * `verifyCsrf` decides "is this cookie-authenticated" by checking for the
+ * staff access cookie — and that cookie's path is `/`, so the browser attaches
+ * it to a `/api/shop/...` request too, the moment a person also has a staff
+ * session open (a manager previewing the storefront, say). Without this
+ * exclusion, that combination made every buyer write demand the STAFF CSRF
+ * header as well as the buyer's own — one track's session silently imposing
+ * a requirement on the other, discovered by a test asserting the two tracks
+ * can coexist. `/api/shop` has its own complete CSRF pair
+ * (`middleware/shopCsrf.js`, mounted in `routes/shopRoutes.js`); this one has
+ * no business there at all.
  */
-app.use(issueCsrfToken);
-app.use(verifyCsrf);
+app.use((req, res, next) => (req.path.startsWith('/api/shop') ? next() : issueCsrfToken(req, res, next)));
+app.use((req, res, next) => (req.path.startsWith('/api/shop') ? next() : verifyCsrf(req, res, next)));
 
 /*
  * morgan is gone: middleware/requestLogger replaces it.
@@ -337,6 +351,7 @@ app.use('/api/ai-search', aiSearchRoutes);
 app.use('/api/audit-logs', auditRoutes);
 app.use('/api/internal', internalRoutes);
 app.use('/api/change-requests', changeRequestRoutes);
+app.use('/api/shop', shopRoutes);
 
 // --- Error handling --------------------------------------------------------
 // Registered last so they see errors from every route above.

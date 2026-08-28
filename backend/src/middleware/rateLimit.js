@@ -185,6 +185,33 @@ const aiPerUserLimiter = createLimiter({
   keyGenerator: (req) => (req.user ? `user:${req.user._id}` : `ip:${ipKeyGenerator(req.ip)}`),
 });
 
+/**
+ * Buyer login and registration: same thresholds as the staff versions, and
+ * named limiters of their own rather than reused ones.
+ *
+ * Sharing `loginLimiter`/`registerLimiter` would count a buyer's attempts
+ * against the same per-IP budget as staff sign-ins from that address — an
+ * office where someone is testing the storefront could lock out a colleague
+ * trying to sign in to the CRM, or vice versa. The threat model is otherwise
+ * identical to the staff versions, so the numbers are unchanged; only the
+ * bucket is separate. See `loginLimiter`/`registerLimiter` above for why
+ * these particular thresholds were chosen.
+ */
+const shopLoginLimiter = createLimiter({
+  name: 'shop-login',
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  message:
+    'Too many sign-in attempts from this address. Please wait a few minutes and try again.',
+});
+
+const shopRegisterLimiter = createLimiter({
+  name: 'shop-register',
+  windowMs: 60 * 60 * 1000,
+  max: 5,
+  message: 'Too many accounts created from this address. Please try again later.',
+});
+
 module.exports = {
   createLimiter,
   loginLimiter,
@@ -192,4 +219,6 @@ module.exports = {
   passwordResetLimiter,
   aiSearchLimiter,
   aiPerUserLimiter,
+  shopLoginLimiter,
+  shopRegisterLimiter,
 };

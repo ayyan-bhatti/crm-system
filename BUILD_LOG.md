@@ -2979,3 +2979,66 @@ polymorphic reference on an approval queue used throughout the app was the one e
 phase with real regression risk.
 
 **Final totals: 867 backend + 215 frontend + 11 end-to-end**, lint clean on both packages.
+
+---
+
+## Storefront, phase 2: buyer auth, and a coupling bug the coexistence test caught
+
+`/api/shop/auth/*` — register, login, refresh, logout, me — structurally parallel to the staff
+auth system: httpOnly cookies, hashed refresh rotation with reuse detection, the same password
+policy, the same exponential lockout. See the phase 1 entry for why the underlying models
+(`Buyer`, `BuyerRefreshToken`) are separate collections rather than shared ones; this phase is
+that same isolation carried through to the HTTP layer.
+
+### Registration activates immediately, and that is a deliberate divergence
+
+Staff sign-up creates a `pending` request an administrator has to approve, because the moment
+that account works it can read the customer list — the risk is what the account can *see*, not
+what it can do. A storefront account grants access to nothing but the buyer's own cart and
+order history. There is nothing for an admin to gate, so `Buyer.create` runs straight through to
+an issued session. Copying the staff registration flow wholesale would have added an approval
+step that protects nothing and makes the storefront unusable the moment someone signs up.
+
+### The token itself says which track it belongs to
+
+A buyer's access JWT carries `kind: 'buyer'` and no `role` claim at all. `protectBuyer` checks
+`kind` before it even looks the id up, so a staff token presented to a buyer route is refused on
+the claim alone — it does not depend on the id happening not to resolve against `Buyer`. The
+reverse direction (a buyer token on a staff route) is already safe by construction, since
+`protect` looks the id up in `User`, a different collection — but the explicit check exists so
+the boundary is stated, not incidental. A test proves both directions.
+
+### The coexistence test found a real bug before anyone hit it by hand
+
+The premise the whole design rests on is that a person can have a staff session and a buyer
+session open in the same browser without either disturbing the other — a manager previewing the
+storefront, most obviously. Writing the test that proves it (`register as staff, then register
+as buyer, in the same cookie-jar agent, confirm both sessions work`) failed immediately: the
+buyer registration came back `403`.
+
+The cause was the STAFF CSRF middleware, mounted globally for every route in `app.js`. It
+decides whether a request is "cookie-authenticated" by checking for the *staff* access cookie —
+and that cookie's path is `/`, so the browser had already started attaching it to
+`/api/shop/...` requests too, the moment the staff session existed. Every buyer write was
+therefore being asked to also carry the staff CSRF header, a requirement that has nothing to do
+with the buyer session at all. Fixed by excluding `/api/shop` from the staff CSRF middleware
+entirely — that prefix has its own complete, independent CSRF pair
+(`middleware/shopCsrf.js`), and the staff one has no business there.
+
+Worth being honest about why this shipped in the first draft rather than being designed around
+from the start: nothing about the buyer auth code itself was wrong in isolation, every test
+written against `/api/shop/auth/*` alone passed on the first run. It only surfaced once a test
+exercised the two tracks *together*, in one cookie jar, which is exactly the scenario the "fully
+separate track" design promises to handle. A lesson worth stating plainly for the phases still
+ahead: isolation claimed by two systems each tested alone is not the same as isolation proven by
+testing them at the same time, in the same client — the multi-tab cookie bug earlier in this log
+was a different flavour of the identical mistake.
+
+**28 new backend tests**, including the coexistence test and its inverse (a staff CSRF token
+must not satisfy the buyer check, or vice versa), full rotation/reuse-detection coverage mirrored
+from `session.test.js`, and the registration-activates-immediately behaviour asserted against the
+staff bootstrap rule to confirm the two paths genuinely don't touch. Full suite re-run clean
+after the `app.js` change, since it altered request handling for every route in the app, not
+only the new ones.
+
+**Final totals: 895 backend + 215 frontend + 11 end-to-end**, lint clean on both packages.
