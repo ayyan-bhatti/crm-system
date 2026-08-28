@@ -387,4 +387,76 @@ describe('Buyer auth', () => {
       expect(res.status).toBe(200);
     });
   });
+
+  describe('the saved-address book', () => {
+    it('adds an address and requires a label and the address itself', async () => {
+      const { agent, res: registered } = await registerAgent();
+      const csrf = cookieValue(registered, SHOP_CSRF_COOKIE);
+
+      const missing = await agent
+        .post('/api/shop/auth/addresses')
+        .set(SHOP_CSRF_HEADER, csrf)
+        .send({ label: 'Home' });
+      expect(missing.status).toBe(400);
+
+      const res = await agent
+        .post('/api/shop/auth/addresses')
+        .set(SHOP_CSRF_HEADER, csrf)
+        .send({ label: 'Home', address: '12 Ledger Road, Karachi', phone: '0300-1234567' });
+
+      expect(res.status).toBe(201);
+      expect(res.body.data.addresses).toHaveLength(1);
+      expect(res.body.data.addresses[0].label).toBe('Home');
+    });
+
+    it('updates and deletes an address, both scoped to the signed-in buyer', async () => {
+      const { agent, res: registered } = await registerAgent();
+      const csrf = cookieValue(registered, SHOP_CSRF_COOKIE);
+      const post = (url) => agent.post(url).set(SHOP_CSRF_HEADER, csrf);
+
+      const added = await post('/api/shop/auth/addresses').send({
+        label: 'Home',
+        address: '12 Ledger Road',
+      });
+      const addressId = added.body.data.addresses[0]._id;
+
+      const updated = await agent
+        .patch(`/api/shop/auth/addresses/${addressId}`)
+        .set(SHOP_CSRF_HEADER, csrf)
+        .send({ label: 'Work' });
+      expect(updated.body.data.addresses[0].label).toBe('Work');
+
+      const deleted = await agent
+        .delete(`/api/shop/auth/addresses/${addressId}`)
+        .set(SHOP_CSRF_HEADER, csrf);
+      expect(deleted.body.data.addresses).toHaveLength(0);
+    });
+
+    it("never reaches another buyer's address book", async () => {
+      const first = await registerAgent();
+      const firstCsrf = cookieValue(first.res, SHOP_CSRF_COOKIE);
+      const added = await first.agent
+        .post('/api/shop/auth/addresses')
+        .set(SHOP_CSRF_HEADER, firstCsrf)
+        .send({ label: 'Home', address: '12 Ledger Road' });
+      const addressId = added.body.data.addresses[0]._id;
+
+      const second = await registerAgent({ email: 'colleague@example.com' });
+      const secondCsrf = cookieValue(second.res, SHOP_CSRF_COOKIE);
+
+      const res = await second.agent
+        .patch(`/api/shop/auth/addresses/${addressId}`)
+        .set(SHOP_CSRF_HEADER, secondCsrf)
+        .send({ label: 'Stolen' });
+
+      expect(res.status).toBe(404);
+    });
+
+    it('refuses an unauthenticated caller', async () => {
+      const res = await api()
+        .post('/api/shop/auth/addresses')
+        .send({ label: 'Home', address: '12 Ledger Road' });
+      expect(res.status).toBe(401);
+    });
+  });
 });

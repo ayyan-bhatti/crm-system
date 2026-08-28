@@ -1,5 +1,14 @@
 const express = require('express');
-const { register, login, refresh, logout, getMe } = require('../controllers/shopAuthController');
+const {
+  register,
+  login,
+  refresh,
+  logout,
+  getMe,
+  addAddress,
+  updateAddress,
+  deleteAddress,
+} = require('../controllers/shopAuthController');
 const { protectBuyer } = require('../middleware/buyerAuth');
 const { shopLoginLimiter, shopRegisterLimiter } = require('../middleware/rateLimit');
 
@@ -18,5 +27,9 @@ router.post('/refresh', refresh);
 router.post('/logout', logout);
 
 router.get('/me', protectBuyer, getMe);
+
+router.post('/addresses', protectBuyer, addAddress);
+router.patch('/addresses/:addressId', protectBuyer, updateAddress);
+router.delete('/addresses/:addressId', protectBuyer, deleteAddress);
 
 module.exports = router;

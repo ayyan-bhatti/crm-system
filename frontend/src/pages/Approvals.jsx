@@ -147,10 +147,21 @@ export default function Approvals() {
                           <p className="text-xs text-muted">{humanize(request.entity)}</p>
                         </td>
                         <td className={td}>
-                          {request.requestedBy?.name || '—'}
-                          <p className="text-xs text-muted">
-                            {humanize(request.requestedBy?.role || '')}
-                          </p>
+                          <span className="inline-flex items-center gap-2">
+                            {request.requestedBy?.name || request.requestedBy?.email || '—'}
+                            {request.requestedByModel === 'Buyer' && (
+                              <span className="rounded-full bg-neutral-wash px-2 py-0.5 text-[11px] font-medium text-neutral-ink">
+                                Customer request
+                              </span>
+                            )}
+                          </span>
+                          {/* A buyer has no role — the badge above already says
+                              who they are, so there is nothing to humanize. */}
+                          {request.requestedByModel !== 'Buyer' && (
+                            <p className="text-xs text-muted">
+                              {humanize(request.requestedBy?.role || '')}
+                            </p>
+                          )}
                         </td>
                         <td className={td}>{formatDate(request.createdAt)}</td>
                         <td className={`${td} text-right`}>

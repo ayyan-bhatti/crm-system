@@ -144,4 +144,62 @@ const getMe = asyncHandler(async (req, res) => {
   res.json({ success: true, data: { buyer: req.buyer } });
 });
 
-module.exports = { register, login, refresh, logout, getMe };
+/**
+ * The saved-address book on a buyer's own account.
+ *
+ * Nested under `/api/shop/auth` rather than a separate router: there is
+ * exactly one buyer these can ever belong to — the signed-in one — so there
+ * is no id in any of these URLs and no scoping question to get wrong. Every
+ * handler here mutates `req.buyer`, which `protectBuyer` has already loaded
+ * and verified belongs to the caller.
+ */
+
+/** POST /api/shop/auth/addresses — body: { label, address, phone } */
+const addAddress = asyncHandler(async (req, res) => {
+  const { label, address, phone } = req.body;
+  if (!label || !address) {
+    throw ApiError.badRequest('An address needs a label and the address itself');
+  }
+
+  req.buyer.addresses.push({ label, address, phone: phone || '' });
+  await req.buyer.save();
+
+  res.status(201).json({ success: true, data: { addresses: req.buyer.addresses } });
+});
+
+/** PATCH /api/shop/auth/addresses/:addressId */
+const updateAddress = asyncHandler(async (req, res) => {
+  const entry = req.buyer.addresses.id(req.params.addressId);
+  if (!entry) throw ApiError.notFound('Address not found');
+
+  const { label, address, phone } = req.body;
+  if (label !== undefined) entry.label = label;
+  if (address !== undefined) entry.address = address;
+  if (phone !== undefined) entry.phone = phone;
+
+  await req.buyer.save();
+
+  res.json({ success: true, data: { addresses: req.buyer.addresses } });
+});
+
+/** DELETE /api/shop/auth/addresses/:addressId */
+const deleteAddress = asyncHandler(async (req, res) => {
+  const entry = req.buyer.addresses.id(req.params.addressId);
+  if (!entry) throw ApiError.notFound('Address not found');
+
+  entry.deleteOne();
+  await req.buyer.save();
+
+  res.json({ success: true, data: { addresses: req.buyer.addresses } });
+});
+
+module.exports = {
+  register,
+  login,
+  refresh,
+  logout,
+  getMe,
+  addAddress,
+  updateAddress,
+  deleteAddress,
+};

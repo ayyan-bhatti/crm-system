@@ -60,6 +60,13 @@ export const customersApi = {
   // the list endpoint returns. See the note on the endpoint itself.
   options: (search) =>
     client.get('/customers/options', { params: { search } }).then((r) => r.data.data),
+
+  /** An AI-drafted follow-up email, never sent — text for a rep to review and send by hand. */
+  draftMessage: (id, tone) =>
+    client.post(`/customers/${id}/draft-message`, { tone }).then((r) => r.data.data),
+
+  /** Manager/admin: churn-risk flagged customers rolled up team-wide, with a narrative. */
+  churnRollup: () => client.get('/customers/churn-rollup').then((r) => r.data),
 };
 
 // --- products ---------------------------------------------------------------
@@ -72,6 +79,9 @@ export const productsApi = {
   create: (payload) => client.post('/products', payload).then((r) => r.data.data),
   update: (id, payload) => client.patch(`/products/${id}`, payload).then((r) => r.data.data),
   remove: (id) => client.delete(`/products/${id}`).then((r) => r.data),
+
+  /** Manager/admin: low-stock, actually-selling products with an AI justification each. */
+  reorderSuggestions: () => client.get('/products/reorder-suggestions').then((r) => r.data),
 };
 
 // --- orders -----------------------------------------------------------------
@@ -157,6 +167,10 @@ export const activityApi = {
 
   add: (entity, id, body) =>
     client.post(`/${entity}s/${id}/activity`, { body }).then((r) => r.data.data),
+
+  /** One AI-written paragraph over the same note thread `list` returns. */
+  summarize: (entity, id) =>
+    client.get(`/${entity}s/${id}/activity/summary`).then((r) => r.data),
 };
 
 // --- users ------------------------------------------------------------------
@@ -192,6 +206,9 @@ export const usersApi = {
 // --- dashboard + AI search --------------------------------------------------
 export const dashboardApi = {
   summary: () => client.get('/dashboard/summary').then((r) => r.data.data),
+
+  /** Manager/admin: the weekly team digest — figures plus an AI narrative. */
+  digest: () => client.get('/dashboard/digest').then((r) => r.data.data),
 };
 
 // --- audit log (admin only) -------------------------------------------------
@@ -214,6 +231,9 @@ export const changeRequestsApi = {
   /** `note` is optional; offered because "rejected" with no reason gets resubmitted. */
   reject: (id, note) =>
     client.patch(`/change-requests/${id}/reject`, note ? { note } : {}).then((r) => r.data),
+
+  /** A plain-English sentence for one request's field-level diff. */
+  summary: (id) => client.get(`/change-requests/${id}/summary`).then((r) => r.data),
 };
 
 // --- internals (admin only) -------------------------------------------------

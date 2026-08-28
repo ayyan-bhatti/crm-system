@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
-import { dashboardApi } from '../api/resources';
+import { dashboardApi, productsApi, customersApi } from '../api/resources';
 import useFetch from '../hooks/useFetch';
+import usePermissions from '../hooks/usePermissions';
 import AiSearchBar from '../components/AiSearchBar';
 import {
   ChartCard,
@@ -17,9 +18,10 @@ import {
   StatusBadge,
   EmptyState,
   Skeleton,
+  CardSkeleton,
 } from '../components/common';
 import { useAuth } from '../context/AuthContext';
-import { money, formatDate, link, td, th, token } from '../ui';
+import { money, formatDate, humanize, link, td, th, token } from '../ui';
 
 /**
  * The landing page: four headline figures, a revenue trend, two breakdowns,
@@ -31,6 +33,7 @@ import { money, formatDate, link, td, th, token } from '../ui';
  */
 export default function Dashboard() {
   const { user } = useAuth();
+  const { can } = usePermissions();
   const { data, loading, error } = useFetch(() => dashboardApi.summary(), []);
 
   if (loading) return <DashboardSkeleton />;
@@ -224,9 +227,128 @@ export default function Dashboard() {
               </div>
             )}
           </Card>
+
+          {/*
+            Manager/admin only, gated on `viewAllRecords` — the same
+            capability that already governs seeing the whole book rather than
+            one's own slice of it, since these three cards are team-wide by
+            nature (a digest across reps, stock decisions, churn across the
+            customer base). A sales rep sees nothing added here.
+          */}
+          {can.viewAllRecords && <ManagerInsights />}
         </>
       )}
     </div>
+  );
+}
+
+/**
+ * Three independent AI-backed cards. Each fetches on its own `useFetch` call
+ * so a slow or failing one never holds up the other two — unlike the summary
+ * above, there is no single response these could share.
+ */
+function ManagerInsights() {
+  return (
+    <div className="grid gap-4 lg:grid-cols-3">
+      <DigestCard />
+      <ReorderCard />
+      <ChurnCard />
+    </div>
+  );
+}
+
+function DigestCard() {
+  const { data, loading, error } = useFetch(() => dashboardApi.digest(), []);
+
+  return (
+    <Card className="p-5">
+      <h2 className="text-sm font-semibold text-ink">Weekly digest</h2>
+
+      {loading && <CardSkeleton lines={2} />}
+      <ErrorBanner message={error} />
+
+      {data && (
+        <>
+          <p className="mt-2 text-sm text-ink-2">{data.narrative}</p>
+          <dl className="mt-4 grid grid-cols-2 gap-3 text-xs">
+            <div>
+              <dt className="font-medium uppercase tracking-wide text-muted">Revenue</dt>
+              <dd className="mt-0.5 text-sm font-semibold text-ink">
+                {money(data.figures.revenue)}
+              </dd>
+            </div>
+            <div>
+              <dt className="font-medium uppercase tracking-wide text-muted">Orders</dt>
+              <dd className="mt-0.5 text-sm font-semibold text-ink">{data.figures.orders}</dd>
+            </div>
+          </dl>
+        </>
+      )}
+    </Card>
+  );
+}
+
+function ReorderCard() {
+  const { data, loading, error } = useFetch(() => productsApi.reorderSuggestions(), []);
+  const suggestions = data?.data || [];
+
+  return (
+    <Card className="p-5">
+      <h2 className="text-sm font-semibold text-ink">Reorder suggestions</h2>
+
+      {loading && <CardSkeleton lines={2} />}
+      <ErrorBanner message={error} />
+
+      {data && suggestions.length === 0 && (
+        <p className="mt-2 text-sm text-muted">Nothing needs reordering right now.</p>
+      )}
+
+      {suggestions.length > 0 && (
+        <ul className="mt-3 space-y-3">
+          {suggestions.slice(0, 4).map((item) => (
+            <li key={item.productId} className="text-sm">
+              <p className="font-medium text-ink">{item.name}</p>
+              <p className="text-xs text-ink-2">{item.justification}</p>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
+  );
+}
+
+function ChurnCard() {
+  const { data, loading, error } = useFetch(() => customersApi.churnRollup(), []);
+  const rollup = data?.data?.rollup || [];
+
+  return (
+    <Card className="p-5">
+      <h2 className="text-sm font-semibold text-ink">Churn risk, team-wide</h2>
+
+      {loading && <CardSkeleton lines={2} />}
+      <ErrorBanner message={error} />
+
+      {data && (
+        <>
+          <p className="mt-2 text-sm text-ink-2">{data.data.narrative}</p>
+
+          {rollup.length === 0 ? (
+            <p className="mt-3 text-sm text-muted">No customers flagged right now.</p>
+          ) : (
+            <ul className="mt-3 space-y-2">
+              {rollup.slice(0, 5).map((entry) => (
+                <li key={entry.customerId} className="flex items-center justify-between gap-2 text-sm">
+                  <span className="text-ink-2">{entry.name}</span>
+                  <span className="shrink-0 text-xs font-medium text-muted">
+                    {humanize(entry.label)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
+      )}
+    </Card>
   );
 }
 

@@ -110,6 +110,28 @@ describe('ProtectedRoute', () => {
 
       expect(await screen.findByText('Home screen')).toBeInTheDocument();
     });
+
+    /**
+     * `/approvals` widened from admin-only to admin+manager (storefront phase
+     * 4), for buyer-initiated requests — see the comment on that route in
+     * App.jsx. A sales rep must still be turned away.
+     */
+    it('lets a manager through a multi-role list, alongside admin', async () => {
+      authApi.me.mockResolvedValue(fakeUser({ role: 'manager' }));
+
+      renderWithProviders(<TestApp roles={['admin', 'manager']} />, { route: '/secret' });
+
+      expect(await screen.findByText('Secret screen')).toBeInTheDocument();
+    });
+
+    it('still refuses a sales rep on that same multi-role list', async () => {
+      authApi.me.mockResolvedValue(fakeUser({ role: 'sales_rep' }));
+
+      renderWithProviders(<TestApp roles={['admin', 'manager']} />, { route: '/secret' });
+
+      expect(await screen.findByText('Home screen')).toBeInTheDocument();
+      expect(screen.queryByText('Secret screen')).not.toBeInTheDocument();
+    });
   });
 });
 

@@ -1,4 +1,5 @@
 @import 'tailwindcss';
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&display=swap');
 
 /* ===========================================================================
  * Design tokens
@@ -19,26 +20,44 @@
  * ======================================================================== */
 
 @theme {
-  /* --- Surfaces & ink ---------------------------------------------------- */
-  --color-plane: #f9f9f7; /* page background */
-  --color-surface: #fcfcfb; /* cards, chart surface */
+  /*
+   * --- Surfaces & ink -----------------------------------------------------
+   * A near-black ink and a warm off-white, rather than the cooler
+   * blue-tinted neutrals this used to run — see the storefront design-round
+   * entry in BUILD_LOG.md for why: one palette across the internal CRM and
+   * the storefront, calmer here (accent used only on primary actions, per
+   * the existing btnPrimary/etc. convention below) and pushed harder there.
+   * Every component already reads these through a semantic Tailwind class
+   * (bg-plane, text-ink, …) rather than a hardcoded hex, which is what makes
+   * changing the whole app's palette a token edit here rather than a sweep
+   * through every component file.
+   */
+  --color-plane: #faf9f6; /* page background */
+  --color-surface: #ffffff; /* cards, chart surface */
   --color-raised: #ffffff; /* inputs, popovers */
 
-  --color-ink: #0b0b0b; /* primary text */
-  --color-ink-2: #52514e; /* secondary text */
-  --color-muted: #898781; /* axis labels, captions */
+  --color-ink: #0b0b0e; /* primary text */
+  --color-ink-2: #55534e; /* secondary text */
+  --color-muted: #8c887f; /* axis labels, captions */
 
-  --color-hairline: #e1e0d9; /* gridlines, card borders */
-  --color-rule: #c3c2b7; /* axis baselines, dividers */
+  --color-hairline: #e6e3da; /* gridlines, card borders */
+  --color-rule: #c8c4b7; /* axis baselines, dividers */
 
   /* --- Brand ------------------------------------------------------------- */
-  /* Categorical slot 1 doubles as the action colour, so the interface and the
-     charts share one accent instead of competing. */
-  --color-brand: #2a78d6;
-  --color-brand-strong: #1c5cab;
-  --color-brand-ink: #104281;
-  --color-brand-soft: #cde2fb;
-  --color-brand-wash: #eaf3fe;
+  /*
+   * Deep emerald, deliberately the one accent in the app rather than a
+   * gradient or a second colour "for variety" — chosen over the amber/copper
+   * alternative because it reads as trustworthy on the CRM side and still
+   * has real personality on the storefront's imagery-heavy surfaces.
+   *
+   * Categorical slot 1 doubles as the action colour, so the interface and the
+   * charts share one accent instead of competing.
+   */
+  --color-brand: #1b7a5a;
+  --color-brand-strong: #145f45;
+  --color-brand-ink: #0e4632;
+  --color-brand-soft: #cfe9dd;
+  --color-brand-wash: #eaf5f0;
 
   /* --- Status (reserved: never reused as a series colour) ---------------- */
   --color-good: #0ca30c;
@@ -57,8 +76,16 @@
   --color-neutral-wash: #f0efec;
   --color-neutral-ink: #52514e;
 
-  /* --- Categorical series (fixed order — see note above) ----------------- */
-  --color-series-1: #2a78d6; /* blue */
+  /*
+   * --- Categorical series (fixed order — see note above) -----------------
+   * Slot 1 follows the brand colour above. NOT independently re-validated
+   * for CVD-safe adjacency against slot 2 after this swap — the original
+   * ΔE check was run against the old blue, and a proper re-check needs a
+   * colour-vision simulation this round didn't have time for. Flagged here
+   * rather than silently assumed still valid; re-run the check before this
+   * chart palette is trusted again for someone with deuteranopia/protanopia.
+   */
+  --color-series-1: #1b7a5a; /* emerald (brand) */
   --color-series-2: #eb6834; /* orange */
   --color-series-3: #1baf7a; /* aqua */
   --color-series-4: #eda100; /* yellow */
@@ -67,8 +94,16 @@
   --color-series-7: #4a3aa7; /* violet */
   --color-series-8: #e34948; /* red */
 
-  /* --- Type -------------------------------------------------------------- */
-  --font-sans: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  /*
+   * --- Type -----------------------------------------------------------
+   * Inter for everything — body text, UI chrome, and the entire internal
+   * dashboard end to end. Fraunces is a SECOND, deliberately restricted
+   * face: only the storefront's marketing-feeling surfaces (hero, product
+   * headline, category headers) reach for `--font-display`; the CRM never
+   * does, so its typography stays exactly as quiet as its layout.
+   */
+  --font-sans: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-display: 'Fraunces', Georgia, 'Times New Roman', serif;
 
   /* --- Elevation --------------------------------------------------------- */
   /* Deliberately shallow. Depth comes from the hairline border; the shadow is
@@ -76,6 +111,18 @@
   --shadow-card: 0 1px 2px rgba(11, 11, 11, 0.04), 0 1px 3px rgba(11, 11, 11, 0.03);
   --shadow-lift: 0 2px 4px rgba(11, 11, 11, 0.05), 0 4px 12px rgba(11, 11, 11, 0.05);
   --shadow-pop: 0 4px 12px rgba(11, 11, 11, 0.08), 0 12px 28px rgba(11, 11, 11, 0.08);
+
+  /*
+   * --- Motion --------------------------------------------------------
+   * Two durations, not a scale: fast for a hover/press response, base for
+   * anything that enters or leaves the screen (the cart drawer, a fade-in
+   * section). Both stay under the 250ms ceiling the design brief sets so
+   * nothing reads as laggy, and both are already overridden to near-zero by
+   * the prefers-reduced-motion block below.
+   */
+  --motion-fast: 150ms;
+  --motion-base: 220ms;
+  --motion-ease: cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 /* ===========================================================================
@@ -96,12 +143,45 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Slightly tighter tracking on headings — IBM Plex Sans is a touch wide at
-   display sizes, and this keeps titles from drifting apart. */
+/* Slightly tighter tracking on headings, so titles don't drift apart at
+   display sizes. */
 h1,
 h2,
 h3 {
   letter-spacing: -0.015em;
+}
+
+.font-display {
+  font-family: var(--font-display);
+}
+
+/*
+ * A real hover state for a card or a product tile — a subtle lift, not just
+ * a colour change. Used across the storefront's product grid and cards;
+ * the internal CRM's existing Card component intentionally does not use
+ * this, staying quieter with motion per the design brief.
+ */
+.hover-lift {
+  transition: transform var(--motion-fast) var(--motion-ease), box-shadow var(--motion-fast) var(--motion-ease);
+}
+.hover-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-lift);
+}
+
+/* Content fading/rising in on load — sections and cards on the storefront. */
+@keyframes fade-rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.animate-fade-rise {
+  animation: fade-rise var(--motion-base) var(--motion-ease) both;
 }
 
 /*

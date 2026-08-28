@@ -222,8 +222,15 @@ export function PageHeader({ title, subtitle, action }) {
  *
  * `hint` and `error` are wired to `aria-describedby`, so the requirement or the
  * failure is announced with the field rather than being visual-only.
+ *
+ * `required`, when passed, marks the field two ways at once — an asterisk
+ * AND the word "Required" in the label, plus `aria-required` on the control.
+ * Colour or the asterisk alone is not enough: a screen reader user gets
+ * nothing from a symbol with no accessible name, and a colourblind user
+ * cannot rely on colour alone either. Both together is what the WCAG
+ * guidance actually asks for, not decoration.
  */
-export function Field({ label, error, children, hint, id, ...inputProps }) {
+export function Field({ label, error, children, hint, id, required = false, ...inputProps }) {
   const generatedId = useId();
   const fieldId = id || inputProps.name || generatedId;
   const hintId = `${fieldId}-hint`;
@@ -237,6 +244,12 @@ export function Field({ label, error, children, hint, id, ...inputProps }) {
     <div>
       <label className={labelClass} htmlFor={fieldId}>
         {label}
+        {required && (
+          <span className="ml-1 text-critical-ink" aria-hidden="true">
+            *
+          </span>
+        )}
+        {required && <span className="sr-only"> (Required)</span>}
       </label>
 
       {children ? (
@@ -245,6 +258,7 @@ export function Field({ label, error, children, hint, id, ...inputProps }) {
         cloneElement(children, {
           id: children.props.id || fieldId,
           'aria-describedby': describedBy || undefined,
+          'aria-required': required || undefined,
         })
       ) : (
         <input
@@ -252,6 +266,8 @@ export function Field({ label, error, children, hint, id, ...inputProps }) {
           id={fieldId}
           aria-describedby={describedBy || undefined}
           aria-invalid={error ? true : undefined}
+          aria-required={required || undefined}
+          required={required}
           {...inputProps}
         />
       )}

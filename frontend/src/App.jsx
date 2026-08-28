@@ -1,8 +1,11 @@
 import { lazy, Suspense } from 'react';
 import { BrowserRouter, Navigate, Outlet, Route, Routes } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
+import { BuyerAuthProvider } from './context/BuyerAuthContext';
+import { CartProvider } from './context/CartContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import DashboardLayout from './components/DashboardLayout';
+import ShopLayout from './components/ShopLayout';
 import ErrorBoundary from './components/ErrorBoundary';
 import { ToastProvider } from './components/Toast';
 import { Spinner } from './components/common';
@@ -57,6 +60,34 @@ const UserList = lazy(() => import('./pages/users/UserList'));
 const AuditLog = lazy(() => import('./pages/AuditLog'));
 const Approvals = lazy(() => import('./pages/Approvals'));
 const Account = lazy(() => import('./pages/Account'));
+
+const ShopHome = lazy(() => import('./pages/shop/Home'));
+const ShopProductGrid = lazy(() => import('./pages/shop/ProductGrid'));
+const ShopProductDetail = lazy(() => import('./pages/shop/ProductDetail'));
+const BuyerLogin = lazy(() => import('./pages/shop/BuyerLogin'));
+const BuyerRegister = lazy(() => import('./pages/shop/BuyerRegister'));
+const Checkout = lazy(() => import('./pages/shop/Checkout'));
+const OrderConfirmation = lazy(() => import('./pages/shop/OrderConfirmation'));
+const BuyerOrders = lazy(() => import('./pages/shop/BuyerOrders'));
+const BuyerOrderDetail = lazy(() => import('./pages/shop/BuyerOrderDetail'));
+const BuyerAccount = lazy(() => import('./pages/shop/BuyerAccount'));
+
+/**
+ * Mounts the buyer session and cart contexts around the whole `/shop` tree,
+ * and nothing else. The internal CRM never needs a buyer session or a cart,
+ * so those two providers stay scoped to the one route subtree that does —
+ * same reasoning as `AuthProvider` staying outside it, just in the other
+ * direction.
+ */
+function ShopRoot() {
+  return (
+    <BuyerAuthProvider>
+      <CartProvider>
+        <Outlet />
+      </CartProvider>
+    </BuyerAuthProvider>
+  );
+}
 
 export default function App() {
   return (
@@ -192,14 +223,41 @@ export default function App() {
                     }
                   />
 
+                  {/* Opened to managers alongside admins for buyer-initiated
+                      requests — see the backend's phase 4 note on
+                      /api/change-requests. A manager's response is filtered
+                      server-side to those, so the route guard only has to
+                      stop matching the API's own rule rather than add one. */}
                   <Route
                     path="approvals"
                     element={
-                      <ProtectedRoute roles={[ROLES.ADMIN]}>
+                      <ProtectedRoute roles={[ROLES.ADMIN, ROLES.MANAGER]}>
                         <Approvals />
                       </ProtectedRoute>
                     }
                   />
+                </Route>
+
+                {/*
+                  --- Storefront ---------------------------------------------
+                  Public, and deliberately outside <ProtectedRoute>: a
+                  shopper browses and checks out without an account, and the
+                  buyer session this tree carries is a wholly separate
+                  credential from the staff session above.
+                */}
+                <Route element={<ShopRoot />}>
+                  <Route path="shop" element={<ShopLayout />}>
+                    <Route index element={<ShopHome />} />
+                    <Route path="products" element={<ShopProductGrid />} />
+                    <Route path="products/:id" element={<ShopProductDetail />} />
+                    <Route path="login" element={<BuyerLogin />} />
+                    <Route path="register" element={<BuyerRegister />} />
+                    <Route path="checkout" element={<Checkout />} />
+                    <Route path="order-confirmation/:id" element={<OrderConfirmation />} />
+                    <Route path="account/orders" element={<BuyerOrders />} />
+                    <Route path="account/orders/:id" element={<BuyerOrderDetail />} />
+                    <Route path="account/addresses" element={<BuyerAccount />} />
+                  </Route>
                 </Route>
 
                 {/* Anything else goes home. */}
