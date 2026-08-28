@@ -800,7 +800,16 @@ async function resolveAssignee(assignedTo) {
  * forget to open one.
  */
 async function placeOrder(
-  { customerId, rawItems, status, assignedTo = null, actorId, actor = null },
+  {
+    customerId,
+    rawItems,
+    status,
+    assignedTo = null,
+    actorId,
+    actor = null,
+    source = 'internal',
+    buyerId = null,
+  },
   session
 ) {
   const customer = await Customer.findById(customerId).session(session);
@@ -847,9 +856,12 @@ async function placeOrder(
          * Not defaulted to the creator: a manager placing an order is not
          * thereby working it, and writing themselves in would put every order
          * in a manager's rep-scoped list and mean nothing was ever visibly
-         * unassigned.
+         * unassigned. A storefront order starts unassigned for the same
+         * reason a directly-placed one does — see the model comment.
          */
         assignedTo,
+        source,
+        buyerId,
       },
     ],
     { session }
@@ -1006,10 +1018,12 @@ module.exports = {
   requestOrderTransfer,
   placeOrder,
   buildOrderItems,
+  restoreStock,
   getOrder,
   createOrder,
   updateOrder,
   assignOrder,
   deleteOrder,
   orderScopeFilter,
+  ORDER_POPULATE,
 };

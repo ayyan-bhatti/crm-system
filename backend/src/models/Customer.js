@@ -74,12 +74,20 @@ const customerSchema = new mongoose.Schema({
     ref: 'User',
     default: null,
   },
-  // Who added the record. Needed for the sales_rep permission rule, which
-  // grants access to customers they *created* or are *assigned to*.
+  /**
+   * Who added the record, if a staff member did.
+   *
+   * Null for a customer matched or created from a storefront checkout — a
+   * guest or a buyer's first order has no staff actor at all. Loosened from
+   * `required: true` deliberately: every existing staff-facing write path
+   * still always supplies it (customer creation has always been a staff-only
+   * route), so nothing that worked before is affected. Only the new
+   * storefront path relies on the loosening.
+   */
   createdBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
-    required: true,
+    default: null,
   },
   createdAt: {
     type: Date,

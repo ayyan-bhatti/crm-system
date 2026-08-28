@@ -85,10 +85,23 @@ const orderSchema = new mongoose.Schema({
     },
     default: ORDER_STATUS.PENDING,
   },
+  /**
+   * The staff member who created this order — required for every order
+   * except a storefront one, which has no staff actor at all. A conditional
+   * required rather than a plain `default: null` so a bug that leaves this
+   * unset on an internal order is still caught by validation, exactly as it
+   * was before the storefront existed.
+   */
   createdBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
-    required: true,
+    required: [
+      function isStaffOrder() {
+        return this.source !== 'storefront';
+      },
+      'Order must record who created it',
+    ],
+    default: null,
   },
 
   /**

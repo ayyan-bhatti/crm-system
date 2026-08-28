@@ -1,6 +1,10 @@
 const express = require('express');
 const { issueShopCsrfToken, verifyShopCsrf } = require('../middleware/shopCsrf');
 const shopAuthRoutes = require('./shopAuthRoutes');
+const shopProductRoutes = require('./shopProductRoutes');
+const shopCartRoutes = require('./shopCartRoutes');
+const shopCheckoutRoutes = require('./shopCheckoutRoutes');
+const shopOrderRoutes = require('./shopOrderRoutes');
 
 /**
  * The storefront's route tree, mounted once at `/api/shop` in app.js.
@@ -20,5 +24,9 @@ router.use(issueShopCsrfToken);
 router.use(verifyShopCsrf);
 
 router.use('/auth', shopAuthRoutes);
+router.use('/products', shopProductRoutes);
+router.use('/cart', shopCartRoutes);
+router.use('/checkout', shopCheckoutRoutes);
+router.use('/orders', shopOrderRoutes);
 
 module.exports = router;

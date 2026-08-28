@@ -38,14 +38,25 @@ const idempotencyKeySchema = new mongoose.Schema({
     required: true,
   },
   /**
-   * Keys are scoped per user, so two users independently generating the same
-   * id cannot collide — and one user cannot probe another's keys to read their
-   * stored responses.
+   * Who is scoped by this key — a staff user, a buyer, or (for a guest
+   * storefront checkout) the caller's IP address. Two independent callers
+   * generating the same key by coincidence must not collide, and one caller
+   * must not be able to probe another's keys to read their stored responses.
+   *
+   * A plain string (`user:<id>` / `buyer:<id>` / `guest:<ip>`) rather than an
+   * ObjectId ref, because this key now scopes three different kinds of
+   * caller and only one of them is a `User`. `user` below is kept purely for
+   * debugging — it is the one case `actor` can also be resolved back to a
+   * document.
    */
+  actor: {
+    type: String,
+    required: true,
+  },
   user: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
-    required: true,
+    default: null,
   },
   /** SHA-256 of method + path + body. See the note above. */
   fingerprint: {
@@ -80,7 +91,7 @@ const idempotencyKeySchema = new mongoose.Schema({
  * the same millisecond on different server instances — a check-then-insert in
  * application code could not, because both would read "no key yet".
  */
-idempotencyKeySchema.index({ key: 1, user: 1 }, { unique: true });
+idempotencyKeySchema.index({ key: 1, actor: 1 }, { unique: true });
 
 /**
  * Keys expire after 24 hours.

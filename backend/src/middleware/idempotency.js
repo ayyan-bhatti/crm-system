@@ -60,6 +60,22 @@ function fingerprint(req) {
     .digest('hex');
 }
 
+/**
+ * Who this request is scoped to, for keys that have to work for staff, a
+ * signed-in buyer, and an anonymous guest checkout alike.
+ *
+ * A guest has no account at all, so the IP is what stands in for identity —
+ * it is a weaker scope than an account id (a shared office address could in
+ * principle collide), but the alternative is no idempotency protection for
+ * the one checkout path that needs it most: a guest's connection dropping
+ * mid-order, with nothing saved anywhere to retry against.
+ */
+function actorScope(req) {
+  if (req.user) return `user:${req.user._id}`;
+  if (req.buyer) return `buyer:${req.buyer._id}`;
+  return `guest:${req.ip}`;
+}
+
 const idempotency = asyncHandler(async (req, res, next) => {
   const key = req.get('Idempotency-Key');
   if (!key) return next();
@@ -71,12 +87,16 @@ const idempotency = asyncHandler(async (req, res, next) => {
     );
   }
 
-  const scope = { key, user: req.user._id };
+  const scope = { key, actor: actorScope(req) };
   const requestFingerprint = fingerprint(req);
 
   let reservation;
   try {
-    reservation = await IdempotencyKey.create({ ...scope, fingerprint: requestFingerprint });
+    reservation = await IdempotencyKey.create({
+      ...scope,
+      user: req.user?._id ?? null,
+      fingerprint: requestFingerprint,
+    });
   } catch (err) {
     if (err.code !== 11000) throw err;
 

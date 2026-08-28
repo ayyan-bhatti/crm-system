@@ -85,6 +85,16 @@ async function submit({ entity, entityId = null, action, payload = {}, label = '
     }
   }
 
+  /*
+   * A buyer requesting their own order's cancellation is not a `User` — see
+   * `models/ChangeRequest.js` for why `requestedBy` is polymorphic. Read off
+   * the actor's own model name rather than a caller-supplied flag, so it is
+   * impossible for a caller to mislabel who is asking: staff callers pass
+   * `req.user` (a `User` document), the buyer routes pass `req.buyer` (a
+   * `Buyer` document), and each names itself.
+   */
+  const requestedByModel = actor.constructor.modelName === 'Buyer' ? 'Buyer' : 'User';
+
   const request = await ChangeRequest.create({
     entity,
     entityId,
@@ -92,6 +102,7 @@ async function submit({ entity, entityId = null, action, payload = {}, label = '
     payload,
     label,
     requestedBy: actor._id,
+    requestedByModel,
   });
 
   log.info(
@@ -173,6 +184,30 @@ async function applyChange(request, session) {
 
   if (request.action === 'delete') {
     await doc.deleteOne({ session });
+    return doc;
+  }
+
+  /*
+   * A buyer's cancellation, unlike a manager's delete, leaves the document
+   * standing — their own order history has to keep showing an order they
+   * cancelled, not lose it. Only ever proposed against a `pending` order
+   * (enforced where the request is submitted), so in practice there is
+   * nothing to restore — but the restore runs unconditionally, off
+   * `completedAt`, for the same reason `updateOrder`'s status transition
+   * does: the rule is "restore stock if it was taken", not "restore stock if
+   * we happen to know it wasn't", and stating that once here rather than
+   * trusting the caller to have enforced it is what makes it still correct
+   * if that enforcement ever changes.
+   */
+  if (request.action === 'cancel') {
+    // Lazy required — see the note on the `create` branch above for why.
+    const { restoreStock } = require('../controllers/orderController');
+
+    if (doc.completedAt) await restoreStock(doc.items, session);
+
+    doc.status = 'cancelled';
+    doc.completedAt = null;
+    await doc.save({ session });
     return doc;
   }
 

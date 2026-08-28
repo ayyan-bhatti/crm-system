@@ -3042,3 +3042,112 @@ after the `app.js` change, since it altered request handling for every route in 
 only the new ones.
 
 **Final totals: 895 backend + 215 frontend + 11 end-to-end**, lint clean on both packages.
+
+---
+
+## Storefront, phase 3: the public catalogue, cart, checkout, and a buyer's own orders
+
+`/api/shop/products*` (public), `/api/shop/cart*` (buyer-only), `/api/shop/checkout` (guest or
+buyer), `/api/shop/orders*` (a buyer's own, plus the two requests they may make against a
+pending one). This is the phase that makes the earlier two mean something — a visitor can now
+actually browse, buy, and later ask to undo.
+
+### Two fields were missing from phase 1, and phase 3 is where that showed up
+
+`Product` needed a `description` for the catalogue to say anything about an item beyond its
+name and price — phase 1 added `imageUrl` and `category` (`category` already existed) but
+missed this one. Caught while writing the public projection, not before, which is worth
+recording rather than quietly folding into "phase 1" after the fact: reading a spec and
+building the projection it implies are different exercises, and the second one is what actually
+proves the first was complete.
+
+### The public projection is a fixed list, not the internal one minus a blocklist
+
+`GET /api/shop/products` shares nothing with `productController.js`'s handlers — no `sku`, no
+`lowStockThreshold`, and stock is a boolean rather than a count. Same reasoning as narrowing
+`/users/assignable` in the role audit: an allow-list is explicit about what leaves the server,
+so a future internal-only field arriving on `Product` is excluded by default instead of shipping
+to the public the day someone adds it and forgets this file existed.
+
+### Matching a customer by email is an atomic upsert, not a lookup then a create
+
+Two guest checkouts with the same email arriving at once must not create two `Customer`
+records — the same shape of race the stock decrement is careful about elsewhere in this app, and
+closed the same way: `findOneAndUpdate` with `upsert: true` inside the transaction, so the
+database arbitrates which of two simultaneous callers performs the insert rather than both
+reading "not found" and both writing one.
+
+It also **only sets fields on insert, never on match**. A returning buyer's second checkout
+might carry a different phone number than the one on file — that record may since have been
+corrected or annotated by a sales rep, and a checkout form overwriting it unreviewed would be a
+regression dressed as a feature. Matching links the order to the right account; keeping the CRM
+record accurate stays a person's job.
+
+### `createdBy` had to stop being unconditionally required, on two models
+
+`Order.createdBy` and `Customer.createdBy` were both `required: true`, because every write path
+that existed before this phase was a staff member acting through `protect`. A guest or a buyer
+placing an order has no staff actor at all. `Order.createdBy` is now required unless
+`source === 'storefront'`; `Customer.createdBy` is simply optional, since every staff-facing
+write path has always supplied it regardless and nothing about loosening a requirement can break
+a caller who was already meeting it.
+
+### The idempotency key had to stop assuming `req.user`
+
+`IdempotencyKey` scoped its unique index on `{ key, user }`, where `user` was a required `User`
+ref — because until this phase every caller of the middleware was staff. Checkout needed the
+same protection (a dropped response on a checkout button is the identical lost-connection
+problem, for an audience with far less recourse than staff have: nobody to ring and ask "did my
+order go through"), for three kinds of caller at once. The scope is now a plain string —
+`user:<id>` / `buyer:<id>` / `guest:<ip>` — computed once and used for both the lookup and the
+uniqueness constraint. `user` is kept as an optional field purely for debugging, the one case it
+can still be resolved to a document. This is ephemeral, 24-hour-TTL bookkeeping with no
+long-term meaning, which is why loosening its shape here carries none of the weight a change to
+`Order` or `Customer` would.
+
+### Checkout always starts an order `pending`, and never reads `status` from the client
+
+A staff-placed order may legitimately arrive already `completed` — a phone sale being entered
+after the fact. Nothing about a storefront checkout is ever after the fact: stock must not move
+until staff actually fulfil it, so the field is not merely defaulted, it is never read from the
+request body at all. Everything else about placing the order — pricing at time of purchase,
+the atomic order-numbering counter, the transactional stock guarantee — is the unmodified
+`placeOrder()` every other order in this app already goes through; `ORDER_POPULATE` is now
+exported from `orderController.js` rather than staying file-private, so the checkout response
+shares the exact same shape as every other order response instead of a second hand-written one.
+
+### The cart stores a quantity, never a price
+
+`Cart` holds `{ product, quantity }` and nothing else. Price is resolved fresh from the product
+at both the cart-viewing endpoint and at checkout — a cart is not a quote, and freezing a price
+into it would mean a product's price change silently applying to some carts and not others
+depending on when they happened to be built.
+
+### A buyer's cancel/edit request reuses the manager's queue completely, not a shadow of it
+
+`POST /api/shop/orders/:id/request-cancel` and `/request-edit` call the exact same
+`changeRequestService.submit`/`approve` a manager's customer edit or order-item edit already
+goes through — `submit` now reads `actor.constructor.modelName` to set `requestedByModel`
+(`'User'` vs `'Buyer'`, from phase 1) rather than trusting a caller-supplied flag, so it is
+structurally impossible for a route to mislabel who is asking. Approving a buyer's cancellation
+runs the identical transactional path (`applyChange`'s new `cancel` branch, mirroring the
+`updateOrder` status transition's own restore-stock logic exactly rather than a copy of it), and
+approving an edit re-prices at approval time through the same `buildOrderItems` call a manager's
+edit already uses — proven with the same test shape as the existing manager-edit-repricing test:
+raise the price between request and approval, confirm the *new* price is what gets charged.
+
+Only ever proposed against a `pending` order, checked before the request is created — once
+`completed` or `cancelled` there is nothing left to request, and the order detail screen (phase
+9) will say so in place of the buttons rather than letting the request fail after the fact.
+
+**28 new backend tests**: the public projection's absences (not just its presence — asserting
+`sku`/`lowStockThreshold`/`stockQty` are genuinely gone, not merely unread by today's frontend),
+cart add/merge/price-freshness, guest and buyer checkout including the customer-matching and
+idempotency-replay cases, a buyer's order list correctly excluding a staff-placed order and a
+colleague buyer's order (404, not 403 — a buyer has no more business learning an unrelated
+order exists than a sales rep does with a colleague's), and the cancel/edit requests end to end
+through real approval. Full suite re-run clean after the `IdempotencyKey` and `createdBy` schema
+changes, both of which affect every existing order-creation and customer-creation test in the
+app, not only the new ones.
+
+**Final totals: 923 backend + 215 frontend + 11 end-to-end**, lint clean on both packages.

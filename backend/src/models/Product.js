@@ -49,6 +49,18 @@ const productSchema = new mongoose.Schema({
     trim: true,
     default: '',
   },
+  /**
+   * Storefront copy — a sentence or two a shopper reads, not an internal
+   * note. Optional and empty by default, same reasoning as `imageUrl`: every
+   * product that existed before the storefront did still displays correctly,
+   * just with no description shown rather than a validation failure.
+   */
+  description: {
+    type: String,
+    trim: true,
+    default: '',
+    maxlength: [2000, 'Description cannot exceed 2000 characters'],
+  },
   createdAt: {
     type: Date,
     default: Date.now,

@@ -120,7 +120,8 @@ const getProduct = asyncHandler(async (req, res) => {
 
 /** POST /api/products — managers and admins only. */
 const createProduct = asyncHandler(async (req, res) => {
-  const { name, sku, price, stockQty, category, lowStockThreshold } = req.body;
+  const { name, sku, price, stockQty, category, lowStockThreshold, imageUrl, description } =
+    req.body;
 
   const product = await Product.create({
     name,
@@ -129,6 +130,8 @@ const createProduct = asyncHandler(async (req, res) => {
     stockQty,
     category,
     lowStockThreshold,
+    imageUrl,
+    description,
   });
 
   await recordAudit(req, {
@@ -149,7 +152,16 @@ const updateProduct = asyncHandler(async (req, res) => {
   // Snapshotted before any field is touched — see the note in customerController.
   const before = product.toObject();
 
-  const editable = ['name', 'sku', 'price', 'stockQty', 'category', 'lowStockThreshold'];
+  const editable = [
+    'name',
+    'sku',
+    'price',
+    'stockQty',
+    'category',
+    'lowStockThreshold',
+    'imageUrl',
+    'description',
+  ];
   editable.forEach((field) => {
     if (req.body[field] !== undefined) product[field] = req.body[field];
   });

@@ -61,4 +61,43 @@ const protectBuyer = asyncHandler(async (req, res, next) => {
   return next();
 });
 
-module.exports = { protectBuyer };
+/**
+ * Attach `req.buyer` if the caller is signed in, without requiring it.
+ *
+ * Checkout is the one route a guest and a signed-in buyer both use — the
+ * whole reason a guest checkout is supported at all. This is `protectBuyer`
+ * with the "or else fail" removed: a present-and-valid session populates
+ * `req.buyer` exactly as it would there, a missing or invalid one is treated
+ * as "checking out as a guest" rather than an error. Anything downstream
+ * that actually requires a buyer (the cart, `/api/shop/auth/me`) still uses
+ * `protectBuyer`, which does fail.
+ */
+const attachBuyerIfPresent = asyncHandler(async (req, res, next) => {
+  const header = req.headers.authorization || '';
+
+  let token = null;
+
+  if (header.startsWith('Bearer ')) {
+    token = header.slice('Bearer '.length).trim();
+  } else if (req.cookies?.[SHOP_ACCESS_COOKIE]) {
+    token = req.cookies[SHOP_ACCESS_COOKIE];
+  }
+
+  if (!token) return next();
+
+  let payload;
+  try {
+    payload = verifyToken(token);
+  } catch {
+    return next();
+  }
+
+  if (payload.kind !== 'buyer') return next();
+
+  const buyer = await Buyer.findById(payload.id);
+  if (buyer) req.buyer = buyer;
+
+  return next();
+});
+
+module.exports = { protectBuyer, attachBuyerIfPresent };
