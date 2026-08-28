@@ -66,7 +66,7 @@ export default function AcceptInvite() {
       await refresh();
 
       toast.success('Welcome to SimpleCRM.');
-      navigate('/', { replace: true });
+      navigate('/crm', { replace: true });
     } catch (err) {
       setError(errorMessage(err, 'Could not activate the account'));
       setSubmitting(false);
@@ -159,7 +159,7 @@ function InviteProblem({ message }) {
           Ask whoever invited you to send a new invitation.
         </p>
         <p className="mt-5 text-sm">
-          <Link to="/login" className={link}>
+          <Link to="/crm/login" className={link}>
             Back to sign in
           </Link>
         </p>

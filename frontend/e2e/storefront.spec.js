@@ -25,6 +25,15 @@ const BUYER = {
 
 /** Sign in to the internal CRM through the real form. */
 async function signInStaff(page, creds) {
+  await page.goto('/crm/login');
+  await page.getByLabel(/email/i).fill(creds.email);
+  await page.getByLabel(/password/i).fill(creds.password);
+  await page.getByRole('button', { name: /sign in/i }).click();
+  await expect(page).not.toHaveURL(/\/crm\/login/);
+}
+
+/** Sign in to the storefront through the real buyer form. */
+async function signInBuyer(page, creds = BUYER) {
   await page.goto('/login');
   await page.getByLabel(/email/i).fill(creds.email);
   await page.getByLabel(/password/i).fill(creds.password);
@@ -32,18 +41,9 @@ async function signInStaff(page, creds) {
   await expect(page).not.toHaveURL(/\/login/);
 }
 
-/** Sign in to the storefront through the real buyer form. */
-async function signInBuyer(page, creds = BUYER) {
-  await page.goto('/shop/login');
-  await page.getByLabel(/email/i).fill(creds.email);
-  await page.getByLabel(/password/i).fill(creds.password);
-  await page.getByRole('button', { name: /sign in/i }).click();
-  await expect(page).not.toHaveURL(/\/shop\/login/);
-}
-
 test.describe('Catalogue', () => {
   test('the home page shows the seeded product as featured', async ({ page }) => {
-    await page.goto('/shop');
+    await page.goto('/');
 
     await expect(page.getByRole('heading', { name: /featured/i })).toBeVisible();
     await expect(page.getByRole('link', { name: /Blue Widget/i })).toBeVisible();
@@ -52,7 +52,7 @@ test.describe('Catalogue', () => {
   test('the catalogue lists it, and the search box finds it via the fallback path', async ({
     page,
   }) => {
-    await page.goto('/shop/products');
+    await page.goto('/products');
     await expect(page.getByRole('link', { name: /Blue Widget/i })).toBeVisible();
 
     // No GEMINI_API_KEY in this environment, so this exercises
@@ -70,7 +70,7 @@ test.describe('Catalogue', () => {
   test('a search for nothing that exists returns no matches, not stale results', async ({
     page,
   }) => {
-    await page.goto('/shop/products');
+    await page.goto('/products');
 
     const searchBox = page.getByLabel(/search products/i);
     await searchBox.fill('zzznonexistentproductzzz');
@@ -82,10 +82,10 @@ test.describe('Catalogue', () => {
 
 test.describe('Product detail and guest cart', () => {
   test('shows the real product and adds it to the cart', async ({ page }) => {
-    await page.goto('/shop/products');
+    await page.goto('/products');
     await page.getByRole('link', { name: /Blue Widget/i }).click();
 
-    await expect(page).toHaveURL(/\/shop\/products\/[a-f0-9]{24}/);
+    await expect(page).toHaveURL(/\/products\/[a-f0-9]{24}/);
     await expect(page.getByRole('heading', { name: 'Blue Widget' })).toBeVisible();
     await expect(page.getByText('$25.00')).toBeVisible();
     await expect(page.getByText(/in stock/i)).toBeVisible();
@@ -106,7 +106,7 @@ test.describe('Product detail and guest cart', () => {
   test('the guest cart is localStorage-backed and survives a reload with no network call', async ({
     page,
   }) => {
-    await page.goto('/shop/products');
+    await page.goto('/products');
     await page.getByRole('link', { name: /Blue Widget/i }).click();
     await page.getByRole('button', { name: /add to cart/i }).click();
     await expect(page.getByLabel('Cart, 1 item')).toBeVisible();
@@ -128,11 +128,18 @@ test.describe('Product detail and guest cart', () => {
   });
 });
 
-test.describe('Guest checkout', () => {
-  test('places an order without an account and shows real details on confirmation', async ({
+test.describe('Checkout requires a buyer account', () => {
+  /**
+   * Guest checkout was removed from the FRONTEND (Checkout.jsx) — the
+   * backend endpoint still accepts a guest payload (see
+   * `shopCheckoutController` and `attachBuyerIfPresent`), it is just
+   * unreachable from this UI now. A guest can still browse and build a
+   * cart freely; reaching the checkout form requires signing in.
+   */
+  test('sends a guest with items in the cart to sign in instead of a guest checkout form', async ({
     page,
   }) => {
-    await page.goto('/shop/products');
+    await page.goto('/products');
     await page.getByRole('link', { name: /Blue Widget/i }).click();
 
     await page.getByLabel(/quantity/i).selectOption('2');
@@ -142,45 +149,36 @@ test.describe('Guest checkout', () => {
     await page.getByLabel(/cart, 2 items/i).click();
     await page.getByRole('link', { name: /checkout/i }).click();
 
-    await expect(page).toHaveURL(/\/shop\/checkout/);
-    await page.getByLabel(/^name/i).fill('Zainab Malik');
-    await page.getByLabel(/email/i).fill('zainab.guest@example.com');
-    await page.getByLabel(/^address/i).fill('12 Clifton Road');
-    await page.getByLabel(/^city$/i).fill('Karachi');
+    // No guest delivery-details form any more — straight to sign-in.
+    await expect(page).toHaveURL(/\/login/);
+    await expect(page.getByLabel(/^name/i)).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /place order/i })).toHaveCount(0);
 
-    await page.getByRole('button', { name: /place order/i }).click();
-
-    await expect(page).toHaveURL(/\/shop\/order-confirmation\/[a-f0-9]{24}/);
-    await expect(page.getByRole('heading', { name: /thank you for your order/i })).toBeVisible();
-
-    // Real order details from the response, not a generic success message.
-    await expect(page.getByRole('cell', { name: 'Blue Widget' })).toBeVisible();
-    await expect(page.getByRole('cell', { name: '2', exact: true })).toBeVisible();
-    await expect(page.getByText('$50.00').first()).toBeVisible();
-    await expect(page.getByText(/pending/i)).toBeVisible();
-
-    // Guest confirmation has no "view your orders" link — there is no
-    // session for that link to be scoped to.
-    await expect(page.getByRole('link', { name: /view your orders/i })).toHaveCount(0);
+    // The cart survives the round trip — it lives in localStorage,
+    // untouched by this redirect (see CartContext's guest-cart merge,
+    // exercised for real by the "Cart merge and buyer checkout" flow below).
+    const stored = await page.evaluate(() => localStorage.getItem('simplecrm_shop_cart'));
+    expect(JSON.parse(stored)).toHaveLength(1);
   });
 });
 
 test.describe('Buyer registration and session', () => {
   test('registers a new buyer account', async ({ page }) => {
-    await page.goto('/shop/register');
+    await page.goto('/register');
 
     await page.getByLabel(/^name/i).fill(BUYER.name);
     await page.getByLabel(/email/i).fill(BUYER.email);
     await page.getByLabel(/password/i).fill(BUYER.password);
     await page.getByRole('button', { name: /create account/i }).click();
 
-    // Registration signs the buyer straight in and lands on the shop home.
-    await expect(page).toHaveURL(/\/shop$/);
+    // Registration signs the buyer straight in and lands on the shop home
+    // (the app's front door, at "/" — see the note at the top of App.jsx).
+    await expect(page).toHaveURL(/\/$/);
     await expect(page.getByText(new RegExp(`hi, ${BUYER.name.split(' ')[0]}`, 'i'))).toBeVisible();
   });
 
   test('rejects a weak password with a visible message', async ({ page }) => {
-    await page.goto('/shop/register');
+    await page.goto('/register');
 
     await page.getByLabel(/^name/i).fill('Weak Password');
     await page.getByLabel(/email/i).fill('weak.password@example.com');
@@ -188,7 +186,7 @@ test.describe('Buyer registration and session', () => {
     await page.getByRole('button', { name: /create account/i }).click();
 
     await expect(page.getByText(/at least 10 characters/i)).toBeVisible();
-    await expect(page).toHaveURL(/\/shop\/register/);
+    await expect(page).toHaveURL(/\/register/);
   });
 
   test('signs in and keeps the session across a reload, then signs out', async ({ page }) => {
@@ -232,7 +230,7 @@ test.describe('Buyer registration and session', () => {
     // Signing in as staff, in the same context, must not have touched the
     // buyer session that was already open.
     await buyerPage.reload();
-    await expect(buyerPage).not.toHaveURL(/\/shop\/login/);
+    await expect(buyerPage).not.toHaveURL(/\/login/);
     await expect(
       buyerPage.getByText(new RegExp(`hi, ${BUYER.name.split(' ')[0]}`, 'i'))
     ).toBeVisible();
@@ -245,7 +243,7 @@ test.describe('Buyer registration and session', () => {
 test.describe('Buyer address book', () => {
   test('adds an address and it appears on the account page', async ({ page }) => {
     await signInBuyer(page);
-    await page.goto('/shop/account/addresses');
+    await page.goto('/account/addresses');
 
     await page.getByRole('button', { name: /add address/i }).click();
     await page.getByLabel(/label/i).fill('Home');
@@ -270,7 +268,7 @@ test.describe('Cart merge and buyer checkout', () => {
   test('a guest cart merges into the buyer account on login, then checks out', async ({
     page,
   }) => {
-    await page.goto('/shop/products');
+    await page.goto('/products');
     await page.getByRole('link', { name: /Blue Widget/i }).click();
     await page.getByRole('button', { name: /add to cart/i }).click();
     await expect(page.getByLabel('Cart, 1 item')).toBeVisible();
@@ -289,7 +287,7 @@ test.describe('Cart merge and buyer checkout', () => {
     await expect(drawer.getByText('Blue Widget')).toBeVisible();
     await drawer.getByRole('link', { name: /checkout/i }).click();
 
-    await expect(page).toHaveURL(/\/shop\/checkout/);
+    await expect(page).toHaveURL(/\/checkout/);
     // Signed in with a saved address: no guest form, the saved address is
     // pre-selected (Checkout.jsx defaults to the first one).
     await expect(page.getByText('Home', { exact: true })).toBeVisible();
@@ -297,7 +295,7 @@ test.describe('Cart merge and buyer checkout', () => {
 
     await page.getByRole('button', { name: /place order/i }).click();
 
-    await expect(page).toHaveURL(/\/shop\/order-confirmation\/[a-f0-9]{24}/);
+    await expect(page).toHaveURL(/\/order-confirmation\/[a-f0-9]{24}/);
     await expect(page.getByRole('heading', { name: /thank you for your order/i })).toBeVisible();
     await expect(page.getByRole('link', { name: /view your orders/i })).toBeVisible();
   });
@@ -308,14 +306,14 @@ test.describe('Buyer order history and actions', () => {
     page,
   }) => {
     await signInBuyer(page);
-    await page.goto('/shop/account/orders');
+    await page.goto('/account/orders');
 
     await expect(page.getByRole('heading', { name: 'Your orders', exact: true })).toBeVisible();
     const orderLink = page.getByRole('link').filter({ hasText: /^ORD-|^#/ }).first();
     await expect(orderLink).toBeVisible();
     await orderLink.click();
 
-    await expect(page).toHaveURL(/\/shop\/account\/orders\/[a-f0-9]{24}/);
+    await expect(page).toHaveURL(/\/account\/orders\/[a-f0-9]{24}/);
     await expect(page.getByRole('cell', { name: 'Blue Widget' })).toBeVisible();
     await expect(page.getByText('$25.00').first()).toBeVisible();
   });
@@ -324,7 +322,7 @@ test.describe('Buyer order history and actions', () => {
     page,
   }) => {
     await signInBuyer(page);
-    await page.goto('/shop/account/orders');
+    await page.goto('/account/orders');
     await page.getByRole('link').filter({ hasText: /^ORD-|^#/ }).first().click();
 
     await page.getByRole('button', { name: /request different quantities/i }).click();
@@ -351,7 +349,7 @@ test.describe('Staff decide the buyer requests', () => {
     page,
   }) => {
     await signInStaff(page, ADMIN);
-    await page.goto('/approvals');
+    await page.goto('/crm/approvals');
 
     await expect(page.getByText(/customer request/i)).toBeVisible();
     await expect(page.getByText(/change items/i)).toBeVisible();
@@ -363,7 +361,7 @@ test.describe('Staff decide the buyer requests', () => {
 
   test('the approved edit is reflected on the buyer’s order', async ({ page }) => {
     await signInBuyer(page);
-    await page.goto('/shop/account/orders');
+    await page.goto('/account/orders');
     await page.getByRole('link').filter({ hasText: /^ORD-|^#/ }).first().click();
 
     // Quantity 3 at $25 — the edit requested above, now actually applied.
@@ -377,7 +375,7 @@ test.describe('Staff decide the buyer requests', () => {
     // is still pending after the admin's edit above, so this is allowed.
     const buyerPage = await page.context().newPage();
     await signInBuyer(buyerPage);
-    await buyerPage.goto('/shop/account/orders');
+    await buyerPage.goto('/account/orders');
     await buyerPage.getByRole('link').filter({ hasText: /^ORD-|^#/ }).first().click();
     buyerPage.once('dialog', (dialog) => dialog.accept());
     await buyerPage.getByRole('button', { name: /request cancellation/i }).click();
@@ -387,7 +385,7 @@ test.describe('Staff decide the buyer requests', () => {
     await buyerPage.close();
 
     await signInStaff(page, MANAGER);
-    await page.goto('/approvals');
+    await page.goto('/crm/approvals');
 
     // Per the phase-4 RBAC rule, a manager's queue is the buyer-request
     // subset of the same list an admin sees — proven here by the pill being
@@ -402,7 +400,7 @@ test.describe('Staff decide the buyer requests', () => {
     page,
   }) => {
     await signInBuyer(page);
-    await page.goto('/shop/account/orders');
+    await page.goto('/account/orders');
     await page.getByRole('link').filter({ hasText: /^ORD-|^#/ }).first().click();
 
     await expect(page.getByText(/^cancelled$/i)).toBeVisible();

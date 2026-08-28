@@ -3377,4 +3377,156 @@ exact-length rejection, and the change-request summary's manager/buyer split reu
 phase 4's `assertMayDecide`. Full suite re-run clean — **958 backend tests, in 118 seconds**,
 confirming nothing in this phase is making a live network call by accident anymore.
 
+## Storefront, phase 7: the buyer-facing pages, and a checkout race the tests caught
+
+Everything the previous six phases built an API for finally got a screen. `BuyerAuthContext`
+and `CartContext` sit above a new `ShopRoot` wrapper in `App.jsx`, scoped only to the
+`/shop` subtree — the internal `AuthContext` never enters that tree and vice versa, the
+same one-directional isolation the backend has kept since phase 2. Pages: `Home`,
+`ProductGrid` (category filter + the phase-6 NL search), `ProductDetail` (add-to-cart,
+recommendations), `BuyerLogin`/`BuyerRegister`, `Checkout` (guest form or saved-address
+picker), `OrderConfirmation`, `BuyerOrders`, `BuyerOrderDetail` (pending-only cancel/edit
+requests), `BuyerAccount` (address book). On the CRM side: `Approvals` now shows a
+"Customer request" pill and falls back to the buyer's email instead of a blank role column
+when `requestedByModel === 'Buyer'`; `Dashboard` gained a manager/admin-only
+`ManagerInsights` section wrapping the digest, reorder-suggestions and churn-rollup cards
+from phase 6, each on its own `useFetch` so one slow card never blocks the others.
+
+**A backend gap found before any frontend code was written against it**: `Buyer.addresses`
+existed and `Checkout` needed to read from it, but nothing let a buyer ever populate it —
+there was no route. Added `addAddress`/`updateAddress`/`deleteAddress` to
+`shopAuthController.js` and their routes before starting the UI, specifically to avoid
+building a screen against a contract that didn't exist yet.
+
+**Real bug, found and fixed by review rather than by a test that happened to catch it**: a
+signed-in buyer's server cart loads from `CartContext`'s effect, which cannot run until
+after the render that first sees `isSignedIn: true` has already committed — one frame where
+`isSignedIn` is true and `items` is still `[]`. `Checkout`'s empty-cart guard fired on that
+stale frame and permanently redirected a signed-in buyer with a full cart back to the
+product grid. Fixed with React's documented "adjust state during render" pattern:
+`CartContext` compares `isSignedIn` against its previous value during render and sets
+`loading` true the instant it flips, so the very first render that sees the sign-in also
+reports "still loading" — `Checkout` waits on that flag alongside its own auth-loading
+check. The merge-once-per-sign-in effect itself was untouched.
+
+**33 new frontend tests** (Field's `required` rendering, `CartContext`'s guest/buyer/merge
+behaviour including the once-per-sign-in guarantee across re-renders, `BuyerAuthContext`'s
+401-is-not-an-error handling, `Checkout`'s full guest and signed-in paths, `BuyerOrderDetail`'s
+pending-only actions) plus an extended `ProtectedRoute` test for the multi-role
+`/approvals` guard. **Frontend: 248/248 passing, lint clean, build succeeds.**
+
+## Storefront, phase 8: end-to-end coverage for the whole buyer journey
+
+Everything up to this point had been proven by mocked component tests or, on the backend,
+Supertest against Express directly — nothing had driven a real browser through the real
+`/api/shop/*` cookie and CSRF machinery the way `e2e/order-flow.spec.js` already does for
+staff auth. Added `e2e/storefront.spec.js`: catalogue browse and search fallback, guest
+cart survives a reload with zero network calls, guest checkout to a real confirmation page,
+buyer registration and login, the address book, guest-cart-to-buyer-cart merge on sign-in
+followed by checkout with a saved address, order history and detail, a buyer's cancel and
+edit requests (including the second-request-refused-while-one-is-pending case), an admin
+and a newly-seeded manager each deciding a buyer-originated request in `Approvals`, and —
+the one assertion that matters most architecturally — that `shop_access`/`shop_refresh`
+and `simplecrm_access`/`simplecrm_refresh` are distinct, both httpOnly, and one session in
+a browser context is unaffected by the other.
+
+**Real bug, found only because this was a real browser and not a mock**: registering or
+logging in as a buyer landed on the empty order-history page instead of wherever the flow
+should have sent them. `BuyerRegister`/`BuyerLogin` both guard `isSignedIn` with a redirect
+to account/orders — correct for someone arriving already signed in — but `register()`/
+`login()` flip `isSignedIn` true via context before the page's own post-submit `navigate()`
+runs, and the guard's `<Navigate>` commits from an effect, so it can win the race and
+overwrite the intended destination. Fixed identically in both files with a `justSubmitted`
+ref, set synchronously at the start of the submit handler and checked by the guard, reset
+to `false` on a failed submission so the guard still behaves correctly if the user is later
+signed in some other way.
+
+`backend/scripts/e2eServer.js` gained a seeded manager account (`Bilal Ahmed`) alongside the
+existing admin — needed to exercise the phase-5 RBAC extension end to end, which had zero
+prior E2E coverage. **Playwright: 29/29 passing** (11 existing staff-flow specs, unchanged,
+plus 18 new). Backend and frontend suites re-confirmed clean throughout: **962/962 backend,
+248/248 frontend** (the backend total moved from 958 to 962 between phases from ordinary
+test additions, not a regression — confirmed by a clean serial `npm test` run).
+
+## Storefront, phase 9: the storefront becomes the front door
+
+Explicit correction from the person running this project: opening the app's root URL was
+still landing on the staff login screen, indistinguishable from before any of this work
+started, because the CRM's protected dashboard had owned `/` since before phase 1 and the
+storefront had only ever been reachable at `/shop`. The instruction was direct — this is
+now an e-commerce site with a CRM tucked on the side, not the other way round — so the two
+route trees in `App.jsx` swapped places. The storefront (`ShopHome`, `ProductGrid`,
+`ProductDetail`, `BuyerLogin`/`Register`, `Checkout`, order confirmation, and the whole
+`/account/*` buyer tree) now sits at the root with no prefix; every CRM route, staff auth
+included, moved under `/crm` (`/crm/login`, `/crm`, `/crm/customers`, …). `ShopLayout`
+gained one small "CRM" link in its header — deliberately last in the row and styled as the
+least prominent element there, since staff are a tiny fraction of that header's audience
+and the link exists only so they have a way in. `ProtectedRoute`, `Login`, and
+`DashboardLayout` were updated to redirect to and from `/crm/*` instead of the old bare
+paths, and every internal `Link`/`navigate()` across both the CRM and storefront pages was
+swept to match — 40-odd call sites across roughly thirty files, found by grepping for every
+`to="/`, `` to={`/ ``, and `navigate('/` / `` navigate(`/ `` in the tree rather than trusting
+memory of which files touch routing.
+
+**Guest checkout was turned off, deliberately not removed.** The instruction was explicit:
+a guest can add to cart, but buying requires a buyer account. `Checkout.jsx` now checks
+`isSignedIn` before rendering anything and redirects an unauthenticated visitor to
+`/login` with `state.from: '/checkout'`, so signing in returns them straight back — the
+guest form and its client-side validator were deleted outright rather than left dead in the
+file. The backend endpoint (`shopCheckoutController` + `attachBuyerIfPresent`) and its 28
+existing tests were left exactly as they were: a documented, deliberate choice to restrict
+the *product's* checkout flow at the one layer that actually defines the user's experience,
+without discarding a working, tested, already-secure capability nobody asked to have
+deleted from the API.
+
+**AI features moved to where their subject lives, per explicit instruction** ("features
+associated to customers should be in customers tab and product tab"). `Dashboard`'s
+`ManagerInsights` — added only in phase 7 — is gone; it held three cards, and two of them
+were never dashboard content in the first place. `ReorderCard` moved to `ProductList`
+(`ReorderSuggestionsCard`, gated on `can.viewAllRecords` since a sales rep can read products
+but not this call). `ChurnCard` moved to `CustomerList` (`ChurnRollupCard`, no extra gate
+needed — reaching that page at all already requires the same `[ADMIN, MANAGER]` the backend
+requires for churn-rollup). Only `DigestCard` stayed on `Dashboard`, because a team-wide
+weekly digest genuinely is dashboard content and nothing else. Two features that existed on
+the backend since phase 6 but had **never been wired to any UI at all** were added now, not
+before: `DraftMessageCard` on `CustomerDetail` (tone selector, on-demand — never
+auto-fetched, since every draft is a fresh paid model call) using the existing
+`customersApi.draftMessage`, and an on-demand "Summarize this thread" button added directly
+to the shared `ActivityTimeline` component, which means it appears on both `CustomerDetail`
+and `OrderDetail` for free. `Approvals` gained a per-row "AI summary" button using
+`changeRequestsApi.summary`, needing no extra role gate since the list endpoint already
+filters each viewer to requests they're allowed to decide.
+
+**A class of bug the routing swap would otherwise have shipped silently**: every backend
+email that links back into the app — invite links, password-reset links, the
+account-request notification an admin gets, the "your account is ready" notification an
+applicant gets — built its link with the OLD bare path (`/accept-invite`, `/reset-password`,
+`/users`, `/login`). None of those pages exist at those paths anymore; a real user clicking
+any of these emails would have landed on the storefront home with no error and no idea why.
+Found by grepping the backend for every `publicUrl(` call rather than waiting for someone to
+report a broken email, and fixed in `inviteService.js`, `passwordResetService.js`,
+`authController.js`, and `userController.js` — all four now build `/crm/...` links. Two
+backend test assertions had the old path hard-coded into an anchored regex/substring
+(`publicUrl.test.js`'s invite-link format check, `passwordReset.test.js`'s reset-link
+substring) and were updated to match; every other existing assertion on these links used an
+unanchored pattern and needed no change.
+
+**What broke and was fixed to match, not weakened to pass**: 5 frontend test files and both
+Playwright specs encoded the old route shape or the old guest-checkout behaviour directly.
+`ProtectedRoute.test.jsx`'s own mini route table declared `/login`/`/` instead of
+`/crm/login`/`/crm`. `Login.test.jsx`, `PasswordReset.test.jsx`, and
+`BuyerOrderDetail.test.jsx` asserted stale `href`/redirect targets. `Checkout.test.jsx`'s
+entire `as a guest` block (4 tests) tested a form that no longer exists — replaced with one
+test asserting the new sign-in redirect and the `state.from` round-trip, following the same
+`<Navigate>`-assertion pattern already used by `BuyerOrderDetail.test.jsx`; the empty-cart
+test was rewritten for a signed-in buyer, since an unauthenticated visitor now never reaches
+that branch at all. Both E2E specs got the same prefix swap, plus `storefront.spec.js`'s own
+guest-checkout scenario was rewritten to assert the sign-in redirect instead of a completed
+guest order, with the guest's cart confirmed still intact in `localStorage` across the
+round trip.
+
+**Final totals: 962 backend + 245 frontend (245, not 248 — three tests removed were the
+guest-checkout-form assertions for behaviour that was deliberately deleted, not weakened)
++ 29 end-to-end, all clean. Lint and production build clean on both packages.**
+
 **Final totals: 958 backend + 216 frontend + 11 end-to-end**, lint clean on both packages.

@@ -203,7 +203,7 @@ describe('invite links on an unconfigured deployment', () => {
 
     expect(res.status).toBe(201);
     expect(res.body.meta.inviteLink).toMatch(
-      /^https:\/\/crm-system\.vercel\.app\/accept-invite\?token=[a-f0-9]{64}$/
+      /^https:\/\/crm-system\.vercel\.app\/crm\/accept-invite\?token=[a-f0-9]{64}$/
     );
     expect(res.body.meta.inviteLink).not.toContain('localhost');
   });

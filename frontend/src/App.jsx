@@ -26,20 +26,31 @@ import {
 /**
  * Route table.
  *
- * Two public routes; everything else sits inside <ProtectedRoute>, which also
- * renders the shared dashboard shell. Where a route is limited to certain roles
- * (product editing, user management) the `roles` prop redirects anyone else
- * home — the API enforces the same rules, so this is about not showing people
- * screens they cannot use.
+ * THE APP'S PRIMARY IDENTITY IS THE STOREFRONT, NOT THE CRM.
  *
- * CODE SPLITTING: the authenticated pages are lazy-loaded, the two auth pages
- * are not. The charting library alone is most of the app's JavaScript, and
- * bundling it with the login screen means every visitor downloads it before
- * they can type a password. Splitting at the route boundary lets each page
- * arrive when it is actually needed.
+ * Everything at the root — "/", "/products", "/login", "/checkout" and so on
+ * — is the public shop: what a visitor sees the moment they open the link,
+ * signed in or not. The internal CRM is deliberately the SECONDARY thing,
+ * tucked under "/crm" and reached from a small link in the shop header
+ * rather than owning the root. That is the inverse of how this app started
+ * (the CRM used to own "/"), and the swap is the point: this is now an
+ * e-commerce storefront with a CRM on the side, not a CRM with a storefront
+ * bolted on.
  *
- * Note "/customers/new" is declared before "/customers/:id", otherwise "new"
- * would be captured as an id.
+ * Two public CRM auth routes; everything else CRM-side sits inside
+ * <ProtectedRoute>, which also renders the shared dashboard shell. Where a
+ * route is limited to certain roles (product editing, user management) the
+ * `roles` prop redirects anyone else to "/crm" — the API enforces the same
+ * rules, so this is about not showing people screens they cannot use.
+ *
+ * CODE SPLITTING: the authenticated pages are lazy-loaded, the two CRM auth
+ * pages are not. The charting library alone is most of the app's JavaScript,
+ * and bundling it with the login screen means every visitor downloads it
+ * before they can type a password. Splitting at the route boundary lets each
+ * page arrive when it is actually needed.
+ *
+ * Note "/crm/customers/new" is declared before "/crm/customers/:id",
+ * otherwise "new" would be captured as an id.
  */
 
 const Dashboard = lazy(() => import('./pages/Dashboard'));
@@ -106,152 +117,23 @@ export default function App() {
                 this needs. */}
             <Suspense fallback={<Spinner full />}>
               <Routes>
-                {/* --- Public ----------------------------------------------- */}
-                <Route path="/login" element={<Login />} />
-                <Route path="/register" element={<Register />} />
-                {/* Not lazy-loaded: someone locked out of their account is the
-                    last person who should wait for a chunk to download. */}
-                <Route path="/forgot-password" element={<ForgotPassword />} />
-                <Route path="/reset-password" element={<ResetPassword />} />
-                {/* Public: the invitee has no account to authenticate with
-                    until they have been through this page. */}
-                <Route path="/accept-invite" element={<AcceptInvite />} />
-
-                {/* --- Authenticated ---------------------------------------- */}
-                <Route
-                  element={
-                    <ProtectedRoute>
-                      <DashboardLayout />
-                    </ProtectedRoute>
-                  }
-                >
-                  <Route index element={<Dashboard />} />
-
-              {/* Every signed-in user has one, whatever their role. */}
-              <Route path="account" element={<Account />} />
-
-                  {/*
-                    The whole customer section is behind a guard, not just its
-                    write screens. A sales rep typing /customers into the
-                    address bar has to land somewhere sensible rather than on a
-                    page that renders and then fills with 403s.
-
-                    The write screens are NOT separately gated: a manager reaches
-                    them and submitting queues a change request for an admin to
-                    approve. Hiding them would turn "needs approval" into "not
-                    allowed", which is a different rule.
-                  */}
-                  <Route
-                    path="customers"
-                    element={
-                      <ProtectedRoute roles={CUSTOMER_VIEW_ROLES}>
-                        <Outlet />
-                      </ProtectedRoute>
-                    }
-                  >
-                    <Route index element={<CustomerList />} />
-                    <Route path="new" element={<CustomerForm />} />
-                    <Route path=":id" element={<CustomerDetail />} />
-                    <Route path=":id/edit" element={<CustomerForm />} />
-                  </Route>
-
-                  <Route path="products">
-                    <Route index element={<ProductList />} />
-                    <Route
-                      path="new"
-                      element={
-                        <ProtectedRoute roles={PRODUCT_WRITE_ROLES}>
-                          <ProductForm />
-                        </ProtectedRoute>
-                      }
-                    />
-                    <Route path=":id" element={<ProductDetail />} />
-                    <Route
-                      path=":id/edit"
-                      element={
-                        <ProtectedRoute roles={PRODUCT_WRITE_ROLES}>
-                          <ProductForm />
-                        </ProtectedRoute>
-                      }
-                    />
-                  </Route>
-
-                  <Route path="orders">
-                    <Route index element={<OrderList />} />
-                    {/*
-                      A rep fulfils orders rather than agreeing them, and has no
-                      customer book to choose a customer from — the form could
-                      not be completed even if the route allowed it.
-                    */}
-                    <Route
-                      path="new"
-                      element={
-                        <ProtectedRoute roles={ORDER_WRITE_ROLES}>
-                          <OrderForm />
-                        </ProtectedRoute>
-                      }
-                    />
-                    <Route path=":id" element={<OrderDetail />} />
-                    <Route
-                      path=":id/edit"
-                      element={
-                        <ProtectedRoute roles={ORDER_WRITE_ROLES}>
-                          <OrderForm />
-                        </ProtectedRoute>
-                      }
-                    />
-                  </Route>
-
-                  <Route
-                    path="users"
-                    element={
-                      <ProtectedRoute roles={[ROLES.ADMIN]}>
-                        <UserList />
-                      </ProtectedRoute>
-                    }
-                  />
-
-                  {/* Admin only in the router AND on the API. The audit trail holds
-                      a copy of every field of every record, so it would otherwise
-                      be a way around every other permission rule in the app. */}
-                  <Route
-                    path="audit"
-                    element={
-                      <ProtectedRoute roles={[ROLES.ADMIN]}>
-                        <AuditLog />
-                      </ProtectedRoute>
-                    }
-                  />
-
-                  {/* Opened to managers alongside admins for buyer-initiated
-                      requests — see the backend's phase 4 note on
-                      /api/change-requests. A manager's response is filtered
-                      server-side to those, so the route guard only has to
-                      stop matching the API's own rule rather than add one. */}
-                  <Route
-                    path="approvals"
-                    element={
-                      <ProtectedRoute roles={[ROLES.ADMIN, ROLES.MANAGER]}>
-                        <Approvals />
-                      </ProtectedRoute>
-                    }
-                  />
-                </Route>
-
                 {/*
-                  --- Storefront ---------------------------------------------
-                  Public, and deliberately outside <ProtectedRoute>: a
-                  shopper browses and checks out without an account, and the
-                  buyer session this tree carries is a wholly separate
-                  credential from the staff session above.
+                  --- Storefront (the app's front door) ----------------------
+                  Public, and deliberately outside <ProtectedRoute>: a shopper
+                  browses without an account, and the buyer session this tree
+                  carries is a wholly separate credential from the staff
+                  session used below — signing in as a buyer here has no
+                  effect on, and is never checked against, the CRM session.
                 */}
                 <Route element={<ShopRoot />}>
-                  <Route path="shop" element={<ShopLayout />}>
+                  <Route element={<ShopLayout />}>
                     <Route index element={<ShopHome />} />
                     <Route path="products" element={<ShopProductGrid />} />
                     <Route path="products/:id" element={<ShopProductDetail />} />
                     <Route path="login" element={<BuyerLogin />} />
                     <Route path="register" element={<BuyerRegister />} />
+                    {/* Buyer sign-in required — see the note at the top of
+                        Checkout.jsx for why guest checkout was removed. */}
                     <Route path="checkout" element={<Checkout />} />
                     <Route path="order-confirmation/:id" element={<OrderConfirmation />} />
                     <Route path="account/orders" element={<BuyerOrders />} />
@@ -260,7 +142,143 @@ export default function App() {
                   </Route>
                 </Route>
 
-                {/* Anything else goes home. */}
+                {/*
+                  --- CRM (staff, reached via the "CRM" link in the shop
+                  header) --------------------------------------------------
+                */}
+                <Route path="crm">
+                  <Route path="login" element={<Login />} />
+                  <Route path="register" element={<Register />} />
+                  {/* Not lazy-loaded: someone locked out of their account is
+                      the last person who should wait for a chunk to download. */}
+                  <Route path="forgot-password" element={<ForgotPassword />} />
+                  <Route path="reset-password" element={<ResetPassword />} />
+                  {/* Public: the invitee has no account to authenticate with
+                      until they have been through this page. */}
+                  <Route path="accept-invite" element={<AcceptInvite />} />
+
+                  <Route
+                    element={
+                      <ProtectedRoute>
+                        <DashboardLayout />
+                      </ProtectedRoute>
+                    }
+                  >
+                    <Route index element={<Dashboard />} />
+
+                    {/* Every signed-in user has one, whatever their role. */}
+                    <Route path="account" element={<Account />} />
+
+                    {/*
+                      The whole customer section is behind a guard, not just its
+                      write screens. A sales rep typing /crm/customers into the
+                      address bar has to land somewhere sensible rather than on a
+                      page that renders and then fills with 403s.
+
+                      The write screens are NOT separately gated: a manager reaches
+                      them and submitting queues a change request for an admin to
+                      approve. Hiding them would turn "needs approval" into "not
+                      allowed", which is a different rule.
+                    */}
+                    <Route
+                      path="customers"
+                      element={
+                        <ProtectedRoute roles={CUSTOMER_VIEW_ROLES}>
+                          <Outlet />
+                        </ProtectedRoute>
+                      }
+                    >
+                      <Route index element={<CustomerList />} />
+                      <Route path="new" element={<CustomerForm />} />
+                      <Route path=":id" element={<CustomerDetail />} />
+                      <Route path=":id/edit" element={<CustomerForm />} />
+                    </Route>
+
+                    <Route path="products">
+                      <Route index element={<ProductList />} />
+                      <Route
+                        path="new"
+                        element={
+                          <ProtectedRoute roles={PRODUCT_WRITE_ROLES}>
+                            <ProductForm />
+                          </ProtectedRoute>
+                        }
+                      />
+                      <Route path=":id" element={<ProductDetail />} />
+                      <Route
+                        path=":id/edit"
+                        element={
+                          <ProtectedRoute roles={PRODUCT_WRITE_ROLES}>
+                            <ProductForm />
+                          </ProtectedRoute>
+                        }
+                      />
+                    </Route>
+
+                    <Route path="orders">
+                      <Route index element={<OrderList />} />
+                      {/*
+                        A rep fulfils orders rather than agreeing them, and has no
+                        customer book to choose a customer from — the form could
+                        not be completed even if the route allowed it.
+                      */}
+                      <Route
+                        path="new"
+                        element={
+                          <ProtectedRoute roles={ORDER_WRITE_ROLES}>
+                            <OrderForm />
+                          </ProtectedRoute>
+                        }
+                      />
+                      <Route path=":id" element={<OrderDetail />} />
+                      <Route
+                        path=":id/edit"
+                        element={
+                          <ProtectedRoute roles={ORDER_WRITE_ROLES}>
+                            <OrderForm />
+                          </ProtectedRoute>
+                        }
+                      />
+                    </Route>
+
+                    <Route
+                      path="users"
+                      element={
+                        <ProtectedRoute roles={[ROLES.ADMIN]}>
+                          <UserList />
+                        </ProtectedRoute>
+                      }
+                    />
+
+                    {/* Admin only in the router AND on the API. The audit trail holds
+                        a copy of every field of every record, so it would otherwise
+                        be a way around every other permission rule in the app. */}
+                    <Route
+                      path="audit"
+                      element={
+                        <ProtectedRoute roles={[ROLES.ADMIN]}>
+                          <AuditLog />
+                        </ProtectedRoute>
+                      }
+                    />
+
+                    {/* Opened to managers alongside admins for buyer-initiated
+                        requests — see the backend's phase 4 note on
+                        /api/change-requests. A manager's response is filtered
+                        server-side to those, so the route guard only has to
+                        stop matching the API's own rule rather than add one. */}
+                    <Route
+                      path="approvals"
+                      element={
+                        <ProtectedRoute roles={[ROLES.ADMIN, ROLES.MANAGER]}>
+                          <Approvals />
+                        </ProtectedRoute>
+                      }
+                    />
+                  </Route>
+                </Route>
+
+                {/* Anything else goes to the shop home, the app's front door. */}
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>
             </Suspense>

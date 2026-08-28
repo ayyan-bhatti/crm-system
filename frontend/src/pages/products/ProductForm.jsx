@@ -79,7 +79,7 @@ export default function ProductForm() {
         ? await productsApi.update(id, payload)
         : await productsApi.create(payload);
       toast.success(isEdit ? 'Changes saved.' : `${saved.name} added.`);
-      navigate(`/products/${saved._id}`, { replace: true });
+      navigate(`/crm/products/${saved._id}`, { replace: true });
     } catch (err) {
       setError(errorMessage(err, 'Could not save product'));
       setSubmitting(false);

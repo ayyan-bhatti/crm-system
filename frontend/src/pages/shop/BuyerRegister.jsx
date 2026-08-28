@@ -27,9 +27,9 @@ export default function BuyerRegister() {
 
   /*
    * `register()` flips `isSignedIn` true (via BuyerAuthContext's setBuyer)
-   * before the `navigate('/shop', ...)` below runs, which can re-render this
-   * component — still mounted at /shop/register — with the guard just below
-   * now true. That guard's own redirect fires from react-router's <Navigate>,
+   * before the `navigate('/', ...)` below runs, which can re-render this
+   * component — still mounted at /register — with the guard just below now
+   * true. That guard's own redirect fires from react-router's <Navigate>,
    * i.e. from a useEffect, so it commits AFTER this file's synchronous
    * navigate() call and overwrites it: a freshly registered buyer landed on
    * their empty order history instead of the shop home. The guard's actual
@@ -40,7 +40,7 @@ export default function BuyerRegister() {
   const justSubmitted = useRef(false);
 
   if (sessionLoading) return <Spinner full />;
-  if (isSignedIn && !justSubmitted.current) return <Navigate to="/shop/account/orders" replace />;
+  if (isSignedIn && !justSubmitted.current) return <Navigate to="/account/orders" replace />;
 
   const fieldErrors = validate(form);
 
@@ -59,7 +59,7 @@ export default function BuyerRegister() {
 
     try {
       await register(form);
-      navigate('/shop', { replace: true });
+      navigate('/', { replace: true });
     } catch (err) {
       justSubmitted.current = false;
       setError(errorMessage(err, 'Unable to create your account'));
@@ -119,7 +119,7 @@ export default function BuyerRegister() {
 
         <p className="mt-5 text-center text-sm text-ink-2">
           Already have an account?{' '}
-          <Link to="/shop/login" className={link}>
+          <Link to="/login" className={link}>
             Sign in
           </Link>
         </p>

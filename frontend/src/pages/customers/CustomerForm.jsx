@@ -103,7 +103,7 @@ export default function CustomerForm() {
         : await customersApi.create(payload);
 
       toast.success(isEdit ? 'Changes saved.' : `${saved.name} added.`);
-      navigate(`/customers/${saved._id}`, { replace: true });
+      navigate(`/crm/customers/${saved._id}`, { replace: true });
     } catch (err) {
       setError(errorMessage(err, 'Could not save customer'));
       setSubmitting(false);

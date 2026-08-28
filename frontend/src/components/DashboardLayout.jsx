@@ -27,19 +27,19 @@ const icons = {
 };
 
 const NAV_ITEMS = [
-  { to: '/', label: 'Dashboard', icon: 'dashboard', end: true },
+  { to: '/crm', label: 'Dashboard', icon: 'dashboard', end: true },
   // Hidden from a sales rep entirely — they have no customer book. Nav is
   // where an absence is least confusing: a missing section reads as "not my
   // job", where a section that 403s reads as broken.
-  { to: '/customers', label: 'Customers', icon: 'customers', requires: 'viewCustomers' },
-  { to: '/products', label: 'Products', icon: 'products' },
-  { to: '/orders', label: 'Orders', icon: 'orders' },
+  { to: '/crm/customers', label: 'Customers', icon: 'customers', requires: 'viewCustomers' },
+  { to: '/crm/products', label: 'Products', icon: 'products' },
+  { to: '/crm/orders', label: 'Orders', icon: 'orders' },
   // `requires` names an ACTION, not a role. See hooks/usePermissions for why:
   // the role list is an implementation detail of the permission, and repeating
   // it here is how the app ended up with the same policy spelled three ways.
-  { to: '/approvals', label: 'Approvals', icon: 'users', requires: 'approveChanges' },
-  { to: '/users', label: 'Users', icon: 'users', requires: 'manageUsers' },
-  { to: '/audit', label: 'Audit log', icon: 'audit', requires: 'viewAuditLog' },
+  { to: '/crm/approvals', label: 'Approvals', icon: 'users', requires: 'approveChanges' },
+  { to: '/crm/users', label: 'Users', icon: 'users', requires: 'manageUsers' },
+  { to: '/crm/audit', label: 'Audit log', icon: 'audit', requires: 'viewAuditLog' },
 ];
 
 function NavIcon({ name }) {
@@ -59,7 +59,7 @@ export default function DashboardLayout() {
   // token — otherwise a fast click-through could race the request.
   async function handleLogout() {
     await logout();
-    navigate('/login', { replace: true });
+    navigate('/crm/login', { replace: true });
   }
 
   const visibleItems = NAV_ITEMS.filter((item) => !item.requires || can[item.requires]);
@@ -114,7 +114,7 @@ export default function DashboardLayout() {
           {/* The account page holds the change-password form. Reachable from
               the identity block, which is where people look for it. */}
           <NavLink
-            to="/account"
+            to="/crm/account"
             className="mt-1 block w-full rounded-lg px-3 py-2 text-left text-sm font-medium text-ink-2 transition-colors hover:bg-neutral-wash hover:text-ink"
           >
             Your account
@@ -138,7 +138,7 @@ export default function DashboardLayout() {
           <span className="text-[15px] font-semibold tracking-tight text-ink">SimpleCRM</span>
           <div className="flex items-center gap-3">
             <NavLink
-              to="/account"
+              to="/crm/account"
               className="flex h-8 w-8 items-center justify-center rounded-full bg-brand-wash text-xs font-semibold text-brand-ink"
               aria-label="Your account"
             >

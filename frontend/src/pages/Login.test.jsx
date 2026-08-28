@@ -152,7 +152,7 @@ describe('Login', () => {
 
     expect(await screen.findByRole('link', { name: /request one/i })).toHaveAttribute(
       'href',
-      '/register'
+      '/crm/register'
     );
   });
 });

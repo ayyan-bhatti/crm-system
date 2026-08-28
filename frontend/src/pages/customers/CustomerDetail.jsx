@@ -14,7 +14,17 @@ import {
 } from '../../components/common';
 import CustomerSummaryCard from '../../components/CustomerSummaryCard';
 import ActivityTimeline from '../../components/ActivityTimeline';
-import { btnDanger, btnPrimary, btnSecondary, formatDate, link, money, td, th } from '../../ui';
+import {
+  btnDanger,
+  btnPrimary,
+  btnSecondary,
+  formatDate,
+  input,
+  link,
+  money,
+  td,
+  th,
+} from '../../ui';
 
 /** A single customer, their details, and every order placed for them. */
 export default function CustomerDetail() {
@@ -41,7 +51,7 @@ export default function CustomerDetail() {
     try {
       await customersApi.remove(id);
       toast.success(`${customer.name} deleted.`);
-      navigate('/customers', { replace: true });
+      navigate('/crm/customers', { replace: true });
     } catch (err) {
       toast.error(errorMessage(err, 'Could not delete customer'));
       setDeleting(false);
@@ -59,10 +69,10 @@ export default function CustomerDetail() {
         subtitle={[customer.company, customer.city].filter(Boolean).join(' · ') || undefined}
         action={
           <div className="flex gap-2">
-            <Link to={`/orders/new?customer=${customer._id}`} className={btnSecondary}>
+            <Link to={`/crm/orders/new?customer=${customer._id}`} className={btnSecondary}>
               New order
             </Link>
-            <Link to={`/customers/${customer._id}/edit`} className={btnPrimary}>
+            <Link to={`/crm/customers/${customer._id}/edit`} className={btnPrimary}>
               Edit
             </Link>
             <button type="button" className={btnDanger} onClick={handleDelete} disabled={deleting}>
@@ -75,6 +85,11 @@ export default function CustomerDetail() {
       {/* Loads independently of the details below, so a slow AI call never
           delays the record the user actually navigated to. */}
       <CustomerSummaryCard customerId={customer._id} />
+
+      {/* On demand, not auto-fetched: unlike the summary above, every draft is
+          a fresh paid model call, and nobody wants one generated on every page
+          visit before they have decided to write to this customer at all. */}
+      <DraftMessageCard customerId={customer._id} />
 
       <div className="grid gap-6 lg:grid-cols-3">
         <Card className="p-5 lg:col-span-1">
@@ -120,7 +135,7 @@ export default function CustomerDetail() {
             <EmptyState
               title="No orders yet"
               action={
-                <Link to={`/orders/new?customer=${customer._id}`} className={btnPrimary}>
+                <Link to={`/crm/orders/new?customer=${customer._id}`} className={btnPrimary}>
                   Create the first order
                 </Link>
               }
@@ -140,7 +155,7 @@ export default function CustomerDetail() {
                   {orders.data.map((order) => (
                     <tr key={order._id} className="hover:bg-plane">
                       <td className={td}>
-                        <Link to={`/orders/${order._id}`} className={link}>
+                        <Link to={`/crm/orders/${order._id}`} className={link}>
                           {formatDate(order.createdAt)}
                         </Link>
                       </td>
@@ -176,5 +191,82 @@ function Detail({ label, children }) {
       <dt className="text-muted">{label}</dt>
       <dd className="text-right font-medium text-ink">{children}</dd>
     </div>
+  );
+}
+
+const TONES = [
+  { value: 'check-in', label: 'Check-in' },
+  { value: 'upsell', label: 'Upsell' },
+  { value: 'win-back', label: 'Win-back' },
+];
+
+/**
+ * An AI-drafted follow-up email. Never sent — a starting point for a rep to
+ * review and send by hand, which is why the draft itself gets no send
+ * control here, only the tone that shaped it.
+ */
+function DraftMessageCard({ customerId }) {
+  const [tone, setTone] = useState('check-in');
+  const [drafting, setDrafting] = useState(false);
+  const [draft, setDraft] = useState(null);
+  const [error, setError] = useState('');
+
+  async function handleDraft() {
+    setDrafting(true);
+    setError('');
+
+    try {
+      setDraft(await customersApi.draftMessage(customerId, tone));
+    } catch (err) {
+      setError(errorMessage(err, 'Could not draft a message'));
+    } finally {
+      setDrafting(false);
+    }
+  }
+
+  return (
+    <Card className="p-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-sm font-semibold text-ink">Draft a follow-up email</h2>
+
+        <div className="flex items-center gap-2">
+          <select
+            className={input}
+            value={tone}
+            onChange={(e) => setTone(e.target.value)}
+            aria-label="Message tone"
+          >
+            {TONES.map((t) => (
+              <option key={t.value} value={t.value}>
+                {t.label}
+              </option>
+            ))}
+          </select>
+          <button type="button" className={btnSecondary} onClick={handleDraft} disabled={drafting}>
+            {drafting ? <Spinner /> : draft ? 'Redraft' : 'Draft'}
+          </button>
+        </div>
+      </div>
+
+      <ErrorBanner message={error} />
+
+      {!draft && !drafting && !error && (
+        <p className="mt-2 text-sm text-muted">
+          Generates a starting point below — nothing is sent automatically.
+        </p>
+      )}
+
+      {draft && (
+        <div className="mt-4 rounded-lg border border-hairline bg-plane p-4">
+          <p className="text-sm font-semibold text-ink">{draft.subject}</p>
+          <p className="mt-2 whitespace-pre-wrap text-sm text-ink-2">{draft.body}</p>
+          <p className="mt-3 text-xs text-muted">
+            {draft.mode === 'ai'
+              ? 'AI-drafted — review before sending.'
+              : 'Written from a template — AI draft unavailable right now.'}
+          </p>
+        </div>
+      )}
+    </Card>
   );
 }

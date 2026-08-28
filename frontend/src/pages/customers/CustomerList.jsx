@@ -6,6 +6,7 @@ import usePermissions from '../../hooks/usePermissions';
 import Can from '../../components/Can';
 import {
   Card,
+  CardSkeleton,
   ListEmptyState,
   TableSkeleton,
   ErrorBanner,
@@ -14,7 +15,7 @@ import {
   StatusBadge,
 } from '../../components/common';
 import { CUSTOMER_STATUSES } from '../../constants';
-import { btnPrimary, input, link, td, th, formatDate } from '../../ui';
+import { btnPrimary, humanize, input, link, td, th, formatDate } from '../../ui';
 
 /**
  * Customer list with search and filters.
@@ -98,13 +99,22 @@ export default function CustomerList() {
         title="Customers"
         subtitle="Everyone you are tracking."
         action={
-          <Link to="/customers/new" className={btnPrimary}>
+          <Link to="/crm/customers/new" className={btnPrimary}>
             New customer
           </Link>
         }
       />
 
       <ErrorBanner message={error} />
+
+      {/*
+        No extra role gate needed here — reaching this page at all already
+        requires `viewCustomers` ([ADMIN, MANAGER]), the same set the backend
+        requires for churn-rollup. Lives on this page rather than the
+        dashboard because a churn call is made while looking at the customer
+        book, not from a landing page nobody opened for that reason.
+      */}
+      <ChurnRollupCard />
 
       <Card>
         {/* --- Filters --------------------------------------------------- */}
@@ -156,7 +166,7 @@ export default function CustomerList() {
             entity="customers"
             onClear={clearFilters}
             action={
-              <Link to="/customers/new" className={btnPrimary}>
+              <Link to="/crm/customers/new" className={btnPrimary}>
                 New customer
               </Link>
             }
@@ -180,7 +190,7 @@ export default function CustomerList() {
                   {data.data.map((customer) => (
                     <tr key={customer._id} className="hover:bg-plane">
                       <td className={td}>
-                        <Link to={`/customers/${customer._id}`} className={link}>
+                        <Link to={`/crm/customers/${customer._id}`} className={link}>
                           {customer.name}
                         </Link>
                         <p className="text-xs text-muted">{customer.email}</p>
@@ -205,5 +215,45 @@ export default function CustomerList() {
         )}
       </Card>
     </div>
+  );
+}
+
+/**
+ * Churn-risk customers rolled up team-wide, with an AI narrative over the
+ * same flags `CustomerSummaryCard` computes per-account. See
+ * `customersApi.churnRollup` and the `mode` its response carries.
+ */
+function ChurnRollupCard() {
+  const { data, loading, error } = useFetch(() => customersApi.churnRollup(), []);
+  const rollup = data?.data?.rollup || [];
+
+  if (!loading && !error && data && rollup.length === 0) return null;
+
+  return (
+    <Card className="mb-4 p-5">
+      <h2 className="text-sm font-semibold text-ink">Churn risk, team-wide</h2>
+
+      {loading && <CardSkeleton lines={2} />}
+      <ErrorBanner message={error} />
+
+      {data && rollup.length > 0 && (
+        <>
+          <p className="mt-2 text-sm text-ink-2">{data.data.narrative}</p>
+          <ul className="mt-3 grid gap-2 sm:grid-cols-2">
+            {rollup.map((entry) => (
+              <li
+                key={entry.customerId}
+                className="flex items-center justify-between gap-2 rounded-lg border border-hairline px-3 py-2 text-sm"
+              >
+                <span className="text-ink-2">{entry.name}</span>
+                <span className="shrink-0 text-xs font-medium text-muted">
+                  {humanize(entry.label)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </Card>
   );
 }

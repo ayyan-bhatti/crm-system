@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import Checkout from './Checkout';
 import { BuyerAuthProvider } from '../../context/BuyerAuthContext';
 import { CartProvider } from '../../context/CartContext';
@@ -13,9 +13,15 @@ import { apiError } from '../../test/utils';
  *
  * Only `api/shopResources` is mocked — the real `BuyerAuthProvider` and
  * `CartProvider` are mounted, same reasoning as `renderWithProviders` on the
- * staff side: the guard logic under test (the guest-form validation, the
- * "no saved addresses" block, the empty-cart redirect) all lives in the real
+ * staff side: the guard logic under test (the sign-in requirement, the "no
+ * saved addresses" block, the empty-cart redirect) all lives in the real
  * context/provider wiring, not in a stand-in.
+ *
+ * Guest checkout was removed from this screen (the backend endpoint still
+ * accepts a guest payload — see the note at the top of Checkout.jsx — it is
+ * just unreachable from here now): an unauthenticated visitor is redirected
+ * straight to sign-in rather than shown a delivery-details form, so there is
+ * no more "as a guest" form-filling coverage here.
  */
 vi.mock('../../api/shopResources', () => ({
   shopAuthApi: { me: vi.fn(), login: vi.fn(), register: vi.fn(), logout: vi.fn() },
@@ -40,19 +46,23 @@ const guestLine = {
   quantity: 1,
 };
 
-/** A tiny router so navigation targets (confirmation vs. back to products) are observable. */
+/** Renders where the "/login" redirect landed, including the `state.from` it carried. */
+function LoginRouteProbe() {
+  const location = useLocation();
+  return <p>LOGIN PAGE (from: {location.state?.from ?? 'none'})</p>;
+}
+
+/** A tiny router so navigation targets (login, confirmation vs. back to products) are observable. */
 function renderCheckout() {
   return render(
-    <MemoryRouter initialEntries={['/shop/checkout']}>
+    <MemoryRouter initialEntries={['/checkout']}>
       <BuyerAuthProvider>
         <CartProvider>
           <Routes>
-            <Route path="/shop/checkout" element={<Checkout />} />
-            <Route path="/shop/products" element={<p>PRODUCTS PAGE</p>} />
-            <Route
-              path="/shop/order-confirmation/:id"
-              element={<p>CONFIRMATION PAGE</p>}
-            />
+            <Route path="/checkout" element={<Checkout />} />
+            <Route path="/products" element={<p>PRODUCTS PAGE</p>} />
+            <Route path="/order-confirmation/:id" element={<p>CONFIRMATION PAGE</p>} />
+            <Route path="/login" element={<LoginRouteProbe />} />
           </Routes>
         </CartProvider>
       </BuyerAuthProvider>
@@ -66,79 +76,30 @@ describe('Checkout', () => {
     vi.clearAllMocks();
   });
 
-  it('redirects to the product grid when the cart is empty', async () => {
+  /**
+   * Replaces the old guest-form coverage: reaching this page without a buyer
+   * session no longer renders a delivery-details form at all, it redirects.
+   * `state.from` is what lets the login page send the buyer back here once
+   * they've signed in — see Checkout.jsx and CartContext's guest-cart merge.
+   */
+  it('sends an unauthenticated visitor to sign in, remembering checkout as the way back', async () => {
     shopAuthApi.me.mockRejectedValue(apiError(401, 'Not authenticated'));
+    seedGuestCart([guestLine]);
+
+    renderCheckout();
+
+    expect(await screen.findByText('LOGIN PAGE (from: /checkout)')).toBeInTheDocument();
+    expect(screen.queryByLabelText(/^name/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /place order/i })).not.toBeInTheDocument();
+  });
+
+  it('redirects to the product grid when a signed-in buyer’s cart is empty', async () => {
+    shopAuthApi.me.mockResolvedValue({ _id: 'b1', name: 'Amina Raza', addresses: [] });
+    shopCartApi.get.mockResolvedValue({ items: [] });
 
     renderCheckout();
 
     expect(await screen.findByText('PRODUCTS PAGE')).toBeInTheDocument();
-  });
-
-  describe('as a guest', () => {
-    beforeEach(() => {
-      shopAuthApi.me.mockRejectedValue(apiError(401, 'Not authenticated'));
-      seedGuestCart([guestLine]);
-    });
-
-    it('shows the guest delivery-details form', async () => {
-      renderCheckout();
-
-      expect(await screen.findByLabelText(/^name/i)).toBeInTheDocument();
-      expect(screen.getByLabelText(/^email/i)).toBeInTheDocument();
-      expect(screen.getByLabelText(/^address/i)).toBeInTheDocument();
-    });
-
-    it('blocks submission and shows field errors when required fields are empty', async () => {
-      const user = userEvent.setup();
-      renderCheckout();
-
-      const submit = await screen.findByRole('button', { name: /place order/i });
-      await user.click(submit);
-
-      expect(await screen.findByText('Enter your name.')).toBeInTheDocument();
-      expect(screen.getByText('Enter a valid email address.')).toBeInTheDocument();
-      expect(screen.getByText('Enter a delivery address.')).toBeInTheDocument();
-      expect(shopCheckoutApi.checkout).not.toHaveBeenCalled();
-      // Still on checkout — no navigation happened.
-      expect(screen.queryByText('PRODUCTS PAGE')).not.toBeInTheDocument();
-      expect(screen.queryByText('CONFIRMATION PAGE')).not.toBeInTheDocument();
-    });
-
-    it('marks the required guest fields with aria-required', async () => {
-      renderCheckout();
-
-      expect(await screen.findByLabelText(/^name/i)).toHaveAttribute('aria-required', 'true');
-      expect(screen.getByLabelText(/^email/i)).toHaveAttribute('aria-required', 'true');
-      expect(screen.getByLabelText(/^address/i)).toHaveAttribute('aria-required', 'true');
-      // Phone and city are optional.
-      expect(screen.getByLabelText(/^phone/i)).not.toHaveAttribute('aria-required');
-      expect(screen.getByLabelText(/^city/i)).not.toHaveAttribute('aria-required');
-    });
-
-    /**
-     * The sequence the guard on `submitting` exists for: cart has items,
-     * submission succeeds, the cart clears — and the redirect to
-     * /shop/products must NOT win the race against the navigate() to the
-     * confirmation page that the same submission already triggered.
-     */
-    it('goes to the order confirmation page on success, never back to the product grid', async () => {
-      const user = userEvent.setup();
-      shopCheckoutApi.checkout.mockResolvedValue({ _id: 'order-1', status: 'pending', items: [], total: 20 });
-
-      renderCheckout();
-
-      await user.type(await screen.findByLabelText(/^name/i), 'Amina Raza');
-      await user.type(screen.getByLabelText(/^email/i), 'amina@example.com');
-      await user.type(screen.getByLabelText(/^address/i), '12 Mall Road');
-      await user.click(screen.getByRole('button', { name: /place order/i }));
-
-      await waitFor(() => expect(shopCheckoutApi.checkout).toHaveBeenCalled());
-      expect(await screen.findByText('CONFIRMATION PAGE')).toBeInTheDocument();
-      expect(screen.queryByText('PRODUCTS PAGE')).not.toBeInTheDocument();
-
-      // The guest cart was cleared as part of the same submission.
-      expect(localStorage.getItem(STORAGE_KEY)).toBe('[]');
-    });
   });
 
   describe('as a signed-in buyer', () => {
@@ -158,7 +119,13 @@ describe('Checkout', () => {
       expect(screen.queryByText('CONFIRMATION PAGE')).not.toBeInTheDocument();
     });
 
-    it('submits with a selected saved address', async () => {
+    /**
+     * The sequence the guard on `submitting` exists for: cart has items,
+     * submission succeeds, the cart clears — and the redirect to
+     * /products must NOT win the race against the navigate() to the
+     * confirmation page that the same submission already triggered.
+     */
+    it('submits with a selected saved address and goes to the order confirmation page, never back to the product grid', async () => {
       const user = userEvent.setup();
       shopAuthApi.me.mockResolvedValue({
         _id: 'b1',
@@ -181,6 +148,7 @@ describe('Checkout', () => {
         )
       );
       expect(await screen.findByText('CONFIRMATION PAGE')).toBeInTheDocument();
+      expect(screen.queryByText('PRODUCTS PAGE')).not.toBeInTheDocument();
     });
   });
 });

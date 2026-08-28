@@ -26,7 +26,7 @@ export default function ProductDetail() {
     try {
       await productsApi.remove(id);
       toast.success(`${product?.name || 'Product'} deleted.`);
-      navigate('/products', { replace: true });
+      navigate('/crm/products', { replace: true });
     } catch (err) {
       toast.error(errorMessage(err, 'Could not delete product'));
       setDeleting(false);
@@ -45,7 +45,7 @@ export default function ProductDetail() {
         action={
           <Can do="manageProducts">
             <div className="flex gap-2">
-              <Link to={`/products/${product._id}/edit`} className={btnPrimary}>
+              <Link to={`/crm/products/${product._id}/edit`} className={btnPrimary}>
                 Edit
               </Link>
               <button

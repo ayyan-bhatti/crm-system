@@ -41,7 +41,7 @@ export default function Register() {
   const [submitted, setSubmitted] = useState(null);
 
   if (sessionLoading) return <Spinner full />;
-  if (isAuthenticated) return <Navigate to="/" replace />;
+  if (isAuthenticated) return <Navigate to="/crm" replace />;
 
   async function handleSubmit(event) {
     event.preventDefault();
@@ -84,7 +84,7 @@ export default function Register() {
           </Card>
 
           <p className="mt-4 text-center text-sm text-muted">
-            <Link to="/login" className={link}>
+            <Link to="/crm/login" className={link}>
               Back to sign in
             </Link>
           </p>
@@ -171,7 +171,7 @@ export default function Register() {
 
         <p className="mt-4 text-center text-sm text-muted">
           Already have an account?{' '}
-          <Link to="/login" className={link}>
+          <Link to="/crm/login" className={link}>
             Sign in
           </Link>
         </p>

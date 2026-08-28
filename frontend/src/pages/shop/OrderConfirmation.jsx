@@ -41,7 +41,7 @@ export default function OrderConfirmation() {
           title="We don't have this order's details anymore"
           hint="If you just placed it, check your email for the confirmation, or find it in your order history."
           action={
-            <Link to="/shop/products" className={link}>
+            <Link to="/products" className={link}>
               Keep shopping
             </Link>
           }
@@ -94,11 +94,11 @@ export default function OrderConfirmation() {
       </Card>
 
       <div className="mt-8 flex flex-wrap justify-center gap-4 text-sm">
-        <Link to="/shop/products" className={link}>
+        <Link to="/products" className={link}>
           Keep shopping
         </Link>
         {isSignedIn && (
-          <Link to="/shop/account/orders" className={link}>
+          <Link to="/account/orders" className={link}>
             View your orders
           </Link>
         )}

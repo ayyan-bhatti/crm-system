@@ -43,12 +43,12 @@ function order(overrides = {}) {
 
 function renderDetail(id = 'order-1') {
   return render(
-    <MemoryRouter initialEntries={[`/shop/account/orders/${id}`]}>
+    <MemoryRouter initialEntries={[`/account/orders/${id}`]}>
       <ToastProvider>
         <BuyerAuthProvider>
           <Routes>
-            <Route path="/shop/account/orders/:id" element={<BuyerOrderDetail />} />
-            <Route path="/shop/login" element={<p>LOGIN PAGE</p>} />
+            <Route path="/account/orders/:id" element={<BuyerOrderDetail />} />
+            <Route path="/login" element={<p>LOGIN PAGE</p>} />
           </Routes>
         </BuyerAuthProvider>
       </ToastProvider>

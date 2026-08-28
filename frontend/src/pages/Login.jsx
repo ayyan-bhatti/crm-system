@@ -17,7 +17,7 @@ export default function Login() {
   // Wait for the session check before deciding — otherwise a refresh on /login
   // briefly shows the form to someone who is already signed in.
   if (sessionLoading) return <Spinner full />;
-  if (isAuthenticated) return <Navigate to="/" replace />;
+  if (isAuthenticated) return <Navigate to="/crm" replace />;
 
   async function handleSubmit(event) {
     event.preventDefault();
@@ -27,7 +27,7 @@ export default function Login() {
     try {
       await login(form.email, form.password);
       // Send them back to whatever page bounced them here, if any.
-      navigate(location.state?.from || '/', { replace: true });
+      navigate(location.state?.from || '/crm', { replace: true });
     } catch (err) {
       setError(errorMessage(err, 'Unable to sign in'));
     } finally {
@@ -81,7 +81,7 @@ export default function Login() {
             </button>
 
             <p className="text-center text-sm">
-              <Link to="/forgot-password" className={link}>
+              <Link to="/crm/forgot-password" className={link}>
                 Forgot your password?
               </Link>
             </p>
@@ -93,7 +93,7 @@ export default function Login() {
           {/* "Request one", not "Create one": signing up does not produce a
               working account, and saying so here rather than only on the next
               page sets the expectation before anyone fills in a form. */}
-          <Link to="/register" className={link}>
+          <Link to="/crm/register" className={link}>
             Request one
           </Link>
         </p>

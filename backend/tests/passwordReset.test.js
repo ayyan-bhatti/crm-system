@@ -271,7 +271,7 @@ describe('Password reset', () => {
     it('points at the app, not the API', async () => {
       await requestReset();
 
-      expect(sent[0].text).toContain(`${env.appUrl}/reset-password?token=`);
+      expect(sent[0].text).toContain(`${env.appUrl}/crm/reset-password?token=`);
     });
 
     it('tells the user it is single use and expires', async () => {

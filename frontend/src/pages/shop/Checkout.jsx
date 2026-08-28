@@ -4,27 +4,27 @@ import { useBuyerAuth } from '../../context/BuyerAuthContext';
 import { useCart } from '../../context/CartContext';
 import { shopCheckoutApi } from '../../api/shopResources';
 import { errorMessage } from '../../api/client';
-import { Card, ErrorBanner, Field, Spinner } from '../../components/common';
+import { Card, ErrorBanner, Spinner } from '../../components/common';
 import { btnPrimary, money } from '../../ui';
 
-const EMAIL_RE = /^\S+@\S+\.\S+$/;
-
-/** Client-side hints only — the server is still the real authority on both. */
-function validateGuest(guest) {
-  const errors = {};
-  if (!guest.name.trim()) errors.name = 'Enter your name.';
-  if (!EMAIL_RE.test(guest.email)) errors.email = 'Enter a valid email address.';
-  if (!guest.address.trim()) errors.address = 'Enter a delivery address.';
-  return errors;
-}
-
+/**
+ * Checkout requires a signed-in buyer.
+ *
+ * This used to also accept a guest checkout — add to cart without an
+ * account, check out with a one-off name/email/address form — and the
+ * backend endpoint still accepts that shape (see `shopCheckoutController`
+ * and `attachBuyerIfPresent`). It was deliberately turned OFF here rather
+ * than removed end-to-end: a guest can still browse and build a cart freely,
+ * but reaching this page now always requires an account, matching the
+ * product decision that buying — as opposed to browsing — is a signed-in
+ * action. The cart itself is untouched and still guest-friendly right up to
+ * this page.
+ */
 export default function Checkout() {
   const { buyer, isSignedIn, loading: authLoading } = useBuyerAuth();
   const { items, total, clear, loading: cartLoading } = useCart();
   const navigate = useNavigate();
 
-  const [guest, setGuest] = useState({ name: '', email: '', phone: '', address: '', city: '' });
-  const [touched, setTouched] = useState({});
   const [addressId, setAddressId] = useState('');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -46,27 +46,26 @@ export default function Checkout() {
   // cases, which failed here before this line was added.
   if (authLoading || cartLoading) return <Spinner full />;
 
+  // Not signed in: send them to sign in (or create an account) and back here
+  // once they have. The cart survives this round trip either way — a
+  // guest's cart is in localStorage, and CartContext merges it into the
+  // buyer's server cart the moment they sign in.
+  if (!isSignedIn) {
+    return <Navigate to="/login" replace state={{ from: '/checkout' }} />;
+  }
+
   // Nothing to check out. Guarded on `submitting` so the redirect does not
   // fire the instant a successful submission clears the cart, ahead of the
   // navigation to the confirmation page that submission already triggered.
   if (items.length === 0 && !submitting) {
-    return <Navigate to="/shop/products" replace />;
-  }
-
-  const guestErrors = validateGuest(guest);
-
-  function blur(field) {
-    setTouched((t) => ({ ...t, [field]: true }));
+    return <Navigate to="/products" replace />;
   }
 
   async function handleSubmit(event) {
     event.preventDefault();
     setError('');
 
-    if (!isSignedIn) {
-      setTouched({ name: true, email: true, address: true });
-      if (Object.keys(guestErrors).length) return;
-    } else if (!addressId) {
+    if (!addressId) {
       setError('Add a delivery address before checking out.');
       return;
     }
@@ -75,12 +74,10 @@ export default function Checkout() {
 
     try {
       const payload = items.map((line) => ({ product: line.product._id, quantity: line.quantity }));
-      const order = isSignedIn
-        ? await shopCheckoutApi.checkout(payload, undefined, addressId)
-        : await shopCheckoutApi.checkout(payload, guest);
+      const order = await shopCheckoutApi.checkout(payload, undefined, addressId);
 
       clear();
-      navigate(`/shop/order-confirmation/${order._id}`, { state: { order } });
+      navigate(`/order-confirmation/${order._id}`, { state: { order } });
     } catch (err) {
       setError(errorMessage(err, 'Could not place your order'));
       setSubmitting(false);
@@ -97,59 +94,7 @@ export default function Checkout() {
             <ErrorBanner message={error} />
 
             <form onSubmit={handleSubmit} noValidate className="space-y-5">
-              {isSignedIn ? (
-                <SavedAddresses
-                  addresses={addresses}
-                  addressId={addressId}
-                  onChange={setAddressId}
-                />
-              ) : (
-                <div className="space-y-4">
-                  <h2 className="text-sm font-semibold text-ink">Delivery details</h2>
-                  <Field
-                    label="Name"
-                    autoComplete="name"
-                    required
-                    value={guest.name}
-                    onBlur={() => blur('name')}
-                    onChange={(e) => setGuest({ ...guest, name: e.target.value })}
-                    error={touched.name ? guestErrors.name : undefined}
-                  />
-                  <Field
-                    label="Email"
-                    type="email"
-                    autoComplete="email"
-                    required
-                    hint="Used to send your order confirmation."
-                    value={guest.email}
-                    onBlur={() => blur('email')}
-                    onChange={(e) => setGuest({ ...guest, email: e.target.value })}
-                    error={touched.email ? guestErrors.email : undefined}
-                  />
-                  <Field
-                    label="Phone"
-                    type="tel"
-                    autoComplete="tel"
-                    value={guest.phone}
-                    onChange={(e) => setGuest({ ...guest, phone: e.target.value })}
-                  />
-                  <Field
-                    label="Address"
-                    autoComplete="street-address"
-                    required
-                    value={guest.address}
-                    onBlur={() => blur('address')}
-                    onChange={(e) => setGuest({ ...guest, address: e.target.value })}
-                    error={touched.address ? guestErrors.address : undefined}
-                  />
-                  <Field
-                    label="City"
-                    autoComplete="address-level2"
-                    value={guest.city}
-                    onChange={(e) => setGuest({ ...guest, city: e.target.value })}
-                  />
-                </div>
-              )}
+              <SavedAddresses addresses={addresses} addressId={addressId} onChange={setAddressId} />
 
               <button type="submit" className={`${btnPrimary} w-full`} disabled={submitting}>
                 {submitting ? <Spinner /> : `Place order — ${money(total)}`}
@@ -175,7 +120,7 @@ function SavedAddresses({ addresses, addressId, onChange }) {
     return (
       <div className="rounded-lg border border-hairline bg-plane p-4 text-sm text-ink-2">
         You have no saved addresses yet.{' '}
-        <Link to="/shop/account/addresses" className="font-medium text-brand hover:underline">
+        <Link to="/account/addresses" className="font-medium text-brand hover:underline">
           Add one
         </Link>{' '}
         before checking out.
@@ -207,7 +152,7 @@ function SavedAddresses({ addresses, addressId, onChange }) {
           </span>
         </label>
       ))}
-      <Link to="/shop/account/addresses" className="inline-block text-sm text-brand hover:underline">
+      <Link to="/account/addresses" className="inline-block text-sm text-brand hover:underline">
         Manage addresses
       </Link>
     </fieldset>

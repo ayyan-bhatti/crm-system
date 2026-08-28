@@ -505,7 +505,7 @@ async function notifyDecision(user, req, approved) {
         ? `Hello ${user.name},\n\n` +
           `Your account has been approved as a ${String(user.role).replace('_', ' ')}. ` +
           `You can sign in with the password you chose when you signed up:\n\n` +
-          `${publicUrl(req, '/login')}`
+          `${publicUrl(req, '/crm/login')}`
         : `Hello ${user.name},\n\n` +
           `Your request for a SimpleCRM account was not approved. If you think this is a ` +
           `mistake, please speak to an administrator.`,

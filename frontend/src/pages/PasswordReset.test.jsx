@@ -98,7 +98,7 @@ describe('ForgotPassword', () => {
 
     expect(await screen.findByRole('link', { name: /sign in/i })).toHaveAttribute(
       'href',
-      '/login'
+      '/crm/login'
     );
   });
 });
@@ -213,7 +213,7 @@ describe('ResetPassword', () => {
     expect(await screen.findByText(/this link is incomplete/i)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /request a new link/i })).toHaveAttribute(
       'href',
-      '/forgot-password'
+      '/crm/forgot-password'
     );
   });
 });

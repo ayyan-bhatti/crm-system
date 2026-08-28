@@ -22,11 +22,11 @@ export default function ProtectedRoute({ children, roles }) {
   if (!isAuthenticated) {
     // `state.from` lets the login page send the user back where they were
     // heading once they authenticate.
-    return <Navigate to="/login" replace state={{ from: location.pathname }} />;
+    return <Navigate to="/crm/login" replace state={{ from: location.pathname }} />;
   }
 
   if (roles && !roles.includes(user.role)) {
-    return <Navigate to="/" replace />;
+    return <Navigate to="/crm" replace />;
   }
 
   return children;

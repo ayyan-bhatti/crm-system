@@ -30,6 +30,24 @@ export default function ActivityTimeline({ entity, id, title = 'Notes' }) {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
 
+  const [summary, setSummary] = useState(null);
+  const [summarizing, setSummarizing] = useState(false);
+  const [summaryError, setSummaryError] = useState('');
+
+  async function summarize() {
+    setSummarizing(true);
+    setSummaryError('');
+
+    try {
+      const result = await activityApi.summarize(entity, id);
+      setSummary({ mode: result.mode, text: result.data.summary });
+    } catch (err) {
+      setSummaryError(errorMessage(err, 'Could not summarize these notes'));
+    } finally {
+      setSummarizing(false);
+    }
+  }
+
   const trimmed = draft.trim();
 
   async function submit(event) {
@@ -59,6 +77,34 @@ export default function ActivityTimeline({ entity, id, title = 'Notes' }) {
         <h2 className="text-sm font-semibold text-ink">{title}</h2>
         <p className="text-xs text-muted">Notes cannot be edited or removed once saved</p>
       </div>
+
+      {/* On demand, not auto-fetched: a fresh model call on every page visit
+          for a thread nobody asked to have summarized would just be spend. */}
+      {notes?.length > 0 && (
+        <div className="mb-5">
+          <button
+            type="button"
+            className="text-xs font-medium text-brand hover:underline disabled:opacity-50"
+            onClick={summarize}
+            disabled={summarizing}
+          >
+            {summarizing ? 'Summarizing…' : summary ? 'Re-summarize' : 'Summarize this thread'}
+          </button>
+
+          {summaryError && <ErrorBanner message={summaryError} />}
+
+          {summary && (
+            <div className="mt-2 rounded-lg border border-hairline bg-plane p-3.5">
+              <p className="text-sm text-ink-2">{summary.text}</p>
+              <p className="mt-2 text-xs text-muted">
+                {summary.mode === 'ai'
+                  ? 'AI-generated from the notes above.'
+                  : 'Written from the notes above — AI summary unavailable right now.'}
+              </p>
+            </div>
+          )}
+        </div>
+      )}
 
       <form onSubmit={submit} className="mb-5 space-y-2">
         <label htmlFor={`note-${entity}-${id}`} className="sr-only">

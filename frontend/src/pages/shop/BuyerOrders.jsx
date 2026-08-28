@@ -24,7 +24,7 @@ export default function BuyerOrders() {
   );
 
   if (authLoading) return <Spinner full />;
-  if (!isSignedIn) return <Navigate to="/shop/login" replace state={{ from: '/shop/account/orders' }} />;
+  if (!isSignedIn) return <Navigate to="/login" replace state={{ from: '/account/orders' }} />;
 
   const orders = data?.data || [];
 
@@ -43,7 +43,7 @@ export default function BuyerOrders() {
             title="You haven't placed an order yet"
             hint="Orders you place will show up here."
             action={
-              <Link to="/shop/products" className={link}>
+              <Link to="/products" className={link}>
                 Start shopping
               </Link>
             }
@@ -67,7 +67,7 @@ export default function BuyerOrders() {
                 {orders.map((order) => (
                   <tr key={order._id} className="hover:bg-plane">
                     <td className={td}>
-                      <Link to={`/shop/account/orders/${order._id}`} className={link}>
+                      <Link to={`/account/orders/${order._id}`} className={link}>
                         {orderLabel(order)}
                       </Link>
                     </td>

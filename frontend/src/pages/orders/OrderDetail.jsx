@@ -87,7 +87,7 @@ export default function OrderDetail() {
       // Raised BEFORE navigating: the toast outlives this component, so the
       // user arrives at the list already knowing the delete succeeded.
       toast.success('Order deleted.');
-      navigate('/orders', { replace: true });
+      navigate('/crm/orders', { replace: true });
     } catch (err) {
       toast.error(errorMessage(err, 'Could not delete the order'));
       setBusy(false);
@@ -134,7 +134,7 @@ export default function OrderDetail() {
               show the order and change nothing — worse than no link at all.
             */}
             {isPending && (
-              <Link to={`/orders/${order._id}/edit`} className={btnSecondary}>
+              <Link to={`/crm/orders/${order._id}/edit`} className={btnSecondary}>
                 Edit items
               </Link>
             )}
@@ -153,7 +153,7 @@ export default function OrderDetail() {
           <div>
             <p className="text-xs font-medium uppercase tracking-wide text-muted">Customer</p>
             {order.customer ? (
-              <Link to={`/customers/${order.customer._id}`} className={`${link} text-sm`}>
+              <Link to={`/crm/customers/${order.customer._id}`} className={`${link} text-sm`}>
                 {order.customer.name}
               </Link>
             ) : (
@@ -191,7 +191,7 @@ export default function OrderDetail() {
               <tr key={index}>
                 <td className={td}>
                   {item.product ? (
-                    <Link to={`/products/${item.product._id}`} className={link}>
+                    <Link to={`/crm/products/${item.product._id}`} className={link}>
                       {item.product.name}
                     </Link>
                   ) : (

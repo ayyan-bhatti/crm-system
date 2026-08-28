@@ -190,7 +190,7 @@ async function notifyAdminsOfRequest(user, req) {
 
     if (!admins.length) return;
 
-    const link = publicUrl(req, '/users');
+    const link = publicUrl(req, '/crm/users');
 
     await Promise.all(
       admins.map((admin) =>

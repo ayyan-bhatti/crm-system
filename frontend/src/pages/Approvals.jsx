@@ -70,6 +70,25 @@ export default function Approvals() {
   const [expanded, setExpanded] = useState(null);
   const [notes, setNotes] = useState({});
 
+  // Keyed by request id: an on-demand AI sentence over that one request's
+  // diff, fetched only when someone asks for it — the list can be long, and
+  // nobody wants a model call fired for every row on every page load.
+  const [summaries, setSummaries] = useState({});
+  const [summarizingId, setSummarizingId] = useState(null);
+
+  async function summarize(request) {
+    setSummarizingId(request._id);
+    try {
+      const result = await changeRequestsApi.summary(request._id);
+      setSummaries((s) => ({ ...s, [request._id]: result }));
+      setExpanded(request._id);
+    } catch (err) {
+      toast.error(errorMessage(err, 'Could not summarize this request'));
+    } finally {
+      setSummarizingId(null);
+    }
+  }
+
   async function decide(request, approved) {
     setBusyId(request._id);
 
@@ -141,6 +160,18 @@ export default function Approvals() {
                               {isOpen ? 'Hide' : 'Show'} details
                             </button>
                           )}
+                          <button
+                            type="button"
+                            className={`${link} ml-2 text-xs disabled:opacity-50`}
+                            disabled={summarizingId === request._id}
+                            onClick={() => summarize(request)}
+                          >
+                            {summarizingId === request._id
+                              ? 'Summarizing…'
+                              : summaries[request._id]
+                              ? 'Re-summarize'
+                              : 'AI summary'}
+                          </button>
                         </td>
                         <td className={td}>
                           {request.label || '—'}
@@ -189,6 +220,19 @@ export default function Approvals() {
                       {isOpen && (
                         <tr key={`${request._id}-detail`} className="bg-plane">
                           <td className={td} colSpan={5}>
+                            {summaries[request._id] && (
+                              <div className="mb-4 rounded-lg border border-hairline bg-surface p-3.5">
+                                <p className="text-sm text-ink-2">
+                                  {summaries[request._id].data.summary}
+                                </p>
+                                <p className="mt-2 text-xs text-muted">
+                                  {summaries[request._id].mode === 'ai'
+                                    ? 'AI-generated from this request.'
+                                    : 'Written from this request — AI summary unavailable right now.'}
+                                </p>
+                              </div>
+                            )}
+
                             <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
                               {fields.map(([field, value]) => (
                                 <div key={field} className="flex gap-2">
@@ -229,7 +273,7 @@ export default function Approvals() {
 
       <p className="mt-4 text-sm text-muted">
         Account requests are handled separately, on the{' '}
-        <Link to="/users" className={link}>
+        <Link to="/crm/users" className={link}>
           Users
         </Link>{' '}
         page.

@@ -102,7 +102,7 @@ async function requestReset(email, req) {
     requestedUserAgent: String(req?.get?.('user-agent') || '').slice(0, 255),
   });
 
-  const link = publicUrl(req, `/reset-password?token=${token}`);
+  const link = publicUrl(req, `/crm/reset-password?token=${token}`);
 
   await mailer.sendMail({
     to: user.email,

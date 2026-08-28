@@ -4,7 +4,7 @@ import { money } from '../../ui';
 export default function ProductCard({ product }) {
   return (
     <Link
-      to={`/shop/products/${product._id}`}
+      to={`/products/${product._id}`}
       className="hover-lift group block overflow-hidden rounded-xl border border-hairline bg-surface"
     >
       <div className="aspect-square overflow-hidden bg-neutral-wash">

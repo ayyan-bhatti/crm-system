@@ -130,7 +130,7 @@ export default function CartDrawer({ open, onClose }) {
             <span className="tabular">{money(total)}</span>
           </div>
           <Link
-            to="/shop/checkout"
+            to="/checkout"
             onClick={onClose}
             aria-disabled={items.length === 0}
             className={`block w-full rounded-lg py-2.5 text-center text-sm font-semibold text-white transition-colors ${

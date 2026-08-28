@@ -2,8 +2,10 @@ import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { productsApi } from '../../api/resources';
 import useFetch, { useDebounced } from '../../hooks/useFetch';
+import usePermissions from '../../hooks/usePermissions';
 import {
   Card,
+  CardSkeleton,
   ListEmptyState,
   TableSkeleton,
   ErrorBanner,
@@ -42,6 +44,7 @@ export default function ProductList() {
   );
 
   const { data: categories } = useFetch(() => productsApi.categories(), []);
+  const { can } = usePermissions();
 
   function setFilter(key, value) {
     const next = new URLSearchParams(searchParams);
@@ -64,7 +67,7 @@ export default function ProductList() {
         subtitle="Inventory and stock levels."
         action={
           <Can do="manageProducts">
-            <Link to="/products/new" className={btnPrimary}>
+            <Link to="/crm/products/new" className={btnPrimary}>
               New product
             </Link>
           </Can>
@@ -72,6 +75,15 @@ export default function ProductList() {
       />
 
       <ErrorBanner message={error} />
+
+      {/*
+        Manager/admin only, mirroring `requireManagerOrAdmin` on
+        GET /products/reorder-suggestions — a sales rep has full read access
+        to the product list itself, just not to this stock-planning call.
+        Lives here rather than on the dashboard because a reorder decision is
+        made while looking at stock levels, not from a landing page.
+      */}
+      {can.viewAllRecords && <ReorderSuggestionsCard />}
 
       <Card>
         <div className="grid gap-3 border-b border-hairline p-4 sm:grid-cols-3">
@@ -138,7 +150,7 @@ export default function ProductList() {
                   {data.data.map((product) => (
                     <tr key={product._id} className="hover:bg-plane">
                       <td className={td}>
-                        <Link to={`/products/${product._id}`} className={link}>
+                        <Link to={`/crm/products/${product._id}`} className={link}>
                           {product.name}
                         </Link>
                         <p className="text-xs text-muted">{product.sku}</p>
@@ -166,5 +178,37 @@ export default function ProductList() {
         )}
       </Card>
     </div>
+  );
+}
+
+/**
+ * Low-stock products that are actually selling, each with an AI-written
+ * justification — figures computed server-side, the sentence generated from
+ * them. See `productsApi.reorderSuggestions` and the `mode` it returns.
+ */
+function ReorderSuggestionsCard() {
+  const { data, loading, error } = useFetch(() => productsApi.reorderSuggestions(), []);
+  const suggestions = data?.data || [];
+
+  if (!loading && !error && data && suggestions.length === 0) return null;
+
+  return (
+    <Card className="mb-4 p-5">
+      <h2 className="text-sm font-semibold text-ink">Reorder suggestions</h2>
+
+      {loading && <CardSkeleton lines={2} />}
+      <ErrorBanner message={error} />
+
+      {suggestions.length > 0 && (
+        <ul className="mt-3 grid gap-3 sm:grid-cols-2">
+          {suggestions.map((item) => (
+            <li key={item.productId} className="rounded-lg border border-hairline p-3 text-sm">
+              <p className="font-medium text-ink">{item.name}</p>
+              <p className="mt-0.5 text-xs text-ink-2">{item.justification}</p>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
   );
 }

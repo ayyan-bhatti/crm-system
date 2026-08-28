@@ -33,7 +33,7 @@ export default function BuyerOrderDetail() {
 
   if (authLoading) return <Spinner full />;
   if (!isSignedIn) {
-    return <Navigate to="/shop/login" replace state={{ from: `/shop/account/orders/${id}` }} />;
+    return <Navigate to="/login" replace state={{ from: `/account/orders/${id}` }} />;
   }
   if (loading) return <Spinner full />;
   if (error) return <ErrorBanner message={error} />;

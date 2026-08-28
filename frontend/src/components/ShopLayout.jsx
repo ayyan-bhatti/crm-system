@@ -21,18 +21,18 @@ export default function ShopLayout() {
     <div className="flex min-h-full flex-col bg-plane text-ink">
       <header className="sticky top-0 z-30 border-b border-hairline bg-surface/95 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
-          <Link to="/shop" className="font-display text-xl font-semibold tracking-tight text-ink">
+          <Link to="/" className="font-display text-xl font-semibold tracking-tight text-ink">
             SimpleCRM Shop
           </Link>
 
           <nav className="flex items-center gap-4 text-sm">
-            <Link to="/shop/products" className="text-ink-2 hover:text-ink">
+            <Link to="/products" className="text-ink-2 hover:text-ink">
               Shop
             </Link>
 
             {isSignedIn ? (
               <>
-                <Link to="/shop/account/orders" className="text-ink-2 hover:text-ink">
+                <Link to="/account/orders" className="text-ink-2 hover:text-ink">
                   My orders
                 </Link>
                 <span className="hidden text-ink-2 sm:inline">Hi, {buyer.name.split(' ')[0]}</span>
@@ -41,7 +41,7 @@ export default function ShopLayout() {
                 </button>
               </>
             ) : (
-              <Link to="/shop/login" className="text-ink-2 hover:text-ink">
+              <Link to="/login" className="text-ink-2 hover:text-ink">
                 Sign in
               </Link>
             )}
@@ -59,6 +59,20 @@ export default function ShopLayout() {
                 </span>
               )}
             </button>
+
+            {/*
+              The CRM's one entry point from the storefront — deliberately
+              small and last in the row. Staff are a tiny fraction of this
+              header's audience, and this link is how they reach their own
+              sign-in without the shop's front door ever implying that is
+              what the site is for.
+            */}
+            <Link
+              to="/crm"
+              className="border-l border-hairline pl-4 text-xs font-medium text-muted hover:text-ink-2"
+            >
+              CRM
+            </Link>
           </nav>
         </div>
       </header>

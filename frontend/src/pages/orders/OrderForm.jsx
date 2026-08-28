@@ -200,7 +200,7 @@ export default function OrderForm() {
         // API for something it is right to refuse.
         await ordersApi.update(id, { items });
         toast.success('Order updated.');
-        navigate(`/orders/${id}`, { replace: true });
+        navigate(`/crm/orders/${id}`, { replace: true });
       } else {
         const order = await ordersApi.create({
           customer: customerId,
@@ -210,7 +210,7 @@ export default function OrderForm() {
           assignedTo: assignedTo || null,
         });
         toast.success('Order created.');
-        navigate(`/orders/${order._id}`, { replace: true });
+        navigate(`/crm/orders/${order._id}`, { replace: true });
       }
     } catch (err) {
       setError(errorMessage(err, isEdit ? 'Could not update order' : 'Could not create order'));

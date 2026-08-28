@@ -90,7 +90,7 @@ export default function ForgotPassword() {
 
         <p className="mt-5 text-center text-sm text-ink-2">
           Remembered it?{' '}
-          <Link to="/login" className={link}>
+          <Link to="/crm/login" className={link}>
             Sign in
           </Link>
         </p>

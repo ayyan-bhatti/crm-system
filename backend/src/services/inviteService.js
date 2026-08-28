@@ -101,7 +101,7 @@ async function inviteUser({ name, email, role }, invitedBy, req) {
     expiresAt: new Date(Date.now() + ms(TOKEN_TTL)),
   });
 
-  const link = publicUrl(req, `/accept-invite?token=${token}`);
+  const link = publicUrl(req, `/crm/accept-invite?token=${token}`);
 
   const delivery = await mailer.sendMail({
     to: user.email,

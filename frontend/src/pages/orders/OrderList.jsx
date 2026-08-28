@@ -64,7 +64,7 @@ export default function OrderList() {
         title="Orders"
         subtitle="Sales across your accounts."
         action={
-          <Link to="/orders/new" className={btnPrimary}>
+          <Link to="/crm/orders/new" className={btnPrimary}>
             New order
           </Link>
         }
@@ -150,12 +150,12 @@ export default function OrderList() {
                     <tr key={order._id} className="hover:bg-plane">
                       {/* The number leads, because it is what someone quotes. */}
                       <td className={`${td} whitespace-nowrap font-mono text-xs`}>
-                        <Link to={`/orders/${order._id}`} className={link}>
+                        <Link to={`/crm/orders/${order._id}`} className={link}>
                           {orderLabel(order)}
                         </Link>
                       </td>
                       <td className={td}>
-                        <Link to={`/orders/${order._id}`} className={link}>
+                        <Link to={`/crm/orders/${order._id}`} className={link}>
                           {order.customer?.name || 'Unknown customer'}
                         </Link>
                         {order.customer?.company && (

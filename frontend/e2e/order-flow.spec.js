@@ -16,13 +16,13 @@ const ADMIN = {
 
 /** Sign in through the real form and wait for the dashboard. */
 async function signIn(page) {
-  await page.goto('/login');
+  await page.goto('/crm/login');
   await page.getByLabel(/email/i).fill(ADMIN.email);
   await page.getByLabel(/password/i).fill(ADMIN.password);
   await page.getByRole('button', { name: /sign in/i }).click();
 
-  // The redirect away from /login is the signal the session took hold.
-  await expect(page).not.toHaveURL(/\/login/);
+  // The redirect away from /crm/login is the signal the session took hold.
+  await expect(page).not.toHaveURL(/\/crm\/login/);
 }
 
 test.describe('Authentication', () => {
@@ -70,32 +70,32 @@ test.describe('Authentication', () => {
 
     // Restored from the cookie via /auth/me — no token to read, so this is the
     // only thing that could have kept the user signed in.
-    await expect(page).not.toHaveURL(/\/login/);
+    await expect(page).not.toHaveURL(/\/crm\/login/);
   });
 
   test('rejects wrong credentials with a visible message', async ({ page }) => {
-    await page.goto('/login');
+    await page.goto('/crm/login');
     await page.getByLabel(/email/i).fill(ADMIN.email);
     await page.getByLabel(/password/i).fill('definitely-not-the-password');
     await page.getByRole('button', { name: /sign in/i }).click();
 
     await expect(page.getByText(/invalid email or password/i)).toBeVisible();
-    await expect(page).toHaveURL(/\/login/);
+    await expect(page).toHaveURL(/\/crm\/login/);
   });
 
   test('signs out and clears the session', async ({ page, context }) => {
     await signIn(page);
 
     await page.getByRole('button', { name: /sign out|log ?out/i }).click();
-    await expect(page).toHaveURL(/\/login/);
+    await expect(page).toHaveURL(/\/crm\/login/);
 
     const cookies = await context.cookies();
     expect(cookies.find((c) => c.name === 'simplecrm_refresh')).toBeUndefined();
   });
 
   test('sends an unauthenticated visitor to login', async ({ page }) => {
-    await page.goto('/customers');
-    await expect(page).toHaveURL(/\/login/);
+    await page.goto('/crm/customers');
+    await expect(page).toHaveURL(/\/crm\/login/);
   });
 });
 
@@ -110,7 +110,7 @@ test.describe('Creating an order', () => {
   test('creates an order from the searchable pickers', async ({ page }) => {
     await signIn(page);
 
-    await page.goto('/orders/new');
+    await page.goto('/crm/orders/new');
 
     // --- customer picker -------------------------------------------------
     const customerBox = page.getByLabel(/customer/i);
@@ -132,13 +132,13 @@ test.describe('Creating an order', () => {
     await page.getByRole('button', { name: /create order/i }).click();
 
     // Redirected to the new order's detail page.
-    await expect(page).toHaveURL(/\/orders\/[a-f0-9]{24}/);
+    await expect(page).toHaveURL(/\/crm\/orders\/[a-f0-9]{24}/);
     await expect(page.getByText(/Karachi Traders/i).first()).toBeVisible();
   });
 
   test('shows the new order in the list', async ({ page }) => {
     await signIn(page);
-    await page.goto('/orders');
+    await page.goto('/crm/orders');
 
     await expect(page.getByText(/Karachi Traders/i).first()).toBeVisible();
   });
@@ -151,7 +151,7 @@ test.describe('Creating an order', () => {
    */
   test('the customer picker searches the server', async ({ page }) => {
     await signIn(page);
-    await page.goto('/orders/new');
+    await page.goto('/crm/orders/new');
 
     const request = page.waitForRequest((req) =>
       req.url().includes('/api/customers/options')
@@ -167,7 +167,7 @@ test.describe('Creating an order', () => {
 
   test('reports no matches rather than silently showing nothing', async ({ page }) => {
     await signIn(page);
-    await page.goto('/orders/new');
+    await page.goto('/crm/orders/new');
 
     const customerBox = page.getByLabel(/customer/i);
     await customerBox.click();
@@ -178,7 +178,7 @@ test.describe('Creating an order', () => {
 
   test('will not submit without a customer', async ({ page }) => {
     await signIn(page);
-    await page.goto('/orders/new');
+    await page.goto('/crm/orders/new');
 
     await expect(page.getByRole('button', { name: /create order/i })).toBeDisabled();
   });

@@ -242,7 +242,7 @@ function ResultRow({ entity, row }) {
     return (
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <Link to={`/customers/${row._id}`} className={link}>
+          <Link to={`/crm/customers/${row._id}`} className={link}>
             {row.name}
           </Link>
           <p className="text-xs text-muted">
@@ -258,7 +258,7 @@ function ResultRow({ entity, row }) {
     return (
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <Link to={`/products/${row._id}`} className={link}>
+          <Link to={`/crm/products/${row._id}`} className={link}>
             {row.name}
           </Link>
           <p className="text-xs text-muted">
@@ -279,7 +279,7 @@ function ResultRow({ entity, row }) {
   return (
     <div className="flex flex-wrap items-center justify-between gap-2">
       <div>
-        <Link to={`/orders/${row._id}`} className={link}>
+        <Link to={`/crm/orders/${row._id}`} className={link}>
           {row.customer?.name || 'Order'}
         </Link>
         <p className="text-xs text-muted">{formatDate(row.createdAt)}</p>

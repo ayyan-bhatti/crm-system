@@ -18,7 +18,7 @@ export default function ShopHome() {
           weekend under $50&quot; works.
         </p>
         <Link
-          to="/shop/products"
+          to="/products"
           className="hover-lift mt-8 inline-block rounded-lg bg-brand px-6 py-3 text-sm font-semibold text-white hover:bg-brand-strong"
         >
           Shop the catalogue

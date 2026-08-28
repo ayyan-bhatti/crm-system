@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { dashboardApi, productsApi, customersApi } from '../api/resources';
+import { dashboardApi } from '../api/resources';
 import useFetch from '../hooks/useFetch';
 import usePermissions from '../hooks/usePermissions';
 import AiSearchBar from '../components/AiSearchBar';
@@ -21,7 +21,7 @@ import {
   CardSkeleton,
 } from '../components/common';
 import { useAuth } from '../context/AuthContext';
-import { money, formatDate, humanize, link, td, th, token } from '../ui';
+import { money, formatDate, link, td, th, token } from '../ui';
 
 /**
  * The landing page: four headline figures, a revenue trend, two breakdowns,
@@ -67,7 +67,7 @@ export default function Dashboard() {
               label="Customers"
               value={data.totalCustomers}
               hint={`${data.customersByStatus.active} active`}
-              to="/customers"
+              to="/crm/customers"
               spark={data.monthly}
               sparkKey="newCustomers"
             />
@@ -82,14 +82,14 @@ export default function Dashboard() {
               label="Low stock"
               value={data.lowStockProducts}
               hint="At or below threshold"
-              to="/products?lowStock=true"
+              to="/crm/products?lowStock=true"
               tone={data.lowStockProducts > 0 ? 'critical' : 'default'}
             />
             <StatTile
               label="Pending orders"
               value={data.ordersByStatus.pending}
               hint="Awaiting completion"
-              to="/orders?status=pending"
+              to="/crm/orders?status=pending"
               spark={data.monthly}
               sparkKey="orders"
             />
@@ -187,7 +187,7 @@ export default function Dashboard() {
           <Card>
             <div className="flex items-center justify-between border-b border-hairline px-5 py-4">
               <h2 className="text-sm font-semibold text-ink">Recent orders</h2>
-              <Link to="/orders" className="text-sm font-medium text-brand hover:underline">
+              <Link to="/crm/orders" className="text-sm font-medium text-brand hover:underline">
                 View all
               </Link>
             </div>
@@ -209,7 +209,7 @@ export default function Dashboard() {
                     {data.recentOrders.map((order) => (
                       <tr key={order._id} className="transition-colors hover:bg-plane">
                         <td className={td}>
-                          <Link to={`/orders/${order._id}`} className={link}>
+                          <Link to={`/crm/orders/${order._id}`} className={link}>
                             {order.customer?.name || 'Unknown customer'}
                           </Link>
                         </td>
@@ -231,28 +231,17 @@ export default function Dashboard() {
           {/*
             Manager/admin only, gated on `viewAllRecords` — the same
             capability that already governs seeing the whole book rather than
-            one's own slice of it, since these three cards are team-wide by
-            nature (a digest across reps, stock decisions, churn across the
-            customer base). A sales rep sees nothing added here.
+            one's own slice of it. This is the one AI card that genuinely
+            belongs on the dashboard: a digest across the whole team, rather
+            than about any one customer or product. The reorder-suggestions
+            and churn-rollup cards that used to sit here moved to the
+            Products and Customers pages instead — a stock decision belongs
+            next to the stock, not on a landing page nobody scrolled to for
+            that reason. A sales rep sees nothing added here.
           */}
-          {can.viewAllRecords && <ManagerInsights />}
+          {can.viewAllRecords && <DigestCard />}
         </>
       )}
-    </div>
-  );
-}
-
-/**
- * Three independent AI-backed cards. Each fetches on its own `useFetch` call
- * so a slow or failing one never holds up the other two — unlike the summary
- * above, there is no single response these could share.
- */
-function ManagerInsights() {
-  return (
-    <div className="grid gap-4 lg:grid-cols-3">
-      <DigestCard />
-      <ReorderCard />
-      <ChurnCard />
     </div>
   );
 }
@@ -282,70 +271,6 @@ function DigestCard() {
               <dd className="mt-0.5 text-sm font-semibold text-ink">{data.figures.orders}</dd>
             </div>
           </dl>
-        </>
-      )}
-    </Card>
-  );
-}
-
-function ReorderCard() {
-  const { data, loading, error } = useFetch(() => productsApi.reorderSuggestions(), []);
-  const suggestions = data?.data || [];
-
-  return (
-    <Card className="p-5">
-      <h2 className="text-sm font-semibold text-ink">Reorder suggestions</h2>
-
-      {loading && <CardSkeleton lines={2} />}
-      <ErrorBanner message={error} />
-
-      {data && suggestions.length === 0 && (
-        <p className="mt-2 text-sm text-muted">Nothing needs reordering right now.</p>
-      )}
-
-      {suggestions.length > 0 && (
-        <ul className="mt-3 space-y-3">
-          {suggestions.slice(0, 4).map((item) => (
-            <li key={item.productId} className="text-sm">
-              <p className="font-medium text-ink">{item.name}</p>
-              <p className="text-xs text-ink-2">{item.justification}</p>
-            </li>
-          ))}
-        </ul>
-      )}
-    </Card>
-  );
-}
-
-function ChurnCard() {
-  const { data, loading, error } = useFetch(() => customersApi.churnRollup(), []);
-  const rollup = data?.data?.rollup || [];
-
-  return (
-    <Card className="p-5">
-      <h2 className="text-sm font-semibold text-ink">Churn risk, team-wide</h2>
-
-      {loading && <CardSkeleton lines={2} />}
-      <ErrorBanner message={error} />
-
-      {data && (
-        <>
-          <p className="mt-2 text-sm text-ink-2">{data.data.narrative}</p>
-
-          {rollup.length === 0 ? (
-            <p className="mt-3 text-sm text-muted">No customers flagged right now.</p>
-          ) : (
-            <ul className="mt-3 space-y-2">
-              {rollup.slice(0, 5).map((entry) => (
-                <li key={entry.customerId} className="flex items-center justify-between gap-2 text-sm">
-                  <span className="text-ink-2">{entry.name}</span>
-                  <span className="shrink-0 text-xs font-medium text-muted">
-                    {humanize(entry.label)}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
         </>
       )}
     </Card>

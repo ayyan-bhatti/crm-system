@@ -17,11 +17,11 @@ export default function BuyerLogin() {
   // See the matching comment in BuyerRegister.jsx: without this, the
   // "already signed in" guard below can win a redirect race against this
   // page's own post-login navigate(), sending a buyer who just signed in
-  // here to /shop/account/orders instead of wherever they meant to go.
+  // here to /account/orders instead of wherever they meant to go.
   const justSubmitted = useRef(false);
 
   if (sessionLoading) return <Spinner full />;
-  if (isSignedIn && !justSubmitted.current) return <Navigate to="/shop/account/orders" replace />;
+  if (isSignedIn && !justSubmitted.current) return <Navigate to="/account/orders" replace />;
 
   async function handleSubmit(event) {
     event.preventDefault();
@@ -31,7 +31,7 @@ export default function BuyerLogin() {
 
     try {
       await login(form.email, form.password);
-      navigate(location.state?.from || '/shop', { replace: true });
+      navigate(location.state?.from || '/', { replace: true });
     } catch (err) {
       justSubmitted.current = false;
       setError(errorMessage(err, 'Unable to sign in'));
@@ -77,7 +77,7 @@ export default function BuyerLogin() {
 
         <p className="mt-5 text-center text-sm text-ink-2">
           New here?{' '}
-          <Link to="/shop/register" className={link}>
+          <Link to="/register" className={link}>
             Create an account
           </Link>
         </p>

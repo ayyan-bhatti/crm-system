@@ -35,7 +35,7 @@ export default function BuyerAccount() {
 
   if (authLoading) return <Spinner full />;
   if (!isSignedIn) {
-    return <Navigate to="/shop/login" replace state={{ from: '/shop/account/addresses' }} />;
+    return <Navigate to="/login" replace state={{ from: '/account/addresses' }} />;
   }
 
   function startAdd() {
@@ -109,7 +109,7 @@ export default function BuyerAccount() {
 
       <p className="mb-6 text-sm text-ink-2">
         Looking for an order?{' '}
-        <Link to="/shop/account/orders" className={link}>
+        <Link to="/account/orders" className={link}>
           View your orders
         </Link>
       </p>

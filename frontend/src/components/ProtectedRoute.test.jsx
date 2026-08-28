@@ -26,8 +26,8 @@ vi.mock('../api/resources', () => ({
 function TestApp({ roles }) {
   return (
     <Routes>
-      <Route path="/login" element={<p>Login screen</p>} />
-      <Route path="/" element={<p>Home screen</p>} />
+      <Route path="/crm/login" element={<p>Login screen</p>} />
+      <Route path="/crm" element={<p>Home screen</p>} />
       <Route
         path="/secret"
         element={

@@ -54,7 +54,7 @@ export default function ResetPassword() {
     try {
       await authApi.resetPassword({ token, password });
       toast.success('Password reset. Please sign in with your new password.');
-      navigate('/login', { replace: true });
+      navigate('/crm/login', { replace: true });
     } catch (err) {
       setError(errorMessage(err, 'Could not reset the password'));
       setSubmitting(false);
@@ -70,7 +70,7 @@ export default function ResetPassword() {
           <p className="mt-2 text-sm text-ink-2">
             It may have been cut short by your email client. Please request a new one.
           </p>
-          <Link to="/forgot-password" className={`${btnPrimary} mt-5 w-full`}>
+          <Link to="/crm/forgot-password" className={`${btnPrimary} mt-5 w-full`}>
             Request a new link
           </Link>
         </Card>
@@ -124,7 +124,7 @@ export default function ResetPassword() {
         </Card>
 
         <p className="mt-5 text-center text-sm text-ink-2">
-          <Link to="/login" className={link}>
+          <Link to="/crm/login" className={link}>
             Back to sign in
           </Link>
         </p>

@@ -4,7 +4,7 @@ import usePermissions, { ACTIONS } from '../hooks/usePermissions';
  * Render children only if the user may perform `do`.
  *
  *   <Can do="manageProducts">
- *     <Link to="/products/new">New product</Link>
+ *     <Link to="/crm/products/new">New product</Link>
  *   </Can>
  *
  * This is the JSX face of `usePermissions`; the hook is the source of truth and
