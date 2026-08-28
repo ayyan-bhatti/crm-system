@@ -113,4 +113,20 @@ const requestEdit = asyncHandler(async (req, res) => {
   });
 });
 
-module.exports = { listMyOrders, getMyOrder, requestCancel, requestEdit };
+/** POST /api/shop/orders/ask — body: { question } */
+const askAboutOrders = asyncHandler(async (req, res) => {
+  const { question } = req.body;
+  if (typeof question !== 'string' || !question.trim()) {
+    throw ApiError.badRequest('A non-empty "question" is required');
+  }
+  if (question.length > 500) {
+    throw ApiError.badRequest('Question cannot exceed 500 characters');
+  }
+
+  const { answer } = require('../services/orderAssistantService');
+  const result = await answer(question.trim(), req.buyer._id);
+
+  res.json({ success: true, mode: result.mode, data: { answer: result.answer } });
+});
+
+module.exports = { listMyOrders, getMyOrder, requestCancel, requestEdit, askAboutOrders };

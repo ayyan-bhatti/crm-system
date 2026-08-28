@@ -11,10 +11,12 @@ const {
 const {
   listOrderActivity,
   addOrderActivity,
+  summarizeOrderActivity,
 } = require('../controllers/activityController');
 const { protect } = require('../middleware/auth');
 const { requireManagerOrAdmin } = require('../middleware/roles');
 const { idempotency } = require('../middleware/idempotency');
+const { aiSearchLimiter, aiPerUserLimiter } = require('../middleware/rateLimit');
 
 const router = express.Router();
 
@@ -92,5 +94,11 @@ router.post('/:id/transfer-request', requestOrderTransfer);
  * as the routes omitting it — see models/Activity.
  */
 router.route('/:id/activity').get(listOrderActivity).post(addOrderActivity);
+router.get(
+  '/:id/activity/summary',
+  aiSearchLimiter,
+  aiPerUserLimiter,
+  summarizeOrderActivity
+);
 
 module.exports = router;

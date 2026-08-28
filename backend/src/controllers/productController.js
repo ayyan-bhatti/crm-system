@@ -199,6 +199,20 @@ const deleteProduct = asyncHandler(async (req, res) => {
   res.json({ success: true, message: 'Product deleted', data: { id: req.params.id } });
 });
 
+/**
+ * GET /api/products/reorder-suggestions — manager and admin.
+ *
+ * See services/reorderSuggestionService.js — which products appear is
+ * decided entirely by code (low stock AND actually selling); the model only
+ * writes the justification for each one already chosen.
+ */
+const getReorderSuggestions = asyncHandler(async (req, res) => {
+  const { getSuggestions } = require('../services/reorderSuggestionService');
+  const result = await getSuggestions(req.user?._id?.toString() ?? null);
+
+  res.json({ success: true, mode: result.mode, count: result.items.length, data: result.items });
+});
+
 module.exports = {
   listProducts,
   listProductOptions,
@@ -207,4 +221,5 @@ module.exports = {
   createProduct,
   updateProduct,
   deleteProduct,
+  getReorderSuggestions,
 };

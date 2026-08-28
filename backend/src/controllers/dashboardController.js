@@ -205,4 +205,20 @@ const getSummary = asyncHandler(async (req, res) => {
   });
 });
 
-module.exports = { getSummary };
+/**
+ * GET /api/dashboard/digest — manager and admin.
+ *
+ * See services/teamDigestService.js — every figure is computed there before
+ * the model is asked to narrate it.
+ */
+const getDigest = asyncHandler(async (req, res) => {
+  const { getDigest: run } = require('../services/teamDigestService');
+  const result = await run(req.user?._id?.toString() ?? null);
+
+  res.json({
+    success: true,
+    data: { mode: result.mode, figures: result.figures, narrative: result.narrative },
+  });
+});
+
+module.exports = { getSummary, getDigest };

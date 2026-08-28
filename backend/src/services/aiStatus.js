@@ -84,10 +84,17 @@ async function getAiStatus() {
    */
   const keyPresent = Boolean(env.geminiApiKey);
 
-  const recent = { calls: 0, succeeded: 0, failed: 0, cached: 0, available: false };
+  const recent = {
+    calls: 0,
+    succeeded: 0,
+    failed: 0,
+    cached: 0,
+    available: false,
+    byFeature: [],
+  };
 
   try {
-    const { totals } = await aiUsageService.getUsageSummary(RECENT_DAYS);
+    const { totals, byFeature } = await aiUsageService.getUsageSummary(RECENT_DAYS);
 
     /*
      * `calls` counts every request including cache hits, so a success is what
@@ -100,6 +107,21 @@ async function getAiStatus() {
     recent.failed = totals?.failedCalls ?? 0;
     recent.succeeded = Math.max(0, recent.calls - recent.cached - recent.failed);
     recent.available = true;
+
+    /*
+     * Per-feature, not just the aggregate. The whole point of adding this is
+     * that "AI is configured and working" can be true in the aggregate while
+     * one specific feature — a new one, most likely, since it has had the
+     * least real traffic — is quietly failing every call. An admin reading
+     * only `recent.calls`/`recent.failed` has no way to see that; this does.
+     */
+    recent.byFeature = (byFeature || []).map((row) => ({
+      feature: row.feature,
+      calls: row.calls,
+      succeeded: Math.max(0, (row.calls ?? 0) - (row.cacheHits ?? 0) - (row.failedCalls ?? 0)),
+      failed: row.failedCalls ?? 0,
+      cached: row.cacheHits ?? 0,
+    }));
   } catch {
     // Usage history is a nice-to-have here; configuration is the headline.
     recent.available = false;

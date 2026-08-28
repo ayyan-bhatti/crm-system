@@ -146,6 +146,10 @@ async function getUsageSummary(days = 30) {
         outputTokens: { $sum: '$outputTokens' },
         estimatedCostUsd: { $sum: '$estimatedCostUsd' },
         cached: { $sum: { $cond: [{ $eq: ['$outcome', 'cached'] }, 1, 0] } },
+        // Kept per feature, not only in the overall totals — so a feature
+        // failing every call can be seen even while the aggregate across
+        // every other feature still looks healthy. See services/aiStatus.js.
+        failed: { $sum: { $cond: [{ $eq: ['$outcome', 'failed'] }, 1, 0] } },
       },
     },
     { $sort: { estimatedCostUsd: -1 } },
@@ -198,6 +202,7 @@ async function getUsageSummary(days = 30) {
       feature: row._id,
       calls: row.calls,
       cacheHits: row.cached,
+      failedCalls: row.failed,
       inputTokens: row.inputTokens,
       outputTokens: row.outputTokens,
       estimatedCostUsd: round(row.estimatedCostUsd, 4),

@@ -92,4 +92,53 @@ const getCustomerSummary = asyncHandler(async (req, res) => {
   });
 });
 
-module.exports = { getCustomerSummary };
+/**
+ * POST /api/customers/:id/draft-message — body: { tone: 'check-in'|'upsell'|'win-back' }
+ *
+ * See services/messageDraftService.js — the draft is never sent from here,
+ * only returned for a rep to review and send by hand.
+ */
+const draftMessage = asyncHandler(async (req, res) => {
+  const customer = await Customer.findById(req.params.id);
+  if (!customer) throw ApiError.notFound('Customer not found');
+
+  if (!canAccessCustomer(req.user, customer)) {
+    throw ApiError.forbidden('You do not have access to this customer');
+  }
+
+  const metrics = await computeCustomerMetrics(customer._id);
+
+  const messageDraftService = require('../services/messageDraftService');
+  const result = await messageDraftService.draft(
+    customer,
+    metrics,
+    req.body.tone,
+    req.user?._id?.toString() ?? null
+  );
+
+  res.json({
+    success: true,
+    data: { mode: result.mode, subject: result.subject, body: result.body },
+  });
+});
+
+/**
+ * GET /api/customers/churn-rollup — manager and admin.
+ *
+ * See services/churnRollupService.js — the flagged list is entirely the
+ * existing per-customer `assessChurnRisk` rule, run across the book; the
+ * model only narrates the list code already built.
+ */
+const getChurnRollup = asyncHandler(async (req, res) => {
+  const { getRollup } = require('../services/churnRollupService');
+  const result = await getRollup(req.user?._id?.toString() ?? null);
+
+  res.json({
+    success: true,
+    mode: result.mode,
+    count: result.rollup.length,
+    data: { rollup: result.rollup, narrative: result.narrative },
+  });
+});
+
+module.exports = { getCustomerSummary, draftMessage, getChurnRollup };

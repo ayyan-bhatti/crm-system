@@ -67,6 +67,8 @@ CRITICAL RULES
 - Your wording must AGREE with the health score you are given. Do not describe an
   account as strong if the score is low, or vice versa — the reader can see both.
   Explain the score; do not second-guess it.
+- If "storefrontOrders" is greater than zero, mention that the customer also buys
+  through the storefront directly — that is useful context for a rep, not a footnote.
 
 Trend values mean:
 ${Object.entries(TREND_MEANINGS)
@@ -109,6 +111,15 @@ function buildUserMessage(customer, metrics, health = null) {
         lastOrderDate: metrics.lastOrderDate,
         daysSinceLastOrder: metrics.daysSinceLastOrder,
         trend: metrics.trend,
+        /*
+         * Which channel their orders come through — staff entering a sale on
+         * their behalf, or the storefront directly. Given so the summary can
+         * say a customer also buys online themselves rather than describing
+         * every order as if a rep had placed it, which stopped being true
+         * the moment the storefront could match an order to this record.
+         */
+        internalOrders: metrics.internalOrderCount,
+        storefrontOrders: metrics.storefrontOrderCount,
       },
       /*
        * The health score, already calculated. Given to the model so its wording

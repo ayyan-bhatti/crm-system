@@ -119,9 +119,33 @@ const addActivity = (entity) =>
     res.status(201).json({ success: true, data: note });
   });
 
+/**
+ * GET /api/customers/:id/activity/summary
+ * GET /api/orders/:id/activity/summary
+ *
+ * One AI-written paragraph over the same timeline `listActivity` returns —
+ * same access rule, same data, borrowed the same way. See
+ * services/noteSummaryService.js for what the model may and may not do with it.
+ */
+const summarizeActivity = (entity) =>
+  asyncHandler(async (req, res) => {
+    await loadSubject(entity, req.params.id, req.user);
+
+    const notes = await Activity.find({ entity, entityId: req.params.id })
+      .sort({ createdAt: -1, _id: -1 })
+      .lean();
+
+    const { summarize } = require('../services/noteSummaryService');
+    const result = await summarize(notes);
+
+    res.json({ success: true, mode: result.mode, data: { summary: result.summary } });
+  });
+
 module.exports = {
   listCustomerActivity: listActivity('customer'),
   addCustomerActivity: addActivity('customer'),
   listOrderActivity: listActivity('order'),
   addOrderActivity: addActivity('order'),
+  summarizeCustomerActivity: summarizeActivity('customer'),
+  summarizeOrderActivity: summarizeActivity('order'),
 };

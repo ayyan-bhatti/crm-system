@@ -13,8 +13,13 @@ const { requireManagerOrAdmin } = require('../middleware/roles');
 const {
   listCustomerActivity,
   addCustomerActivity,
+  summarizeCustomerActivity,
 } = require('../controllers/activityController');
-const { getCustomerSummary } = require('../controllers/customerInsightsController');
+const {
+  getCustomerSummary,
+  draftMessage,
+  getChurnRollup,
+} = require('../controllers/customerInsightsController');
 const { aiSearchLimiter, aiPerUserLimiter } = require('../middleware/rateLimit');
 
 const router = express.Router();
@@ -66,6 +71,12 @@ router.route('/').get(listCustomers).post(createCustomer);
  * for "categories".
  */
 router.get('/options', listCustomerOptions);
+router.get(
+  '/churn-rollup',
+  aiSearchLimiter,
+  aiPerUserLimiter,
+  getChurnRollup
+);
 router.route('/:id').get(getCustomer).patch(updateCustomer).delete(deleteCustomer);
 
 /*
@@ -82,6 +93,12 @@ router.route('/:id').get(getCustomer).patch(updateCustomer).delete(deleteCustome
  * models/Activity.
  */
 router.route('/:id/activity').get(listCustomerActivity).post(addCustomerActivity);
+router.get(
+  '/:id/activity/summary',
+  aiSearchLimiter,
+  aiPerUserLimiter,
+  summarizeCustomerActivity
+);
 
 /*
  * The AI-backed account summary.
@@ -95,5 +112,6 @@ router.route('/:id/activity').get(listCustomerActivity).post(addCustomerActivity
  * the per-user limiter to key on.
  */
 router.get('/:id/summary', aiSearchLimiter, aiPerUserLimiter, getCustomerSummary);
+router.post('/:id/draft-message', aiSearchLimiter, aiPerUserLimiter, draftMessage);
 
 module.exports = router;

@@ -56,6 +56,14 @@ function buildFallbackSummary(customer, metrics) {
 
   parts.push(TREND_PHRASES[trend] || '');
 
+  if (metrics.storefrontOrderCount > 0) {
+    parts.push(
+      `${metrics.storefrontOrderCount} of those order${
+        metrics.storefrontOrderCount === 1 ? ' was' : 's were'
+      } placed through the storefront directly.`
+    );
+  }
+
   return {
     headline: buildHeadline(metrics),
     summary: parts.filter(Boolean).join(' '),

@@ -76,4 +76,40 @@ const getPublicProduct = asyncHandler(async (req, res) => {
   res.json({ success: true, data: toPublicShape(product) });
 });
 
-module.exports = { listPublicProducts, getPublicProduct, PUBLIC_PRODUCT_FIELDS, toPublicShape };
+/**
+ * GET /api/shop/products/search?q=something for a rainy weekend under $50
+ *
+ * See services/shopSearchService.js for how this reuses the internal AI
+ * search's filter-translation step against the public projection.
+ */
+const searchProducts = asyncHandler(async (req, res) => {
+  const query = req.query.q;
+  if (typeof query !== 'string' || !query.trim()) {
+    throw ApiError.badRequest('A non-empty "q" query parameter is required');
+  }
+
+  // Lazy required: shopSearchService itself requires this file, for the
+  // public shape helpers — requiring it back here at module load time would
+  // be a circular import.
+  const { search } = require('../services/shopSearchService');
+  const result = await search(query.trim());
+
+  res.json({ success: true, mode: result.mode, ...(result.reason && { reason: result.reason }), data: result.data });
+});
+
+/** GET /api/shop/products/:id/recommendations — "you might also like". */
+const getRecommendations = asyncHandler(async (req, res) => {
+  const { getRecommendations: run } = require('../services/recommendationService');
+  const result = await run(req.params.id);
+
+  res.json({ success: true, mode: result.mode, reason: result.reason, data: result.data });
+});
+
+module.exports = {
+  listPublicProducts,
+  getPublicProduct,
+  searchProducts,
+  getRecommendations,
+  PUBLIC_PRODUCT_FIELDS,
+  toPublicShape,
+};

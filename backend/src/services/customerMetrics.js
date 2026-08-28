@@ -81,6 +81,18 @@ async function computeCustomerMetrics(customerId) {
           $sum: { $cond: [{ $eq: ['$status', REVENUE_STATUS] }, '$total', 0] },
         },
 
+        /*
+         * Split by where the order came from, so the summary can say a
+         * customer buys through both channels rather than treating a
+         * storefront purchase as if a rep had entered it. Every order counts
+         * here regardless of status, same as `orderCount` above — a
+         * cancelled storefront order is still evidence somebody tried to buy
+         * something.
+         */
+        storefrontOrderCount: {
+          $sum: { $cond: [{ $eq: ['$source', 'storefront'] }, 1, 0] },
+        },
+
         // The two trend windows, summed in the same pass.
         recentRevenue: {
           $sum: {
@@ -127,6 +139,7 @@ async function computeCustomerMetrics(customerId) {
     previousRevenue: 0,
     firstOrderDate: null,
     lastOrderDate: null,
+    storefrontOrderCount: 0,
   };
 
   const totalRevenue = round(base.totalRevenue);
@@ -150,6 +163,9 @@ async function computeCustomerMetrics(customerId) {
     trendWindowDays: TREND_WINDOW_DAYS,
     recentRevenue: round(base.recentRevenue),
     previousRevenue: round(base.previousRevenue),
+
+    storefrontOrderCount: base.storefrontOrderCount,
+    internalOrderCount: base.orderCount - base.storefrontOrderCount,
   };
 }
 

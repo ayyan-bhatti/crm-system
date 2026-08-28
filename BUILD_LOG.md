@@ -3272,3 +3272,109 @@ is actually built, rather than adding speculative entries now for actions that d
 hand, not part of the suite, consistent with how it has been treated since Task 2.
 
 **Final totals: 929 backend + 216 frontend + 11 end-to-end**, lint clean on both packages.
+
+---
+
+## Storefront, phase 6: ten AI features, and a live key almost got spent on the test suite
+
+Every feature below follows the discipline this project has used since the first AI
+feature: code computes every fact and decides every list; the model writes prose about
+figures already correct, or makes one bounded, schema-validated choice from options code
+already offered it — never a number, never which records appear. Each one reports
+`mode: 'ai' | 'fallback'` and has a real, useful fallback rather than an error path.
+
+### Where the data comes from, what the model may and may not return, per feature
+
+1. **Guest NL product search** (`GET /api/shop/products/search`) — reuses
+   `aiSearchService.translateQuery`, the same translator staff AI search uses, forced to
+   the `product` entity. The model returns a filter; `filterTranslator.conditionsToMongo`
+   (already exported, already used by `runFilter`) turns it into a query this file runs
+   itself, through the storefront's own narrow projection rather than `runFilter`'s full
+   documents. Fallback: a plain substring match on `name`.
+2. **"You might also like"** — the list is entirely code: co-purchase counts from
+   completed orders' line items, padded with same-category in-stock products when
+   history is thin. The model writes one sentence explaining the list; it cannot name a
+   product, because the response schema has no field a product name could go in.
+   Fallback: a generic "frequently bought together" / "popular in `<category>`" line.
+3. **Buyer order-status assistant** (`POST /api/shop/orders/ask`) — the model is handed a
+   plain list of the SIGNED-IN buyer's own order facts (`Order.find({ buyerId })`, nothing
+   else) and answers from those alone; it is not scoping the answer itself; the query is
+   what scopes it. Fallback: a rule that matches an order number in the question, or
+   states the most recent order's real status.
+4. **Customer summary + storefront history** — `customerMetrics.js` now splits
+   `orderCount` by `source`, and the prompt is told to mention it when non-zero. No new
+   endpoint; the existing `/api/customers/:id/summary` figures are simply more complete
+   now that a customer can order through two channels.
+5. **AI-drafted follow-up** (`POST /api/customers/:id/draft-message`) — tone (`check-in` /
+   `upsell` / `win-back`) is the one caller-chosen, schema-validated option; the model
+   drafts subject and body from the customer's already-computed figures. Never sent —
+   nothing in this feature has a mail transport wired to it at all; it is text for a rep
+   to read, edit and send by hand. Fallback: a short, honest template per tone.
+6. **Note-thread summarizer** (`GET /.../activity/summary`, customer AND order) — reuses
+   `activityController.loadSubject`'s existing access rule verbatim, so a summary can
+   never be read by someone who could not read the notes themselves. The model condenses
+   what the notes already say; told explicitly not to add anything or recommend an
+   action. Fallback: note count, span, and the most recent note verbatim.
+7. **Weekly team digest** (`GET /api/dashboard/digest`) — this-week/last-week revenue and
+   order counts, and a per-rep breakdown, all one pair of aggregations. The model narrates
+   them and may name a clear leader; told not to rank reps when the numbers are close
+   enough that ranking would mislead. Fallback: a templated sentence from the same figures.
+8. **Inventory reorder suggestions** (`GET /api/products/reorder-suggestions`) — a product
+   qualifies by two facts alone: at or below its own `lowStockThreshold`, AND actually sold
+   in the last 30 days (a quiet low-stock item is not urgent). The model writes one
+   justification per product ALREADY in that list, by position — a reply with the wrong
+   number of justifications is rejected outright rather than zipped against the wrong
+   product. Fallback: a one-line fact string per item (units sold, stock left, threshold).
+9. **Team churn-risk roll-up** (`GET /api/customers/churn-rollup`) — reuses the EXISTING
+   `assessChurnRisk` from the earlier churn-risk feature, run once per customer with a rep
+   actively assigned, kept when it already rates moderate or high. The model writes one
+   "call these people" paragraph from that list; cannot add a customer or change a level.
+   Fallback: the flagged names and labels, concatenated.
+10. **Change-request diff summary** (`GET /api/change-requests/:id/summary`) — reuses
+    `auditService.diff()`, the SAME function the permanent audit trail runs at approval
+    time, computed early as a preview. The model turns `{field, from, to}` triples into one
+    sentence; fallback does the identical job as a plain field list.
+
+### Two more places the "sales rep" categorisation didn't fit this CRM, resolved the same way as phase 5
+
+The brief lists AI-drafted messages and note summaries as sales-rep features, for "an
+assigned customer" — language that assumes a rep has customers. This CRM settled that
+question long before this round: a rep has **zero** customer-book access, full stop, and
+reopening it for one AI feature would undo that. Resolved by splitting on what a rep
+genuinely reaches: **the message draft and the customer-notes summary are
+manager/admin, mirroring `canAccessCustomer`** (draft-message, and the customer variant of
+the note summarizer); **the order-notes summary is reachable by the assigned rep**,
+because reps already read and write order notes — nothing new needed there, the rep-facing
+half of feature 6 already worked the moment it reused `loadSubject`.
+
+### A live key almost got spent on every run of this suite
+
+Writing the tests assuming "no `GEMINI_API_KEY` in the test environment" — true of a fresh
+checkout, false here: this deployment's `backend/.env` carries a real key for manual
+testing, and `env.js` loads it regardless of `NODE_ENV`. The first run of
+`aiFeatures.test.js` made real, billed Gemini calls on every "fallback" test and took 158
+seconds; one recommendation response came back as genuine model prose ("Gear up for your
+next outdoor adventure…"), which is what caught it — a hand-written fallback string would
+never read like that. Fixed by stubbing `aiClient.isConfigured` to `false` for the whole
+file, restored in `afterAll`, rather than relying on the key's absence. Worth flagging
+plainly: **any future AI test in this repo has to do the same** — checking "does the test
+env have a key" by reading `env.js` is not safe here, because this one does.
+
+### `/api/internal/ai-status` now reports per feature, not only in aggregate
+
+The deliverable was explicit: the new features' health has to be visible alongside the
+existing two. `aiUsageService.getUsageSummary`'s `byFeature` breakdown already existed for
+the cost dashboard but dropped failure counts; added a `failed` accumulator to that
+aggregation and surfaced `recent.byFeature` on the status endpoint. The reason this
+matters and is not cosmetic: the aggregate `recent.failed` can read as healthy while one
+specific feature — most plausibly a newly-added one with the least real traffic — is
+failing every call, and an admin reading only the aggregate has no way to see that.
+
+**29 new backend tests**, covering every feature's fallback path for real (not by luck),
+role gating per feature (a rep refused the two manager/admin-only ones, allowed the
+order-notes summary and its own order-status assistant), the reorder validator's
+exact-length rejection, and the change-request summary's manager/buyer split reusing
+phase 4's `assertMayDecide`. Full suite re-run clean — **958 backend tests, in 118 seconds**,
+confirming nothing in this phase is making a live network call by accident anymore.
+
+**Final totals: 958 backend + 216 frontend + 11 end-to-end**, lint clean on both packages.

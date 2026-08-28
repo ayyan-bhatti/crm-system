@@ -3,9 +3,11 @@ const {
   listChangeRequests,
   approveChangeRequest,
   rejectChangeRequest,
+  summarizeChangeRequest,
 } = require('../controllers/changeRequestController');
 const { protect } = require('../middleware/auth');
 const { requireManagerOrAdmin } = require('../middleware/roles');
+const { aiSearchLimiter, aiPerUserLimiter } = require('../middleware/rateLimit');
 
 const router = express.Router();
 
@@ -30,6 +32,7 @@ const router = express.Router();
 router.use(protect, requireManagerOrAdmin);
 
 router.get('/', listChangeRequests);
+router.get('/:id/summary', aiSearchLimiter, aiPerUserLimiter, summarizeChangeRequest);
 router.patch('/:id/approve', approveChangeRequest);
 router.patch('/:id/reject', rejectChangeRequest);
 

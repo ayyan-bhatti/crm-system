@@ -116,4 +116,44 @@ const rejectChangeRequest = asyncHandler(async (req, res) => {
   res.json({ success: true, message: 'Rejected. Nothing was changed.', data: request });
 });
 
-module.exports = { listChangeRequests, approveChangeRequest, rejectChangeRequest };
+/**
+ * GET /api/change-requests/:id/summary
+ *
+ * A plain-English sentence for a pending request's field-level diff, so an
+ * admin (or a manager deciding a buyer's request) is not parsing raw
+ * before/after JSON to decide. Same visibility rule as approve/reject:
+ * `assertMayDecide` refuses a manager trying to preview a colleague's
+ * staff-initiated request, exactly as deciding it is refused.
+ *
+ * See services/changeRequestSummaryService.js for why the diff itself is
+ * the same code the audit trail uses.
+ */
+const summarizeChangeRequest = asyncHandler(async (req, res) => {
+  const request = await ChangeRequest.findById(req.params.id);
+  if (!request) throw ApiError.notFound('Change request not found');
+  assertMayDecide(req.user, request);
+
+  const { summarize } = require('../services/changeRequestSummaryService');
+  const result = await summarize(request);
+
+  if (!result) {
+    return res.json({
+      success: true,
+      mode: 'fallback',
+      data: { summary: 'The record this refers to no longer exists.', changes: [] },
+    });
+  }
+
+  res.json({
+    success: true,
+    mode: result.mode,
+    data: { summary: result.summary, changes: result.changes },
+  });
+});
+
+module.exports = {
+  listChangeRequests,
+  approveChangeRequest,
+  rejectChangeRequest,
+  summarizeChangeRequest,
+};
