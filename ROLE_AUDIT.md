@@ -48,7 +48,7 @@ request rather than applied.
 | `PATCH /api/users/:id` | 200 | **403** | **403** | pass |
 | `PATCH /api/users/:id/status` | 200 | **403** | **403** | pass |
 | `DELETE /api/users/:id` | 200 | **403** | **403** | pass |
-| `GET /api/change-requests` | 200 | **403** | **403** | pass |
+| `GET /api/change-requests` | 200 (0) | **200 (0)** | **403** | pass — manager sees buyer requests only |
 | `GET /api/audit-logs` | 200 (25) | **403** | **403** | pass |
 | `GET /api/internal/metrics` | 200 | **403** | **403** | pass |
 | `GET /api/internal/ai-status` | 200 | **403** | **403** | pass |
@@ -84,9 +84,16 @@ collection is closed too.
 come back `202` with nothing written. Products and orders they run directly. Order items and
 order deletion queue for approval.
 
-**Correctly refused:** user management, the approvals queue, the audit trail, all internal
-endpoints — and, importantly, **inviting an admin** (`403`) while an ordinary invite
-succeeds. The escalation guard holds.
+**Correctly refused:** user management, the audit trail, all internal endpoints — and,
+importantly, **inviting an admin** (`403`) while an ordinary invite succeeds. The escalation
+guard holds.
+
+**Opened since the storefront was added:** `GET /api/change-requests` now answers `200` for a
+manager rather than `403` — but filtered. A manager sees only buyer-initiated requests (a
+customer's own cancellation or edit ask); a colleague's customer-edit or order-deletion request
+stays invisible to them, same as before. Verified by seeding one of each kind and confirming
+the manager's list contains the buyer one and not the staff one — see the storefront section
+below and `BUILD_LOG.md`'s phase 4 entry for the reasoning behind opening this at all.
 
 ### admin
 
@@ -152,6 +159,47 @@ This is the substance of Task 4 and is handled there.
 
 ---
 
+## The buyer role
+
+A fourth account kind, added with the storefront — and deliberately not a fourth value in the
+staff `role` enum above. The claim being audited here is the one the buyer-auth build-log entry
+makes: a buyer reaches **none** of the internal routes above, and is correctly scoped to their
+own cart, order history, and requests on the storefront's own routes.
+
+### Against the internal matrix, using the same bearer-token mechanism as every staff role
+
+Every route in the matrix above was also called as a signed-in buyer, using
+`Authorization: Bearer <buyer token>` exactly as the three staff roles are. **Every single one
+answers `401`** — not `403`, which matters: `protect` never gets far enough to make an access
+decision, because a buyer token's id does not resolve in the `User` collection at all. This is
+isolation by construction, not by a role check somebody could get wrong; the audit exercises it
+end to end rather than trusting the source.
+
+### The storefront's own routes
+
+| Route | guest | buyer | buyer (colleague) | Verdict |
+| --- | --- | --- | --- | --- |
+| `GET /api/shop/products` | 200 (n) | 200 (n) | 200 (n) | pass — public |
+| `GET /api/shop/products/:id` | 200 | 200 | 200 | pass — public |
+| `GET /api/shop/cart` | **401** | 200 | 200 *(their own)* | pass |
+| `GET /api/shop/orders` | **401** | 200 (1) | **200 (0)** | pass — scoped |
+| `GET /api/shop/orders/:id` *(the first buyer's)* | **401** | 200 | **404** | pass |
+| `GET /api/shop/auth/me` | **401** | 200 | 200 | pass |
+| `GET /api/shop/cart` *(as a staff admin!)* | — | — | **401** | pass — tracks fully separate |
+
+The order-detail row is the one worth reading carefully: a second buyer gets `404`, not `403`,
+on an order that is not theirs — the same "can't tell not-yours from doesn't-exist" rule every
+sub-resource in this app follows, so a buyer probing order ids learns nothing.
+
+**Reproduce:** `npm run audit-roles` in `backend/` — the storefront table now prints
+immediately after the internal one, from the same run.
+
+**Verdict: role separation holds for the buyer track too**, on both sides of the boundary — a
+buyer cannot reach a single internal route, and a staff session cannot reach a single buyer-only
+one either.
+
+---
+
 ## What was explicitly tried and could not be broken
 
 - A rep calling every admin-only and manager-only endpoint directly with a valid session:
@@ -163,3 +211,7 @@ This is the substance of Task 4 and is handled there.
   manager gets `1`.
 - A manager's customer write: `202` with the record verified unchanged in the database
   afterwards, not a `200` that quietly applied.
+- A buyer's session token, presented to every route in the internal matrix: **all `401`**.
+- A staff session token, presented to a buyer-only storefront route: **`401`**.
+- A buyer reading another buyer's order by id: `404`, consistent with it being absent from
+  their own order list.

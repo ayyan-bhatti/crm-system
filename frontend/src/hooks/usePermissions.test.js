@@ -51,6 +51,20 @@ describe('the permission table', () => {
     expect(can.approveAccounts).toBe(false);
   });
 
+  /**
+   * A buyer's own cancel/edit request has no colleague self-approval
+   * conflict, unlike a manager's own customer edit — so a manager may decide
+   * one where they may not decide the other. See the comment on this entry
+   * in usePermissions.js for why it is a second entry rather than widening
+   * `approveChanges`.
+   */
+  it('lets a manager decide a buyer-initiated request but not a colleague one', () => {
+    const { can } = permissionsFor(manager);
+
+    expect(can.approveBuyerRequest).toBe(true);
+    expect(can.approveChanges).toBe(false);
+  });
+
   it('gives an anonymous visitor nothing at all', () => {
     expect(allowed(null)).toEqual([]);
     expect(allowed({ role: 'not_a_real_role' })).toEqual([]);

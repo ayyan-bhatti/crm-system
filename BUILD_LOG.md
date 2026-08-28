@@ -3205,3 +3205,70 @@ negative case — no email at all for a staff-initiated decision. One existing t
 split into the rep-only 403 plus the new filtered-200 behaviour, rather than simply relaxed.
 
 **Final totals: 929 backend + 215 frontend + 11 end-to-end**, lint clean on both packages.
+
+---
+
+## Storefront, phase 5: RBAC extension, and why most of the new actions aren't in the table
+
+The brief asked for every new action — `viewStorefront`, `manageOwnCart`, `requestOrderChange`,
+`approveBuyerRequest` — to go into the existing `usePermissions` table and its backend mirror,
+with an explicit instruction not to build a second permission mechanism. Only one of those four
+actually went in.
+
+### The table is shaped like the staff role system, because it mirrors one
+
+`usePermissions` resolves everything from `useAuth()` — the STAFF session — against three roles.
+`viewStorefront`, `manageOwnCart` and `requestOrderChange` are not staff capabilities at all;
+they describe what a BUYER or a guest may do, and a buyer is never `useAuth()`'s user. Forcing
+them into this table would not just be pointless, it would be actively wrong: every one of them
+would permanently evaluate to `false`, because `permissionsFor` returns `false` for anyone whose
+`role` is not `admin`/`manager`/`sales_rep` — which describes every real buyer and every guest,
+always. A permission entry that can never be true for the people it is about is worse than no
+entry, because it looks like a working gate.
+
+This is the same conflict Phase 4 hit, from the other side. There it was the brief's storefront
+instructions assuming something the CRM's existing access rule did not do; here it is the
+brief's RBAC instructions asking for buyer-facing gating inside a mechanism its OWN ground rule
+1 says a buyer must never be checked against at all — *"structurally parallel to `protect`, but
+never populated into or checked against the staff permission table."* Read literally, "add
+every new action to the table" and "never check a buyer against that table" cannot both be
+followed for a buyer-facing action. Resolved the same way Phase 4's conflict was: keep the
+architectural rule (buyers stay off the staff table, full stop) and let the storefront's own,
+much simpler gating do the buyer-facing work — "is a buyer signed in", asked of a `BuyerAuthContext`
+built in phase 9, not a three-role matrix that would have exactly one real row (buyer) and one
+permanently-false one (guest) for every entry.
+
+**`approveBuyerRequest`, on the other hand, is a genuine staff action** — a manager or admin
+deciding a request — and went into the table as its own entry rather than widening
+`approveChanges`. The two ask different questions: `approveChanges` is "may this user decide a
+*colleague's* request" (admin only, per the self-approval rule); this one is "may this user
+decide a *buyer's*" (no colleague involved, so no such conflict — see phase 4's reasoning for
+why the route itself opened to managers). A test locks in the distinction directly: a manager's
+`can.approveBuyerRequest` is `true` while their `can.approveChanges` stays `false`.
+
+### The audit script now runs a buyer through both sides of the boundary
+
+`npm run audit-roles` adds a fourth actor to the existing internal-routes matrix — a buyer,
+authenticated the identical way the three staff roles are (`Authorization: Bearer <token>`) —
+and every single internal route answers `401`. Worth being precise about what that proves: not
+`403`, because `protect` never gets far enough to make an access *decision* at all — a buyer
+token's id does not resolve in the `User` collection, so the isolation is structural rather than
+a role check that could be got wrong. A second, separate table then audits the storefront's own
+routes with three callers (a guest, a buyer, and that buyer's colleague), proving cart and order
+scoping the same way `otherRep` already proved it for staff — including the one row that checks
+the reverse direction, a staff bearer token tried against a buyer-only cart route, which also
+`401`s.
+
+`ROLE_AUDIT.md` is updated with both new tables, plus a correction: `GET /api/change-requests`
+for a manager was recorded as `403` before phase 4 and is now genuinely `200 (0)` — filtered
+rather than refused — which is a real behaviour change from that phase, not new information
+about an old one, and the audit document now says so.
+
+**Deferred to phase 6:** confirming the ten AI features are gated through this same table where
+they are staff-facing (a rep's drafted follow-up, a manager's team digest) at the point each one
+is actually built, rather than adding speculative entries now for actions that do not exist yet.
+
+**1 new frontend test.** No backend test changes — the audit script is a diagnostic tool run by
+hand, not part of the suite, consistent with how it has been treated since Task 2.
+
+**Final totals: 929 backend + 216 frontend + 11 end-to-end**, lint clean on both packages.

@@ -130,7 +130,36 @@ export const PERMISSIONS = {
    * Mirrors `requireRole(ADMIN)` on /api/internal.
    */
   viewInternals: [ADMIN],
+
+  /**
+   * Decide a BUYER-initiated request — a storefront customer's own
+   * cancellation or edit ask.
+   *
+   * Deliberately a second, narrower entry rather than widening
+   * `approveChanges` to include managers. The two answer different
+   * questions: `approveChanges` is "may this user decide a colleague's
+   * request" (admin only — the self-approval rule that entry's own comment
+   * explains), this one is "may this user decide a buyer's" (no colleague
+   * involved, so no such conflict). Mirrors the per-request check in
+   * `changeRequestController.js` — `[ADMIN, MANAGER]` at the route, but
+   * `assertMayDecide` there still refuses a manager acting on anyone else's
+   * request even when this is `true`, exactly as this table cannot express
+   * "except your own colleagues' rows" and does not try to.
+   */
+  approveBuyerRequest: [ADMIN, MANAGER],
 };
+
+/*
+ * WHAT IS DELIBERATELY NOT IN THIS TABLE: any buyer-facing action
+ * (browsing, the cart, requesting a cancellation). This table is resolved
+ * from `useAuth()` — the STAFF session — and a buyer is never that session;
+ * see `middleware/buyerAuth.js`'s own comment for why a buyer must never be
+ * checked against the staff permission table at all, in either direction.
+ * The storefront's own gating is "is a buyer signed in", asked of a
+ * separate buyer auth context — there is no role matrix to maintain on that
+ * side, since a buyer has exactly one relationship to their own cart and
+ * order history: it is theirs, or they are not signed in.
+ */
 
 /** Every action name, so a typo in `<Can do="...">` can be caught rather than silently denying. */
 export const ACTIONS = Object.keys(PERMISSIONS);

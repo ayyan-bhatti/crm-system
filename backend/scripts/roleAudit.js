@@ -40,6 +40,27 @@ async function main() {
   const rep = await make('Sara', 'sara@t.com', 'sales_rep');
   const otherRep = await make('Omar', 'omar@t.com', 'sales_rep');
 
+  /*
+   * A buyer, exercised against the INTERNAL routes below with the SAME
+   * Authorization-header mechanism the staff actors use. A buyer token
+   * carries `kind: 'buyer'` and an id from a different collection entirely
+   * — `protect` looks it up in `User`, which cannot resolve it — so this
+   * proves the isolation the storefront's auth design claims rather than
+   * assuming it from reading the code.
+   */
+  const makeBuyer = async (name, email) => {
+    const res = await api()
+      .post('/api/shop/auth/register')
+      .send({ name, email, password: PW });
+    return { role: 'buyer', headers: { Authorization: `Bearer ${res.body.data.token}` } };
+  };
+
+  const buyer = await makeBuyer('Sana', 'sana@shop.t.com');
+  // Same shape as `buyer`, but tracked under its own table key ('buyer2')
+  // rather than sharing 'buyer' — otherwise two rows would collide under one
+  // column when the storefront audit below runs both at once.
+  const otherBuyer = { ...(await makeBuyer('Zainab', 'zainab@shop.t.com')), role: 'buyer2' };
+
   // ---- data ------------------------------------------------------------
   const customer = await Customer.create({
     name: 'Karachi Traders', email: 'kt@t.com', city: 'Karachi',
@@ -108,7 +129,13 @@ async function main() {
     ['POST  /api/ai-search',                 (a) => api().post('/api/ai-search').set(a.headers).send({ query: 'customers in Karachi' })],
   ];
 
-  const actors = [admin, manager, rep];
+  /*
+   * The buyer rides along on the SAME internal matrix as the three staff
+   * roles, rather than a separate pass — the claim being audited is "a
+   * buyer reaches none of this", and running it through the identical loop
+   * as everyone else is what makes that comparable rather than asserted.
+   */
+  const actors = [admin, manager, rep, buyer];
   const rows = [];
 
 
@@ -187,14 +214,86 @@ async function main() {
 
   // ---- print -----------------------------------------------------------
   const pad = (s, n) => String(s).padEnd(n);
-  console.log(pad('ROUTE', 38), pad('admin', 12), pad('manager', 12), 'sales_rep');
-  console.log('-'.repeat(78));
+  const roleColumns = [...new Set(actors.map((a) => a.role))];
+
+  console.log('-- internal routes --');
+  console.log(pad('ROUTE', 38), roleColumns.map((r) => pad(r, 12)).join(''));
+  console.log('-'.repeat(38 + roleColumns.length * 12));
   for (const r of rows) {
-    console.log(pad(r.route, 38), pad(r.admin, 12), pad(r.manager, 12), r.sales_rep);
+    console.log(pad(r.route, 38), roleColumns.map((role) => pad(r[role], 12)).join(''));
   }
+
+  await auditShopRoutes({ api, admin, buyer, otherBuyer, pad });
 
   await mongoose.disconnect();
   await mongo.stop();
+}
+
+/**
+ * The storefront's OWN routes, audited separately from the internal matrix
+ * above rather than folded into it — a public product endpoint answering
+ * `200` to a guest is correct there and would be a finding on every other
+ * row in this file, so the two need different callers and different
+ * expectations rather than one table trying to mean both.
+ *
+ * Three callers: a guest (no session at all — the majority of the public
+ * storefront's actual traffic), a buyer, and the SAME buyer's colleague, to
+ * prove order/cart scoping the same way `otherRep` proves it internally.
+ */
+async function auditShopRoutes({ api, admin, buyer, otherBuyer, pad }) {
+  const Product = require('../src/models/Product');
+  const product = await Product.create({
+    name: 'Shop Widget',
+    sku: 'SHOP-1',
+    price: 25,
+    stockQty: 50,
+    category: 'Storefront',
+  });
+
+  const myOrder = await api()
+    .post('/api/shop/checkout')
+    .set(buyer.headers)
+    .send({ items: [{ product: product._id, quantity: 1 }] });
+
+  const guest = { role: 'guest', headers: {} };
+
+  const SHOP_ROUTES = [
+    ['GET  /shop/products', (a) => api().get('/api/shop/products').set(a.headers)],
+    ['GET  /shop/products/:id', (a) => api().get(`/api/shop/products/${product._id}`).set(a.headers)],
+    ['GET  /shop/cart', (a) => api().get('/api/shop/cart').set(a.headers)],
+    ['GET  /shop/orders', (a) => api().get('/api/shop/orders').set(a.headers)],
+    ['GET  /shop/orders/:id (own)', (a) => api().get(`/api/shop/orders/${myOrder.body.data._id}`).set(a.headers)],
+    ['GET  /shop/auth/me', (a) => api().get('/api/shop/auth/me').set(a.headers)],
+    // A staff bearer token, tried against a buyer-only route — the reverse
+    // of the internal matrix's question, and just as load-bearing.
+    ['GET  /shop/cart (as admin!)', () => api().get('/api/shop/cart').set(admin.headers)],
+  ];
+
+  const actors = [guest, buyer, otherBuyer];
+  const rows = [];
+
+  for (const [label, call] of SHOP_ROUTES) {
+    const row = { route: label };
+    for (const actor of actors) {
+      try {
+        const res = await call(actor);
+        let note = String(res.status);
+        if (res.status < 300 && Array.isArray(res.body?.data)) note += ` (${res.body.data.length})`;
+        row[actor.role] = note;
+      } catch (err) {
+        row[actor.role] = `ERR ${err.message.slice(0, 20)}`;
+      }
+    }
+    rows.push(row);
+  }
+
+  console.log('');
+  console.log('-- storefront routes (buyer + guest) --');
+  console.log(pad('ROUTE', 30), pad('guest', 12), pad('buyer', 12), 'buyer (colleague)');
+  console.log('-'.repeat(66));
+  for (const r of rows) {
+    console.log(pad(r.route, 30), pad(r.guest, 12), pad(r.buyer, 12), r.buyer2);
+  }
 }
 
 main().catch((e) => {
