@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useBuyerAuth } from '../../context/BuyerAuthContext';
 import { errorMessage } from '../../api/client';
@@ -14,18 +14,26 @@ export default function BuyerLogin() {
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
+  // See the matching comment in BuyerRegister.jsx: without this, the
+  // "already signed in" guard below can win a redirect race against this
+  // page's own post-login navigate(), sending a buyer who just signed in
+  // here to /shop/account/orders instead of wherever they meant to go.
+  const justSubmitted = useRef(false);
+
   if (sessionLoading) return <Spinner full />;
-  if (isSignedIn) return <Navigate to="/shop/account/orders" replace />;
+  if (isSignedIn && !justSubmitted.current) return <Navigate to="/shop/account/orders" replace />;
 
   async function handleSubmit(event) {
     event.preventDefault();
     setSubmitting(true);
     setError('');
+    justSubmitted.current = true;
 
     try {
       await login(form.email, form.password);
       navigate(location.state?.from || '/shop', { replace: true });
     } catch (err) {
+      justSubmitted.current = false;
       setError(errorMessage(err, 'Unable to sign in'));
     } finally {
       setSubmitting(false);

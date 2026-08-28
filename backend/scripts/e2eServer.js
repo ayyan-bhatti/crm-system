@@ -77,6 +77,15 @@ const SEED = {
     password: 'Karachi-Ledger-72',
     role: 'admin',
   },
+  // Exercises the phase-4 RBAC extension: a manager reaches /approvals and
+  // sees buyer-initiated requests, filtered server-side from the same
+  // colleague-request queue an admin sees in full.
+  manager: {
+    name: 'Bilal Ahmed',
+    email: 'e2e-manager@example.com',
+    password: 'Lahore-Ledger-53',
+    role: 'manager',
+  },
   customer: {
     name: 'Karachi Traders',
     email: 'contact@karachitraders.example',
@@ -107,6 +116,7 @@ async function main() {
   await Promise.all([User.init(), Customer.init(), Product.init()]);
 
   const admin = await User.create(SEED.admin);
+  await User.create(SEED.manager);
   await Customer.create({ ...SEED.customer, createdBy: admin._id, assignedTo: admin._id });
   await Product.create(SEED.product);
 

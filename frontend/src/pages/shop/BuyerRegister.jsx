@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Link, Navigate, useNavigate } from 'react-router-dom';
 import { useBuyerAuth } from '../../context/BuyerAuthContext';
 import { errorMessage } from '../../api/client';
@@ -25,8 +25,22 @@ export default function BuyerRegister() {
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
+  /*
+   * `register()` flips `isSignedIn` true (via BuyerAuthContext's setBuyer)
+   * before the `navigate('/shop', ...)` below runs, which can re-render this
+   * component — still mounted at /shop/register — with the guard just below
+   * now true. That guard's own redirect fires from react-router's <Navigate>,
+   * i.e. from a useEffect, so it commits AFTER this file's synchronous
+   * navigate() call and overwrites it: a freshly registered buyer landed on
+   * their empty order history instead of the shop home. The guard's actual
+   * job — sending someone who ARRIVES at this page already signed in
+   * elsewhere back out — never applies to a sign-in this submit itself just
+   * caused, so it's safe to skip in that one case.
+   */
+  const justSubmitted = useRef(false);
+
   if (sessionLoading) return <Spinner full />;
-  if (isSignedIn) return <Navigate to="/shop/account/orders" replace />;
+  if (isSignedIn && !justSubmitted.current) return <Navigate to="/shop/account/orders" replace />;
 
   const fieldErrors = validate(form);
 
@@ -41,11 +55,13 @@ export default function BuyerRegister() {
 
     setSubmitting(true);
     setError('');
+    justSubmitted.current = true;
 
     try {
       await register(form);
       navigate('/shop', { replace: true });
     } catch (err) {
+      justSubmitted.current = false;
       setError(errorMessage(err, 'Unable to create your account'));
     } finally {
       setSubmitting(false);
