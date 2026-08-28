@@ -158,7 +158,7 @@ describe('Buyer cart', () => {
 });
 
 describe('Checkout', () => {
-  const GUEST = { name: 'Sana Malik', email: 'sana@example.com', phone: '0300-1234567' };
+  const GUEST = { name: 'Sana Malik', email: 'sana@example.com', phone: '0300-1234567', paymentMethod: 'cod' };
 
   it('places a guest order and creates a matching Customer', async () => {
     const product = await createProduct({ price: 20 });
@@ -227,6 +227,7 @@ describe('Checkout', () => {
 
     const res = await write('post', '/api/shop/checkout').send({
       items: [{ product: product._id, quantity: 1 }],
+      paymentMethod: 'cod',
     });
 
     expect(res.status).toBe(201);
@@ -245,9 +246,11 @@ describe('Checkout', () => {
 
     const firstOrder = await write('post', '/api/shop/checkout').send({
       items: [{ product: product._id, quantity: 1 }],
+      paymentMethod: 'cod',
     });
     const secondOrder = await write('post', '/api/shop/checkout').send({
       items: [{ product: product._id, quantity: 1 }],
+      paymentMethod: 'cod',
     });
 
     expect(secondOrder.body.data.customer._id).toBe(firstOrder.body.data.customer._id);
@@ -261,6 +264,7 @@ describe('Checkout', () => {
     await write('post', '/api/shop/cart/items').send({ product: product._id, quantity: 2 });
     await write('post', '/api/shop/checkout').send({
       items: [{ product: product._id, quantity: 1 }],
+      paymentMethod: 'cod',
     });
 
     const cart = await write('get', '/api/shop/cart');
@@ -286,9 +290,11 @@ describe("A buyer's own orders", () => {
 
     await mine.write('post', '/api/shop/checkout').send({
       items: [{ product: product._id, quantity: 1 }],
+      paymentMethod: 'cod',
     });
     await theirs.write('post', '/api/shop/checkout').send({
       items: [{ product: product._id, quantity: 1 }],
+      paymentMethod: 'cod',
     });
 
     const res = await mine.write('get', '/api/shop/orders');
@@ -302,6 +308,7 @@ describe("A buyer's own orders", () => {
 
     const theirOrder = await theirs.write('post', '/api/shop/checkout').send({
       items: [{ product: product._id, quantity: 1 }],
+      paymentMethod: 'cod',
     });
 
     const res = await mine.write('get', `/api/shop/orders/${theirOrder.body.data._id}`);
@@ -330,6 +337,7 @@ describe("A buyer's own orders", () => {
 
       const order = await write('post', '/api/shop/checkout').send({
         items: [{ product: product._id, quantity: 1 }],
+        paymentMethod: 'cod',
       });
 
       const res = await write(
@@ -352,6 +360,7 @@ describe("A buyer's own orders", () => {
 
       const order = await write('post', '/api/shop/checkout').send({
         items: [{ product: product._id, quantity: 1 }],
+        paymentMethod: 'cod',
       });
 
       await api()
@@ -374,6 +383,7 @@ describe("A buyer's own orders", () => {
 
       const order = await write('post', '/api/shop/checkout').send({
         items: [{ product: product._id, quantity: 1 }],
+        paymentMethod: 'cod',
       });
 
       await write('post', `/api/shop/orders/${order.body.data._id}/request-cancel`);
@@ -396,6 +406,7 @@ describe("A buyer's own orders", () => {
 
       const order = await write('post', '/api/shop/checkout').send({
         items: [{ product: product._id, quantity: 1 }],
+        paymentMethod: 'cod',
       });
 
       const requested = await write(
@@ -419,6 +430,7 @@ describe("A buyer's own orders", () => {
 
       const order = await write('post', '/api/shop/checkout').send({
         items: [{ product: product._id, quantity: 1 }],
+        paymentMethod: 'cod',
       });
 
       const res = await write(
@@ -441,6 +453,7 @@ describe("A buyer's own orders", () => {
 
       const order = await write('post', '/api/shop/checkout').send({
         items: [{ product: product._id, quantity: 1 }],
+        paymentMethod: 'cod',
       });
 
       const requested = await write(

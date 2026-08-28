@@ -63,8 +63,13 @@ test.describe('Catalogue', () => {
     await searchBox.fill('Widget');
     await page.getByRole('button', { name: /^search$/i }).click();
 
-    await expect(page.getByText(/showing matches for/i)).toBeVisible();
+    await expect(page.getByText(/showing keyword matches for/i)).toBeVisible();
     await expect(page.getByRole('link', { name: /Blue Widget/i })).toBeVisible();
+
+    // The fallback strips filler words, so the words it actually searched for
+    // are rarely the words that were typed — the grid now shows them, for the
+    // same reason the internal AI search bar does.
+    await expect(page.getByText(/searched for:/i)).toBeVisible();
   });
 
   test('a search for nothing that exists returns no matches, not stale results', async ({
@@ -248,12 +253,17 @@ test.describe('Buyer address book', () => {
     await page.getByRole('button', { name: /add address/i }).click();
     await page.getByLabel(/label/i).fill('Home');
     await page.getByLabel(/^address/i).fill('45 Boat Basin, Clifton');
+    // Required since round 2 — a courier needs the city to route the parcel,
+    // so it is the one part of a delivery address held separately from the
+    // free-text block. See Buyer.js's addressSchema.
+    await page.getByLabel(/^city/i).fill('Karachi');
     await page.getByLabel(/phone/i).fill('0300-1234567');
     await page.getByRole('button', { name: /save address/i }).click();
 
     await expect(page.getByText(/address added/i)).toBeVisible();
     await expect(page.getByText('Home')).toBeVisible();
     await expect(page.getByText('45 Boat Basin, Clifton')).toBeVisible();
+    await expect(page.getByText('Karachi')).toBeVisible();
   });
 });
 

@@ -402,7 +402,7 @@ describe('Buyer auth', () => {
       const res = await agent
         .post('/api/shop/auth/addresses')
         .set(SHOP_CSRF_HEADER, csrf)
-        .send({ label: 'Home', address: '12 Ledger Road, Karachi', phone: '0300-1234567' });
+        .send({ label: 'Home', address: '12 Ledger Road, Karachi', city: 'Karachi', phone: '0300-1234567' });
 
       expect(res.status).toBe(201);
       expect(res.body.data.addresses).toHaveLength(1);
@@ -417,6 +417,7 @@ describe('Buyer auth', () => {
       const added = await post('/api/shop/auth/addresses').send({
         label: 'Home',
         address: '12 Ledger Road',
+        city: 'Karachi',
       });
       const addressId = added.body.data.addresses[0]._id;
 
@@ -438,7 +439,7 @@ describe('Buyer auth', () => {
       const added = await first.agent
         .post('/api/shop/auth/addresses')
         .set(SHOP_CSRF_HEADER, firstCsrf)
-        .send({ label: 'Home', address: '12 Ledger Road' });
+        .send({ label: 'Home', address: '12 Ledger Road', city: 'Karachi' });
       const addressId = added.body.data.addresses[0]._id;
 
       const second = await registerAgent({ email: 'colleague@example.com' });

@@ -101,22 +101,55 @@ export default function ProductGrid() {
         </div>
       )}
 
-      {activeQuery && data && (
-        <p className="mb-4 text-sm text-muted">
-          {data.mode === 'ai'
-            ? `Results for "${activeQuery}"`
-            : `Showing matches for "${activeQuery}"${data.reason ? ` — ${data.reason}` : ''}`}
-        </p>
+      {/*
+        `!loading` and the `mode` check are both load-bearing.
+
+        `useFetch` keeps the PREVIOUS response in `data` while the next
+        request is in flight, and the previous response here is the plain
+        product LIST — which has no `mode` field at all. Without these
+        guards, submitting a search rendered "Showing keyword matches for
+        X" above the stale, unfiltered catalogue for as long as the request
+        took: a confident, specific claim about results that were not
+        results, and not for X. Caught by an end-to-end test that read the
+        line, believed it, and then failed on the terms below it.
+      */}
+      {activeQuery && !loading && data?.mode && (
+        <div className="mb-4 text-sm text-muted">
+          <p>
+            {data.mode === 'ai'
+              ? `Results for "${activeQuery}"`
+              : `Showing keyword matches for "${activeQuery}"`}
+          </p>
+          {/*
+            The fallback strips filler words, so the words it actually
+            searched for are rarely the words that were typed. Showing them
+            is the difference between "no results" and "no results *for
+            this*" — the same reason the internal AI search bar shows them.
+          */}
+          {data.mode !== 'ai' && data.terms?.length > 0 && (
+            <p className="mt-1 flex flex-wrap items-center gap-1.5 text-xs">
+              <span>Searched for:</span>
+              {data.terms.map((term) => (
+                <span
+                  key={term}
+                  className="rounded bg-neutral-wash px-1.5 py-0.5 font-medium text-ink-2"
+                >
+                  {term}
+                </span>
+              ))}
+            </p>
+          )}
+        </div>
       )}
 
       {loading && <Spinner full />}
       {error && <ErrorBanner message={error} />}
 
-      {data && products.length === 0 && (
+      {!loading && data && products.length === 0 && (
         <EmptyState title="No products found" hint="Try a different search or category." />
       )}
 
-      {products.length > 0 && (
+      {!loading && products.length > 0 && (
         <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 lg:grid-cols-4">
           {products.map((product) => (
             <ProductCard key={product._id} product={product} />

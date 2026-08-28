@@ -1,5 +1,5 @@
 const { isRetryable, backoffDelay, MAX_ATTEMPTS } = require('../src/services/aiClient');
-const { api, createManager, createCustomer } = require('./helpers');
+const { api, createAdmin, createManager, createCustomer } = require('./helpers');
 const customerSummaryService = require('../src/services/customerSummaryService');
 const aiSearchService = require('../src/services/aiSearchService');
 
@@ -95,9 +95,15 @@ describe('an AI outage degrades rather than breaks', () => {
   });
 
   let manager;
+  // AI SEARCH IS ADMIN-ONLY, the customer summary is manager-and-admin. Both
+  // actors exist here because this block is about AI OUTAGES, not about
+  // access — using a manager for the search would now fail on a 403 and
+  // silently stop testing the thing it exists to test.
+  let admin;
 
   beforeEach(async () => {
     manager = await createManager();
+    admin = await createAdmin();
   });
 
   /**
@@ -133,7 +139,7 @@ describe('an AI outage degrades rather than breaks', () => {
 
     const res = await api()
       .post('/api/ai-search')
-      .set(manager.headers)
+      .set(admin.headers)
       .send({ query: 'customers in Karachi' });
 
     expect(res.status).toBe(200);

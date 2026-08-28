@@ -81,7 +81,13 @@ describe('Role-based access control', () => {
       const res = await api()
         .post('/api/products')
         .set(manager.headers)
-        .send({ name: 'Widget', sku: 'W-1', price: 5, stockQty: 5 });
+        .send({
+          name: 'Widget',
+          sku: 'W-1',
+          price: 5,
+          stockQty: 5,
+          imageUrl: 'https://picsum.photos/seed/w-1/480',
+        });
 
       expect(res.status).toBe(201);
     });

@@ -1,8 +1,16 @@
 const Customer = require('../models/Customer');
 const Product = require('../models/Product');
 const Order = require('../models/Order');
+const User = require('../models/User');
+const ChangeRequest = require('../models/ChangeRequest');
 const asyncHandler = require('../utils/asyncHandler');
-const { ORDER_STATUS, CUSTOMER_STATUS_VALUES } = require('../config/constants');
+const {
+  ORDER_STATUS,
+  CUSTOMER_STATUS_VALUES,
+  CHANGE_REQUEST_STATUS,
+  USER_STATUS,
+  ROLES,
+} = require('../config/constants');
 const { customerScopeFilter } = require('./customerController');
 const { orderScopeFilter } = require('./orderController');
 
@@ -188,6 +196,9 @@ const getSummary = asyncHandler(async (req, res) => {
   res.json({
     success: true,
     data: {
+      // Echoed so the frontend renders the layout for the role the SERVER
+      // resolved, not one inferred from a client-side token that may be stale.
+      role: req.user.role,
       totalCustomers,
       totalRevenue: Math.round(revenue.total * 100) / 100,
       completedOrders: revenue.count,
@@ -201,9 +212,63 @@ const getSummary = asyncHandler(async (req, res) => {
         units,
       })),
       recentOrders,
+      ...(await roleExtras(req.user, orderFilter)),
     },
   });
 });
+
+/**
+ * The figures only one role's dashboard has a use for.
+ *
+ * WHY THIS IS A SEPARATE QUERY SET RATHER THAN MORE FIELDS FOR EVERYONE.
+ *
+ * The three dashboards are genuinely different screens, not one screen with
+ * different numbers in it — an admin is looking at the whole business, a
+ * manager at the floor's operations, a rep at the handful of orders they
+ * personally have to move today. Sending an admin's approval queue and user
+ * counts to a rep would mean the client deciding what to hide, which is the
+ * pattern that leaves an empty "Customers: 0" tile on a screen belonging to
+ * someone who has no customer book at all. Nothing a role cannot act on is
+ * computed for them, so nothing has to be hidden.
+ */
+async function roleExtras(user, orderFilter) {
+  if (user.role === ROLES.SALES_REP) {
+    // A rep's whole job on this screen: the orders assigned to them that are
+    // still waiting to be moved. No revenue, no team data, no customer count
+    // — see the note above.
+    const myPendingOrders = await Order.find({ ...orderFilter, status: ORDER_STATUS.PENDING })
+      .populate('customer', 'name company phone')
+      .sort({ createdAt: 1 })
+      .limit(10)
+      .lean();
+
+    return {
+      myPendingOrders,
+      myPendingCount: await Order.countDocuments({
+        ...orderFilter,
+        status: ORDER_STATUS.PENDING,
+      }),
+    };
+  }
+
+  // Admin and manager both get the approval queue; only an admin gets the
+  // account-management figures, which are the things only they can act on.
+  const [pendingApprovals, unassignedOrders] = await Promise.all([
+    ChangeRequest.countDocuments({ status: CHANGE_REQUEST_STATUS.PENDING }),
+    Order.countDocuments({ status: ORDER_STATUS.PENDING, assignedTo: null }),
+  ]);
+
+  if (user.role === ROLES.MANAGER) {
+    return { pendingApprovals, unassignedOrders };
+  }
+
+  const [totalUsers, pendingAccounts] = await Promise.all([
+    User.countDocuments({ status: USER_STATUS.ACTIVE }),
+    User.countDocuments({ status: USER_STATUS.PENDING }),
+  ]);
+
+  return { pendingApprovals, unassignedOrders, totalUsers, pendingAccounts };
+}
 
 /**
  * GET /api/dashboard/digest — manager and admin.

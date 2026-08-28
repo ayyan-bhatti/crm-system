@@ -97,6 +97,12 @@ const SEED = {
     sku: 'E2E-BW-1',
     price: 25,
     stockQty: 40,
+    category: 'Widgets',
+    // Seeded so the storefront grid renders a real image rather than the
+    // generated "no photo yet" placeholder — the specs assert on product
+    // cards, and a placeholder is a correct but less representative render.
+    imageUrl: 'https://picsum.photos/seed/e2e-bw-1/480/480',
+    description: 'A dependable blue widget, used by the end-to-end specs.',
   },
 };
 

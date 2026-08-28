@@ -1,22 +1,26 @@
 import { useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import useFetch from '../../hooks/useFetch';
 import { shopProductsApi } from '../../api/shopResources';
 import { useCart } from '../../context/CartContext';
+import { useBuyerAuth } from '../../context/BuyerAuthContext';
 import { useToast } from '../../components/Toast';
 import { errorMessage } from '../../api/client';
 import { Spinner, ErrorBanner } from '../../components/common';
 import ProductCard from '../../components/shop/ProductCard';
-import { money, btnPrimary } from '../../ui';
+import { money, btnPrimary, btnSecondary, placeholderImage } from '../../ui';
 
 export default function ShopProductDetail() {
   const { id } = useParams();
   const { data: product, loading, error } = useFetch(() => shopProductsApi.get(id), [id]);
   const { data: recs } = useFetch(() => shopProductsApi.recommendations(id), [id]);
   const { addItem } = useCart();
+  const { isSignedIn } = useBuyerAuth();
+  const navigate = useNavigate();
   const toast = useToast();
   const [quantity, setQuantity] = useState(1);
   const [adding, setAdding] = useState(false);
+  const [buying, setBuying] = useState(false);
 
   async function handleAdd() {
     setAdding(true);
@@ -30,6 +34,28 @@ export default function ShopProductDetail() {
     }
   }
 
+  /**
+   * Buy now: add the item, then head straight for checkout rather than
+   * leaving the shopper to find the cart drawer themselves. An unsigned
+   * visitor's item is safe either way — it is in the guest cart in
+   * localStorage — and `/checkout` itself is what sends them to `/login`
+   * with `state.from` set, so they land back here on checkout, not on the
+   * shop home, once they have signed in or created an account.
+   */
+  async function handleBuyNow() {
+    setBuying(true);
+    try {
+      await addItem(product, quantity);
+      navigate(isSignedIn ? '/checkout' : '/login', {
+        state: isSignedIn ? undefined : { from: '/checkout' },
+      });
+    } catch (err) {
+      toast.error(errorMessage(err, 'Could not start checkout'));
+    } finally {
+      setBuying(false);
+    }
+  }
+
   if (loading) return <Spinner full />;
   if (error) return <ErrorBanner message={error} />;
   if (!product) return null;
@@ -38,13 +64,11 @@ export default function ShopProductDetail() {
     <div className="mx-auto max-w-6xl px-4 py-10 sm:px-6">
       <div className="grid gap-10 md:grid-cols-2">
         <div className="aspect-square overflow-hidden rounded-xl bg-neutral-wash">
-          {product.imageUrl ? (
-            <img src={product.imageUrl} alt="" className="h-full w-full object-cover" />
-          ) : (
-            <div className="flex h-full w-full items-center justify-center text-sm text-muted">
-              No image available
-            </div>
-          )}
+          <img
+            src={product.imageUrl || placeholderImage(product)}
+            alt=""
+            className="h-full w-full object-cover"
+          />
         </div>
 
         <div className="animate-fade-rise">
@@ -86,11 +110,20 @@ export default function ShopProductDetail() {
 
             <button
               type="button"
-              className={`${btnPrimary} hover-lift`}
-              disabled={!product.inStock || adding}
+              className={`${btnSecondary} hover-lift`}
+              disabled={!product.inStock || adding || buying}
               onClick={handleAdd}
             >
               {adding ? <Spinner /> : 'Add to cart'}
+            </button>
+
+            <button
+              type="button"
+              className={`${btnPrimary} hover-lift`}
+              disabled={!product.inStock || adding || buying}
+              onClick={handleBuyNow}
+            >
+              {buying ? <Spinner /> : 'Buy now'}
             </button>
           </div>
         </div>

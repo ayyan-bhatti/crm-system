@@ -1,6 +1,6 @@
 const Product = require('../models/Product');
 const aiSearchService = require('./aiSearchService');
-const { conditionsToMongo } = require('./filterTranslator');
+const { conditionsToMongo, tokenize } = require('./filterTranslator');
 const { containsRegex } = require('../utils/queryHelpers');
 const { toPublicShape, PUBLIC_PRODUCT_FIELDS } = require('../controllers/shopProductController');
 
@@ -40,19 +40,37 @@ async function search(query) {
   }
 
   /*
-   * Fallback: a plain case-insensitive substring match on the name, ranked
-   * by nothing in particular — the same honest degradation the internal
-   * search's keyword path offers, scoped to the one field a shopper's
-   * question is actually about.
+   * Fallback: a case-insensitive keyword match, the same honest degradation
+   * the internal search's keyword path offers.
+   *
+   * TWO THINGS THIS USED TO GET WRONG, both found by running the fallback
+   * against a real catalogue rather than against a test fixture.
+   *
+   * It split on whitespace and kept every word of two characters or more, so
+   * a shopper's actual phrasing — "something waterproof under $50" — searched
+   * for "something" and "under" as if they were product names. `tokenize` is
+   * the internal search's own stop-word-aware splitter and already solves
+   * this; it is reused here rather than reimplemented, which is the whole
+   * reason it lives in `filterTranslator` and not inline there.
+   *
+   * And it matched on `name` ALONE. A storefront shopper describes what a
+   * thing is, not what it is called: "waterproof" is in the Rain Jacket's
+   * description and "outdoor" is its category, and neither is in its name, so
+   * the one query a shopper is most likely to type returned nothing at all
+   * while the product sat in the catalogue. Description and category are both
+   * already public — they are in `PUBLIC_PRODUCT_FIELDS` and rendered on the
+   * product page — so searching them exposes nothing new.
    */
-  const terms = String(query)
-    .toLowerCase()
-    .split(/\s+/)
-    .filter((t) => t.length >= 2)
-    .slice(0, 8);
+  const terms = tokenize(query);
 
   const mongoQuery = terms.length
-    ? { $or: terms.map((term) => ({ name: containsRegex(term) })) }
+    ? {
+        $or: terms.flatMap((term) => [
+          { name: containsRegex(term) },
+          { description: containsRegex(term) },
+          { category: containsRegex(term) },
+        ]),
+      }
     : {};
 
   const data = await Product.find(mongoQuery)
@@ -64,6 +82,7 @@ async function search(query) {
   return {
     mode: 'fallback',
     reason: translation.reason || 'Search entity was not "product"',
+    terms,
     data: data.map(toPublicShape),
   };
 }

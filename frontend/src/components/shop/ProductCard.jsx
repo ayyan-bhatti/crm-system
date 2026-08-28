@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { money } from '../../ui';
+import { money, placeholderImage } from '../../ui';
 
 export default function ProductCard({ product }) {
   return (
@@ -8,17 +8,11 @@ export default function ProductCard({ product }) {
       className="hover-lift group block overflow-hidden rounded-xl border border-hairline bg-surface"
     >
       <div className="aspect-square overflow-hidden bg-neutral-wash">
-        {product.imageUrl ? (
-          <img
-            src={product.imageUrl}
-            alt=""
-            className="h-full w-full object-cover transition-transform duration-[220ms] group-hover:scale-105"
-          />
-        ) : (
-          <div className="flex h-full w-full items-center justify-center text-xs text-muted">
-            No image
-          </div>
-        )}
+        <img
+          src={product.imageUrl || placeholderImage(product)}
+          alt=""
+          className="h-full w-full object-cover transition-transform duration-[220ms] group-hover:scale-105"
+        />
       </div>
       <div className="p-3">
         <p className="truncate text-sm font-medium text-ink">{product.name}</p>

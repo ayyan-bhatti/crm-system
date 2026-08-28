@@ -4,8 +4,15 @@ import { useBuyerAuth } from '../../context/BuyerAuthContext';
 import { useCart } from '../../context/CartContext';
 import { shopCheckoutApi } from '../../api/shopResources';
 import { errorMessage } from '../../api/client';
-import { Card, ErrorBanner, Spinner } from '../../components/common';
-import { btnPrimary, money } from '../../ui';
+import { Card, ErrorBanner, Field, Spinner } from '../../components/common';
+import { btnPrimary, input, money } from '../../ui';
+
+/** Demo payment methods — this storefront has no real payment processor behind it. */
+const PAYMENT_METHODS = [
+  { value: 'cod', label: 'Cash on delivery' },
+  { value: 'card', label: 'Card (demo)' },
+  { value: 'bank_transfer', label: 'Bank transfer (demo)' },
+];
 
 /**
  * Checkout requires a signed-in buyer.
@@ -26,6 +33,7 @@ export default function Checkout() {
   const navigate = useNavigate();
 
   const [addressId, setAddressId] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState('cod');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -74,7 +82,7 @@ export default function Checkout() {
 
     try {
       const payload = items.map((line) => ({ product: line.product._id, quantity: line.quantity }));
-      const order = await shopCheckoutApi.checkout(payload, undefined, addressId);
+      const order = await shopCheckoutApi.checkout(payload, undefined, addressId, paymentMethod);
 
       clear();
       navigate(`/order-confirmation/${order._id}`, { state: { order } });
@@ -95,6 +103,24 @@ export default function Checkout() {
 
             <form onSubmit={handleSubmit} noValidate className="space-y-5">
               <SavedAddresses addresses={addresses} addressId={addressId} onChange={setAddressId} />
+
+              <Field
+                label="Payment method"
+                required
+                hint="This is a demo storefront — nothing is actually charged."
+              >
+                <select
+                  className={input}
+                  value={paymentMethod}
+                  onChange={(e) => setPaymentMethod(e.target.value)}
+                >
+                  {PAYMENT_METHODS.map((method) => (
+                    <option key={method.value} value={method.value}>
+                      {method.label}
+                    </option>
+                  ))}
+                </select>
+              </Field>
 
               <button type="submit" className={`${btnPrimary} w-full`} disabled={submitting}>
                 {submitting ? <Spinner /> : `Place order — ${money(total)}`}

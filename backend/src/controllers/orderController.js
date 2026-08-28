@@ -809,6 +809,7 @@ async function placeOrder(
     actor = null,
     source = 'internal',
     buyerId = null,
+    paymentMethod = null,
   },
   session
 ) {
@@ -862,6 +863,7 @@ async function placeOrder(
         assignedTo,
         source,
         buyerId,
+        paymentMethod,
       },
     ],
     { session }

@@ -5,7 +5,7 @@ import { errorMessage } from '../../api/client';
 import useFetch from '../../hooks/useFetch';
 import { Card, ErrorBanner, Field, PageHeader, Spinner } from '../../components/common';
 import { useToast } from '../../components/Toast';
-import { btnPrimary, btnSecondary } from '../../ui';
+import { btnPrimary, btnSecondary, input } from '../../ui';
 
 /**
  * Create / edit a product. Reachable only by managers and admins — the route is
@@ -27,6 +27,8 @@ export default function ProductForm() {
     stockQty: '',
     category: '',
     lowStockThreshold: '10',
+    imageUrl: '',
+    description: '',
   });
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -55,6 +57,8 @@ export default function ProductForm() {
       stockQty: String(existing.stockQty ?? ''),
       category: existing.category || '',
       lowStockThreshold: String(existing.lowStockThreshold ?? '10'),
+      imageUrl: existing.imageUrl || '',
+      description: existing.description || '',
     });
   }, [existing]);
 
@@ -111,6 +115,7 @@ export default function ProductForm() {
             <Field
               label="Name"
               required
+              hint="Shown to customers on the storefront."
               value={form.name}
               onChange={(e) => update('name', e.target.value)}
             />
@@ -127,6 +132,7 @@ export default function ProductForm() {
               step="0.01"
               min="0"
               required
+              hint="In USD, e.g. 29.99."
               value={form.price}
               onChange={(e) => update('price', e.target.value)}
             />
@@ -135,11 +141,14 @@ export default function ProductForm() {
               type="number"
               min="0"
               required
+              hint="How many units are available right now."
               value={form.stockQty}
               onChange={(e) => update('stockQty', e.target.value)}
             />
             <Field
               label="Category"
+              required
+              hint="Used for storefront filtering."
               value={form.category}
               onChange={(e) => update('category', e.target.value)}
             />
@@ -151,7 +160,43 @@ export default function ProductForm() {
               value={form.lowStockThreshold}
               onChange={(e) => update('lowStockThreshold', e.target.value)}
             />
+            <div className="sm:col-span-2">
+              <Field
+                label="Image URL"
+                type="url"
+                required
+                hint="Paste a direct link to a product photo."
+                value={form.imageUrl}
+                onChange={(e) => update('imageUrl', e.target.value)}
+              />
+            </div>
           </div>
+
+          <Field label="Description" hint="A short paragraph shown on the product page.">
+            <textarea
+              rows={3}
+              className={input}
+              value={form.description}
+              onChange={(e) => update('description', e.target.value)}
+            />
+          </Field>
+
+          {form.imageUrl && (
+            <div className="flex items-center gap-3 rounded-lg border border-hairline bg-plane p-3">
+              <img
+                src={form.imageUrl}
+                alt=""
+                onError={(e) => {
+                  e.currentTarget.style.display = 'none';
+                }}
+                onLoad={(e) => {
+                  e.currentTarget.style.display = '';
+                }}
+                className="h-16 w-16 rounded-md border border-hairline bg-neutral-wash object-cover"
+              />
+              <p className="text-xs text-muted">Preview — shown as it will look on the storefront.</p>
+            </div>
+          )}
 
           <div className="flex gap-3 pt-2">
             <button type="submit" className={btnPrimary} disabled={submitting}>

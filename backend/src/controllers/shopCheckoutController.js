@@ -6,6 +6,7 @@ const { withTransaction } = require('../utils/transaction');
 const { placeOrder, ORDER_POPULATE } = require('./orderController');
 const { matchOrCreateCustomer } = require('../services/storefrontCustomerService');
 const { recordAudit } = require('../services/auditService');
+const { PAYMENT_METHOD_VALUES } = require('../config/constants');
 
 /**
  * POST /api/shop/checkout
@@ -35,6 +36,13 @@ const checkout = asyncHandler(async (req, res) => {
     throw ApiError.badRequest('A checkout needs at least one item');
   }
 
+  const { paymentMethod } = req.body;
+  if (!PAYMENT_METHOD_VALUES.includes(paymentMethod)) {
+    throw ApiError.badRequest(
+      `paymentMethod must be one of: ${PAYMENT_METHOD_VALUES.join(', ')}`
+    );
+  }
+
   const buyer = req.buyer || null;
 
   let name;
@@ -57,6 +65,7 @@ const checkout = asyncHandler(async (req, res) => {
 
     if (chosen) {
       address = chosen.address;
+      city = chosen.city || '';
       phone = chosen.phone || '';
     }
   } else {
@@ -93,6 +102,7 @@ const checkout = asyncHandler(async (req, res) => {
         assignedTo: null,
         source: 'storefront',
         buyerId: buyer ? buyer._id : null,
+        paymentMethod,
       },
       session
     );

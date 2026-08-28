@@ -294,56 +294,23 @@ describe('AI search', () => {
     });
 
     /**
-     * The permission-bypass test. AI search must not become a side door around
-     * the role scoping the ordinary list endpoints apply.
-     */
-    /**
-     * SCOPE IS APPLIED AFTER THE MODEL, NOT BY IT.
+     * ADMIN ONLY, ENFORCED AT THE ROUTE — NOT JUST BY SCOPING.
      *
-     * The model is asked to translate a question; it is never asked, and never
-     * trusted, to decide who may see the answer. The filter it produces is
-     * intersected with the caller's own scope, so a rep asking about customers
-     * gets nothing — they have no customer book — while an admin asking the
-     * identical question gets everything.
-     *
-     * This test used to check that a rep saw only their OWN customers. That was
-     * the old rule; the new one is stricter, and this is the natural-language
-     * route into the same collection, which makes it exactly the place a
-     * lockdown gets forgotten.
+     * This used to be a scope test: a rep asking about customers got zero
+     * results rather than a refusal, on the theory that `customerScopeFilter`
+     * intersecting with the model's filter was protection enough. It was not
+     * — a manager could still ask this box for the entire customer book and
+     * get it, which is exactly the access `customerRoutes` otherwise keeps
+     * read-only (and keeps a rep out of entirely). The route now gates on
+     * `requireAdmin` before the model is ever called, so a manager or rep gets
+     * a flat 403 regardless of what entity they ask about — not a
+     * quietly-empty 200 that reads as "nothing found" instead of "not for you".
      */
-    it('gives a sales rep nothing when the model asks for customers', async () => {
-      const admin = await createAdmin();
-      const rep = await createRep();
-
-      await createCustomer(admin, { name: 'One Customer', city: 'Karachi' });
-      await createCustomer(admin, { name: 'Another Customer', city: 'Karachi' });
-
-      stubFilter({
-        entity: 'customer',
-        conditions: [{ field: 'city', operator: 'contains', value: 'Karachi' }],
-        special: {},
-        sort: { field: 'createdAt', direction: 'desc' },
-        limit: 25,
-      });
-
-      const asAdmin = await api().post('/api/ai-search').set(admin.headers).send({ query: 'x' });
-      const asRep = await api().post('/api/ai-search').set(rep.headers).send({ query: 'x' });
-
-      expect(asAdmin.body.count).toBe(2);
-      expect(asRep.body.count).toBe(0);
-    });
-
-    /**
-     * A manager reads the whole book, so the same question must still answer
-     * for them. Asserted alongside the refusal above, because "scoped" is only
-     * meaningful if it lets the right people through.
-     */
-    it('gives a manager the whole answer', async () => {
+    it('blocks a manager with 403, whatever they ask', async () => {
       const admin = await createAdmin();
       const manager = await createManager();
 
       await createCustomer(admin, { name: 'One Customer', city: 'Karachi' });
-      await createCustomer(admin, { name: 'Another Customer', city: 'Karachi' });
 
       stubFilter({
         entity: 'customer',
@@ -354,6 +321,45 @@ describe('AI search', () => {
       });
 
       const res = await api().post('/api/ai-search').set(manager.headers).send({ query: 'x' });
+
+      expect(res.status).toBe(403);
+    });
+
+    it('blocks a sales rep with 403, whatever they ask', async () => {
+      const admin = await createAdmin();
+      const rep = await createRep();
+
+      await createCustomer(admin, { name: 'One Customer', city: 'Karachi' });
+
+      stubFilter({
+        entity: 'customer',
+        conditions: [{ field: 'city', operator: 'contains', value: 'Karachi' }],
+        special: {},
+        sort: { field: 'createdAt', direction: 'desc' },
+        limit: 25,
+      });
+
+      const res = await api().post('/api/ai-search').set(rep.headers).send({ query: 'x' });
+
+      expect(res.status).toBe(403);
+    });
+
+    /** An admin asking the identical question still gets everything. */
+    it('still gives an admin the whole answer', async () => {
+      const admin = await createAdmin();
+
+      await createCustomer(admin, { name: 'One Customer', city: 'Karachi' });
+      await createCustomer(admin, { name: 'Another Customer', city: 'Karachi' });
+
+      stubFilter({
+        entity: 'customer',
+        conditions: [{ field: 'city', operator: 'contains', value: 'Karachi' }],
+        special: {},
+        sort: { field: 'createdAt', direction: 'desc' },
+        limit: 25,
+      });
+
+      const res = await api().post('/api/ai-search').set(admin.headers).send({ query: 'x' });
 
       expect(res.body.count).toBe(2);
     });
@@ -532,16 +538,15 @@ describe('AI search', () => {
     });
 
     /**
-     * The fallback is a keyword search, and it is scoped by the same filters as
-     * the AI path. Worth testing separately rather than assuming: it is a
-     * DIFFERENT code path reached only when the model is unavailable, which
-     * makes it the one that keeps the old permissions when the rules change.
+     * The route-level admin gate runs before the AI-vs-fallback branch is ever
+     * reached, so a rep is blocked on the fallback path exactly the same way
+     * — worth asserting separately rather than assuming, since it is a
+     * DIFFERENT code path and the one most likely to regress independently.
      */
-    it('gives a rep nothing on the fallback path either', async () => {
+    it('blocks a rep on the fallback path too', async () => {
       const admin = await createAdmin();
       const rep = await createRep();
       await createCustomer(admin, { name: 'One Co', city: 'Karachi' });
-      await createCustomer(admin, { name: 'Another Co', city: 'Karachi' });
 
       stubFallback();
 
@@ -550,7 +555,7 @@ describe('AI search', () => {
         .set(rep.headers)
         .send({ query: 'customers in Karachi with no recent orders' });
 
-      expect(asRep.body.count).toBe(0);
+      expect(asRep.status).toBe(403);
     });
 
     it('falls back to keyword search and says why', async () => {
@@ -584,12 +589,13 @@ describe('AI search', () => {
     });
 
     /**
-     * Products are company-wide and a rep genuinely needs them — they are
-     * fulfilling orders made of them. So "scoped" must not have quietly become
-     * "empty for a rep" across the board: the refusal is specific to the
-     * customer book.
+     * Products are read-only for a rep elsewhere in the app (`GET /api/products`
+     * stays open to them), but this box is a different surface — the internal
+     * CRM search — and it is admin-only regardless of entity. A rep asking
+     * about products through THIS endpoint is still refused; they reach
+     * product data through the ordinary product list/detail routes instead.
      */
-    it('still answers a rep about products, which are not scoped', async () => {
+    it('still refuses a rep asking about products through this endpoint', async () => {
       const rep = await createRep();
       await createProduct({ name: 'Shared Term Widget', sku: 'SHARED-1' });
 
@@ -600,7 +606,7 @@ describe('AI search', () => {
         .set(rep.headers)
         .send({ query: 'Shared', entity: 'product' });
 
-      expect(res.body.count).toBe(1);
+      expect(res.status).toBe(403);
     });
 
     it('is used when the AI returns a filter that fails validation', async () => {
@@ -645,6 +651,12 @@ describe('AI search', () => {
     it('requires authentication', async () => {
       const res = await api().post('/api/ai-search').send({ query: 'anything' });
       expect(res.status).toBe(401);
+    });
+
+    it('requires admin even before validating the query body', async () => {
+      const rep = await createRep();
+      const res = await api().post('/api/ai-search').set(rep.headers).send({ query: '   ' });
+      expect(res.status).toBe(403);
     });
   });
 });

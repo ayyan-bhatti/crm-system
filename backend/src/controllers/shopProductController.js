@@ -94,7 +94,21 @@ const searchProducts = asyncHandler(async (req, res) => {
   const { search } = require('../services/shopSearchService');
   const result = await search(query.trim());
 
-  res.json({ success: true, mode: result.mode, ...(result.reason && { reason: result.reason }), data: result.data });
+  res.json({
+    success: true,
+    mode: result.mode,
+    ...(result.reason && { reason: result.reason }),
+    /*
+     * The words actually searched for, on the fallback path only.
+     *
+     * `tokenize` strips filler, so the terms are rarely the words that were
+     * typed — surfacing them is the difference between "no results" and "no
+     * results *for this*". Same reasoning as the internal AI search bar,
+     * which already shows them for exactly this reason.
+     */
+    ...(result.terms && { terms: result.terms }),
+    data: result.data,
+  });
 });
 
 /** GET /api/shop/products/:id/recommendations — "you might also like". */

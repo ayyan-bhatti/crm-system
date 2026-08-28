@@ -159,6 +159,17 @@ export function formatDateTime(value) {
   });
 }
 
+/**
+ * Human labels for a storefront order's `paymentMethod` — shared between the
+ * buyer-facing checkout form and the staff order-detail screen, so the same
+ * value reads the same way on both sides.
+ */
+export const PAYMENT_METHOD_LABELS = {
+  cod: 'Cash on delivery',
+  card: 'Card (demo)',
+  bank_transfer: 'Bank transfer (demo)',
+};
+
 /** Turn `sales_rep` into `Sales rep` for display. */
 export function humanize(value) {
   if (!value) return '';
@@ -184,4 +195,57 @@ export function orderLabel(order) {
   if (!order?._id) return '—';
 
   return `#${String(order._id).slice(-6)}`;
+}
+
+// --- Placeholder product images ----------------------------------------------
+
+/**
+ * A deterministic set of background colours for generated product placeholders
+ * — the same handful of hues used for the category bar chart's series colours,
+ * so a placeholder reads as "part of this app" rather than a random swatch.
+ */
+const PLACEHOLDER_PALETTE = ['#2a78d6', '#1f9d78', '#c2762a', '#7c5cd6', '#c23a5e', '#2a9bc2'];
+
+/** A short, stable hash of a string, used only to pick a palette index. */
+function hashString(value) {
+  let hash = 0;
+  for (let i = 0; i < value.length; i += 1) {
+    hash = (hash * 31 + value.charCodeAt(i)) >>> 0;
+  }
+  return hash;
+}
+
+/**
+ * Up to two initials from a product's name — "Standing Desk" becomes "SD",
+ * a one-word name becomes its first letter.
+ */
+function productInitials(name) {
+  const words = String(name || '?').trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return '?';
+  if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
+  return (words[0][0] + words[1][0]).toUpperCase();
+}
+
+/**
+ * A generated "no photo yet" placeholder for a product with no `imageUrl` —
+ * a neutral, on-brand square carrying the product's initials and category,
+ * built as an inline SVG data URI so it needs no network request and never
+ * 404s. This is what every product created before `imageUrl` existed falls
+ * back to, and it is deliberately NOT a random stock photo: the point is that
+ * it reads as "no photo yet", not as "this happens to be a photo of a desk".
+ */
+export function placeholderImage(product) {
+  const name = product?.name || 'Product';
+  const category = product?.category || '';
+  const color = PLACEHOLDER_PALETTE[hashString(name + category) % PLACEHOLDER_PALETTE.length];
+  const initials = productInitials(name);
+
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="480" height="480" viewBox="0 0 480 480">
+    <rect width="480" height="480" fill="${color}" opacity="0.14"/>
+    <rect width="480" height="480" fill="none" stroke="${color}" stroke-opacity="0.3" stroke-width="2"/>
+    <text x="240" y="252" font-family="system-ui, sans-serif" font-size="120" font-weight="600" fill="${color}" text-anchor="middle">${initials}</text>
+    ${category ? `<text x="240" y="330" font-family="system-ui, sans-serif" font-size="22" font-weight="500" fill="${color}" text-anchor="middle" opacity="0.85">${category}</text>` : ''}
+  </svg>`;
+
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }

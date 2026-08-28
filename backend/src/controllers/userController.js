@@ -515,6 +515,23 @@ async function notifyDecision(user, req, approved) {
   }
 }
 
+/**
+ * GET /api/users/activity-digest — admin only.
+ *
+ * See services/staffActivityDigestService.js — every figure is counted from
+ * the `User` and `AuditLog` collections before the model is asked to narrate
+ * it, and the response schema has no numeric field at all.
+ */
+const getActivityDigest = asyncHandler(async (req, res) => {
+  const { getDigest } = require('../services/staffActivityDigestService');
+  const result = await getDigest(req.user?._id?.toString() ?? null);
+
+  res.json({
+    success: true,
+    data: { mode: result.mode, facts: result.facts, narrative: result.narrative },
+  });
+});
+
 module.exports = {
   listUsers,
   listPendingRequests,
@@ -527,4 +544,5 @@ module.exports = {
   createUser,
   updateUser,
   deleteUser,
+  getActivityDigest,
 };

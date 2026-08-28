@@ -77,7 +77,7 @@ export default function BuyerLogin() {
 
         <p className="mt-5 text-center text-sm text-ink-2">
           New here?{' '}
-          <Link to="/register" className={link}>
+          <Link to="/register" state={location.state} className={link}>
             Create an account
           </Link>
         </p>

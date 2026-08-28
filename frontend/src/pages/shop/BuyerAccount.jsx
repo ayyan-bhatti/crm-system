@@ -7,7 +7,7 @@ import { useToast } from '../../components/Toast';
 import { Card, ErrorBanner, Field, PageHeader, Spinner } from '../../components/common';
 import { btnDanger, btnPrimary, btnSecondary, link } from '../../ui';
 
-const EMPTY_FORM = { label: '', address: '', phone: '' };
+const EMPTY_FORM = { label: '', address: '', city: '', phone: '' };
 
 /**
  * The buyer's saved addresses.
@@ -45,7 +45,12 @@ export default function BuyerAccount() {
   }
 
   function startEdit(address) {
-    setForm({ label: address.label, address: address.address, phone: address.phone || '' });
+    setForm({
+      label: address.label,
+      address: address.address,
+      city: address.city || '',
+      phone: address.phone || '',
+    });
     setEditingId(address._id);
     setAdding(true);
   }
@@ -62,7 +67,12 @@ export default function BuyerAccount() {
     setBusy(true);
 
     try {
-      const payload = { label: form.label, address: form.address, phone: form.phone || undefined };
+      const payload = {
+        label: form.label,
+        address: form.address,
+        city: form.city,
+        phone: form.phone || undefined,
+      };
       const next = editingId
         ? await shopAuthApi.updateAddress(editingId, payload)
         : await shopAuthApi.addAddress(payload);
@@ -127,6 +137,7 @@ export default function BuyerAccount() {
               <div className="text-sm">
                 <p className="font-medium text-ink">{addr.label}</p>
                 <p className="text-ink-2">{addr.address}</p>
+                {addr.city && <p className="text-ink-2">{addr.city}</p>}
                 {addr.phone && <p className="text-xs text-muted">{addr.phone}</p>}
               </div>
               <div className="flex shrink-0 gap-2">
@@ -171,13 +182,22 @@ export default function BuyerAccount() {
             <Field
               label="Address"
               required
+              hint="Street, building, and any other delivery detail."
               value={form.address}
               onChange={(e) => setForm({ ...form, address: e.target.value })}
             />
             <Field
+              label="City"
+              required
+              hint="So the courier knows which city to deliver in."
+              value={form.city}
+              onChange={(e) => setForm({ ...form, city: e.target.value })}
+            />
+            <Field
               label="Phone"
               type="tel"
-              hint="Optional — used to reach you about delivery."
+              required
+              hint="In case we need to reach you about delivery."
               value={form.phone}
               onChange={(e) => setForm({ ...form, phone: e.target.value })}
             />

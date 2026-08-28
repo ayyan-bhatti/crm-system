@@ -83,6 +83,18 @@ const ORDER_STATUS = {
 /** Default stock level at or below which a product counts as "low stock". */
 const DEFAULT_LOW_STOCK_THRESHOLD = 10;
 
+/**
+ * How a storefront order says it will be paid. This is a demo storefront with
+ * no real payment processor behind it — nothing here is charged — so the
+ * value is purely informational: what a rep or admin sees on the order when
+ * deciding how to fulfil it.
+ */
+const PAYMENT_METHOD = {
+  COD: 'cod',
+  CARD: 'card',
+  BANK_TRANSFER: 'bank_transfer',
+};
+
 module.exports = {
   ROLES,
   REQUESTABLE_ROLES,
@@ -96,4 +108,6 @@ module.exports = {
   ORDER_STATUS,
   ORDER_STATUS_VALUES: Object.values(ORDER_STATUS),
   DEFAULT_LOW_STOCK_THRESHOLD,
+  PAYMENT_METHOD,
+  PAYMENT_METHOD_VALUES: Object.values(PAYMENT_METHOD),
 };

@@ -123,6 +123,16 @@ const createProduct = asyncHandler(async (req, res) => {
   const { name, sku, price, stockQty, category, lowStockThreshold, imageUrl, description } =
     req.body;
 
+  // Required on CREATE only, not on the schema itself — every product seeded
+  // or created before this rule existed keeps its empty `imageUrl` and still
+  // falls back to the storefront's generated placeholder. A schema-level
+  // `required` would instead fail validation the next time any of THOSE
+  // products was merely edited for an unrelated field, which is not what
+  // "new products need a photo" was ever meant to reach back and break.
+  if (!imageUrl || !imageUrl.trim()) {
+    throw ApiError.badRequest('Image URL is required for a new product');
+  }
+
   const product = await Product.create({
     name,
     sku,

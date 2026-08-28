@@ -1,4 +1,4 @@
-import { NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import usePermissions from '../hooks/usePermissions';
 import { humanize } from '../ui';
@@ -90,6 +90,22 @@ export default function DashboardLayout() {
           <span className="text-[15px] font-semibold tracking-tight text-ink">SimpleCRM</span>
         </div>
 
+        {/*
+          The storefront's one entry point from the CRM — mirrors the small
+          "CRM" link ShopLayout offers in the other direction. Staff are
+          shoppers too, and closing this tab or hunting for the site's public
+          URL shouldn't be the only way back to it.
+        */}
+        <Link
+          to="/"
+          className="mx-3 mb-2 flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-muted hover:bg-neutral-wash hover:text-ink-2"
+        >
+          <svg viewBox="0 0 20 20" className="h-3.5 w-3.5 shrink-0 fill-current" aria-hidden="true">
+            <path d="M9.3 3.3a1 1 0 011.4 0l6 6a1 1 0 01-1.4 1.4L15 10.4V16a1 1 0 01-1 1h-3a1 1 0 01-1-1v-3H10v3a1 1 0 01-1 1H6a1 1 0 01-1-1v-5.6l-.3.3a1 1 0 01-1.4-1.4l6-6z" />
+          </svg>
+          Back to store
+        </Link>
+
         <nav className="flex-1 space-y-1 px-3 py-2">
           {visibleItems.map((item) => (
             <NavLink key={item.to} to={item.to} end={item.end} className={navClass}>
@@ -137,6 +153,9 @@ export default function DashboardLayout() {
         <header className="flex h-16 items-center justify-between gap-4 border-b border-hairline bg-surface px-5 sm:hidden">
           <span className="text-[15px] font-semibold tracking-tight text-ink">SimpleCRM</span>
           <div className="flex items-center gap-3">
+            <Link to="/" className="text-sm font-medium text-ink-2 hover:text-ink">
+              Store
+            </Link>
             <NavLink
               to="/crm/account"
               className="flex h-8 w-8 items-center justify-center rounded-full bg-brand-wash text-xs font-semibold text-brand-ink"

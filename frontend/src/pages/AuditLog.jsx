@@ -3,6 +3,7 @@ import { auditApi } from '../api/resources';
 import useFetch from '../hooks/useFetch';
 import {
   Card,
+  CardSkeleton,
   ErrorBanner,
   ListEmptyState,
   PageHeader,
@@ -161,6 +162,8 @@ export default function AuditLog() {
         </div>
       </Card>
 
+      <AuditDigestCard entity={entity} action={action} />
+
       <Card>
         {loading ? (
           // A skeleton shaped like the table, matching the other three lists —
@@ -249,5 +252,43 @@ export default function AuditLog() {
         )}
       </Card>
     </div>
+  );
+}
+
+/**
+ * A plain-English summary of the range currently on screen.
+ *
+ * Re-fetches whenever the filters change, and passes those same filters to the
+ * endpoint — the digest and the table below it always describe the same rows.
+ * Deliberately NOT paged: it summarises the whole filtered range, not the 25
+ * entries on this page, which is the question someone actually has when they
+ * narrow an audit log to "deletions this week".
+ */
+function AuditDigestCard({ entity, action }) {
+  const { data, loading, error } = useFetch(
+    () => auditApi.digest({ entity: entity || undefined, action: action || undefined }),
+    [entity, action]
+  );
+
+  return (
+    <Card className="mb-4 p-5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-sm font-semibold text-ink">What happened in this range</h2>
+        {data && (
+          <span
+            className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${
+              data.mode === 'ai' ? 'bg-good-wash text-good-ink' : 'bg-warning-wash text-warning-ink'
+            }`}
+          >
+            {data.mode === 'ai' ? 'AI summary' : 'Counted summary'}
+          </span>
+        )}
+      </div>
+
+      {loading && <CardSkeleton lines={2} />}
+      <ErrorBanner message={error} />
+
+      {data && <p className="mt-2 text-sm text-ink-2">{data.narrative}</p>}
+    </Card>
   );
 }

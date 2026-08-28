@@ -3530,3 +3530,216 @@ guest-checkout-form assertions for behaviour that was deliberately deleted, not 
 + 29 end-to-end, all clean. Lint and production build clean on both packages.**
 
 **Final totals: 958 backend + 216 frontend + 11 end-to-end**, lint clean on both packages.
+
+## Round 2, phase 10: a QA pass, and two bugs that only a real catalogue could surface
+
+A written fix-list from the person running the project, after a QA review of everything
+above. Six sections, most of them corrections rather than new features — the interesting
+part of this entry is the two defects found while *verifying* the work, neither of which
+any existing test would ever have caught.
+
+**The internal AI search became admin-only, at the route and not just in the UI.** It had
+been open to every authenticated role since it was built, on the reasoning recorded in
+`aiSearchRoutes.js` that the controller's `customerScopeFilter`/`orderScopeFilter` narrowed
+whatever the model asked for. That reasoning was half right and the wrong half mattered: a
+scope filter returns *nothing* for a sales rep, which is safe, but returns *everything* for
+a manager — so a manager could phrase their way to the entire customer book through a
+search box, while `customerRoutes.js` took care to keep them read-only on the same
+collection. `requireAdmin` now runs before any Gemini call is made, which is both cheaper
+(a 403 costs nothing; a scoped-to-empty search still spends a paid request) and impossible
+to loosen by accident later, since it no longer depends on a scope helper staying strict.
+Mirrored in `usePermissions` as a new `internalAiSearch` action — named for the action, not
+the role, per that file's own rule — and `Dashboard` now renders `<AiSearchBar />` only
+behind it. Four tests in `aiSearch.test.js` asserted the *old* rule (a rep gets an empty
+200, a manager gets the whole answer); they were rewritten to assert 403 on both the AI and
+the fallback paths, because a test that still passes after a security rule inverts is a test
+that was checking the wrong thing. `aiClient.test.js`'s outage test also had to switch its
+actor from manager to admin — it exists to prove an AI outage degrades to a 200, and left
+alone it would have started failing on a 403 it was never about.
+
+**Three dashboards that are actually different screens.** This was a known gap flagged in
+the original build log and never properly closed — all three roles got one layout with
+different numbers in it, which is how a sales rep ended up looking at a "Customers: 0" tile.
+Zero is the correct figure (a rep has no customer book) and a false-sounding statement about
+the business, which is the precise failure mode of filtering a layout instead of choosing
+one. `Dashboard.jsx` is now three components behind a role switch, and the split is
+enforced server-side: `roleExtras()` in `dashboardController` computes the approval queue
+and unassigned-order count for admin and manager, the user/account figures for admin alone,
+and for a rep only their own pending orders. Nothing a role cannot act on is *sent* to them,
+so nothing has to be hidden — a rep is not one devtools tab away from company revenue. The
+rep dashboard is deliberately not a tile grid at all but a work queue: their pending orders,
+oldest first, each linking to where they can move it. The one company-wide figure it keeps
+is low stock, because that blocks their own fulfilment work. `dashboard.test.js` asserts on
+what is *absent* per role as much as what is present, since "structurally different" is only
+true if the payloads differ.
+
+**A caveat on what "team-scoped" currently means.** The brief asks for a manager to see
+their team's figures. There is no manager-to-rep relationship anywhere in the data model —
+no `managerId` on `User`, no team collection — and `hasFullRecordAccess` treats admin and
+manager identically, so a manager has always seen the whole book. Inventing that hierarchy
+was well outside a fix-list, so "team" here means all operational data, and a manager is
+differentiated from an admin by what is *removed* (user management, account figures,
+org-wide framing) rather than by a narrower query. Recorded rather than glossed over,
+because the difference matters the moment a second sales team exists.
+
+**Two new AI features, 11 and 12, both admin-only.** A staff activity digest on the Users
+page (`staffActivityDigestService`) and an audit digest on the Audit Logs page
+(`auditDigestService`). Both follow the discipline every other feature here follows —
+MongoDB counts, the model narrates, no numeric field in either response schema, both
+degrade to a templated narrative. Two decisions worth recording. The activity digest reports
+records *changed*, from the audit trail, and its prompt explicitly forbids the model from
+saying anyone has or has not logged in: the app records writes and never records a bare
+session, so "hasn't signed in" is a claim this data cannot support, and a model asked to
+narrate "activity" will reach for it unless told not to. And the audit digest takes the
+screen's *current filters* — `buildAuditFilter` was extracted from `listAuditLogs` so both
+share one definition — because an audit log is only ever read through a filter, and a
+summary computed over a different set than the table beneath it would look authoritative
+while contradicting what the reader can see.
+
+**Product images, with the required-ness in the right place.** `imageUrl` and `description`
+already existed on the `Product` model and on both storefront surfaces; the gap was that
+`ProductForm` never offered either, so nothing could set them. Both added, `imageUrl`
+required. Required *in the create controller*, deliberately not on the schema: a
+schema-level `required` would fail validation the next time anyone edited an older product
+for an unrelated reason — a restock, a price change — which is a rule about new products
+reaching back to break old data. `product.test.js` asserts exactly that: 400 on a create
+with no image, 200 on a `stockQty` edit of an existing image-less product. For those older
+products the storefront now renders a generated placeholder (`placeholderImage` in `ui.js`)
+— an inline SVG data URI with the product's initials and category on a hashed-but-stable
+background colour, so it needs no network request, never 404s, and reads as "no photo yet"
+rather than as a wrong photo. The seed script now populates images and descriptions for all
+ten demo products, so the catalogue looks populated out of the box rather than being a wall
+of placeholders.
+
+**Buy now, and the details a purchase actually needs.** There was no "Buy now" control
+anywhere — the closest path was add-to-cart, find the drawer, click checkout. Added to
+`ProductDetail`, and it routes an unsigned visitor to `/login` carrying
+`state.from: '/checkout'`, so they land back on checkout rather than the shop home.
+`BuyerRegister` had never read `state.from` at all (only `BuyerLogin` did), so a visitor who
+chose "create an account" instead of "sign in" lost their destination — fixed, and both
+pages now pass `state` through the link between them so the round trip survives switching
+between the two. Checkout also collects a payment method (`PAYMENT_METHOD` in
+`config/constants`, stored on `Order`, shown on the staff order detail) and addresses gained
+a required `city`. Both are optional on their schemas and required at their controllers, the
+same reasoning as `imageUrl`: an order placed before either existed is still a valid order.
+A "Back to store" link was added to the CRM sidebar and mobile header, mirroring the small
+"CRM" link `ShopLayout` already offered in the other direction — the CRM had been a
+one-way door since the routing swap.
+
+**Hints and required markers** were applied through the existing shared `Field` component on
+every form named in the brief. One deliberate deviation: the brief lists customer *phone* as
+required, and it is not marked required here — `Customer.phone` is optional on the model and
+several existing tests create customers without one, so marking it required in the UI alone
+would have produced a form that refuses input the API accepts. It carries the hint
+explaining when it is needed instead.
+
+### The two bugs, both found by verification rather than by a test
+
+Neither would ever have failed a unit test, because both are cases where the code did
+exactly what its tests asked and the tests asked for the wrong thing.
+
+**The storefront's fallback search could not find its own products.** Running all twelve
+features against a realistic seeded catalogue — rather than against fixtures whose product
+names happen to contain the search words — the very first one returned *zero results* for
+"something waterproof under $50", with a $45 waterproof rain jacket sitting in the
+catalogue. Two causes, both in the fallback path. It split the query on whitespace and kept
+every word of two characters or more, so it searched for the literal words "something" and
+"under"; and it matched on `name` alone. A shopper describes what a thing *is*, not what it
+is *called* — "waterproof" was in the description, "outdoor" was the category, and neither
+was in the name. The existing test passed because it searched for "rain jacket" against a
+product named "Rain Jacket". Fixed by reusing `tokenize` from `filterTranslator` — the
+internal search's own stop-word-aware splitter, which is why it lives in a shared module —
+and matching name, description and category, all three of which were already in
+`PUBLIC_PRODUCT_FIELDS` and rendered on the product page, so nothing new is exposed. The
+endpoint now also returns the terms it actually searched for, and the storefront shows them,
+for the same reason the internal search bar already did: the difference between "no results"
+and "no results *for this*".
+
+**A test that passed for the wrong reason.** The new audit-digest filter test seeded its
+"unfiltered" case with `createCustomer()`, a helper that writes straight through the Mongoose
+model — which records no audit entry at all. So the trail held only the product, the
+filtered and unfiltered totals were both 1, and the assertion that one exceeds the other
+failed. The fix was the test's, not the code's: both writes now go through the API, which is
+the only thing that produces a trail. Worth recording because the failure mode is the
+inverse of the usual one — had the numbers happened to differ for any other reason, this
+would have passed while testing nothing.
+
+**The storefront lied about what it was showing, for the length of every search.** Found by
+the end-to-end suite, and worth the entry on its own because the test failed the way a
+*user* would have been misled. `useFetch` keeps the previous response in `data` while the
+next request is in flight — correct, and what stops the grid flashing empty between pages.
+But the previous response on this screen is the plain product LIST, and a list response has
+no `mode` field at all. The status line only asked whether `mode === 'ai'`, so for any
+response without one it fell to the else branch and rendered `Showing keyword matches for
+"Widget"` — a confident, specific claim — directly above the stale, unfiltered catalogue,
+for as long as the search took. The Playwright snapshot caught it exactly: the status line
+and a `Loading` spinner and the *unfiltered* results, all on screen together. Fixed by
+gating the block on `!loading && data?.mode` — the `mode` check is what distinguishes a
+search response from a list one, and neither guard is redundant — and by holding the results
+grid and the empty state back while loading too, since "No products found" over a
+half-finished request is the same lie in the other direction.
+
+### On proving both AI modes — and the third bug, which was the worst of them
+
+Section A asked for live proof of both modes for all twelve features, and the verification
+was done with a throwaway harness that seeds a real in-memory database and calls each of
+the twelve services directly, reporting the `mode` each came back with.
+
+The fallback mode is proven for all twelve, and more convincingly than a mocked failure
+would have been: the first run hit a real `429 RESOURCE_EXHAUSTED` from the live API — the
+free tier's 20-requests-per-day cap, already spent — so every one of the twelve degraded
+under a genuine upstream failure rather than a stubbed one, and every one produced correct,
+data-grounded output. That is precisely the scenario the fallbacks exist for, arrived at by
+accident and worth more than the test that was planned.
+
+The live run is what found the third and most serious bug of this round.
+
+**Every AI feature had been silently serving its fallback under the configured model.** On
+the first live pass, three features came back `fallback` with *no upstream failure in the
+log to explain it* — the AI request was logged `outcome: ok`, with a token count, and the
+feature served a template anyway. The cause is `THINKING_ALLOWANCE_TOKENS` in `aiClient.js`.
+Gemini bills thinking against `maxOutputTokens`, so that constant exists to add head-room on
+top of whatever a caller asks for; it was set to 256, measured honestly at the time against
+a model generation that barely thought (68-109 thought tokens for a one-word reply, per the
+comment that was there). Current Gemini 3-class models are not that. Measured again with a
+real feature prompt, `thoughtsTokenCount` came back at **529-640** for a two-to-four-sentence
+answer whose actual text was about 55 tokens. A service asking for 500 therefore had a true
+budget of 756, thinking consumed 640 of it, and the JSON was cut off mid-string — reliably,
+for any feature whose prompt made the model think even slightly harder than average.
+
+The failure mode is the reason this survived a full green test suite. A truncated reply is
+not an error at any layer: the HTTP call succeeds, `aiUsageService` records a normal
+successful request, `parseAndValidate` does exactly its job and rejects unparseable JSON,
+and the caller does exactly its job and degrades. Every one of those components behaved
+correctly and the observable result was a product where the AI never worked. No mocked-
+failure test can catch it, because a mocked failure *is* the thing being tested — the bug
+lives precisely in the case where nothing fails. Raised to 1024, which covers the measured
+640 with room for a longer prompt, and is still spent only if the model actually uses it, so
+it costs nothing on a model that thinks less. Recorded at length because the lesson is not
+about a number: a fallback that fires when nothing is broken is indistinguishable, from the
+inside, from a fallback that is working as designed.
+
+### Exactly what was and was not proven live, and what is left
+
+Being precise about this, because "12/12 verified in both modes" would be a nicer sentence
+than the true one.
+
+**Fallback mode: all twelve, under a real upstream failure** (the 429 described above), each
+producing correct data-grounded output.
+
+**Live AI mode: nine of twelve confirmed** — the storefront search, recommendations, order
+assistant, customer summary, note summariser, team digest, reorder suggestions,
+change-request summary, and the new audit digest all returned `mode: 'ai'` with sensible
+prose over real seeded data. Of the remaining three, the churn roll-up is *correct* to fall
+back: `getRollup` short-circuits when the risk list is empty rather than paying for a model
+call to narrate nothing. The other two — the draft-message and the new staff activity digest
+— are the truncation bug, diagnosed directly rather than inferred: the same prompt at a
+756-token budget came back cut off mid-string, and at 1456 came back as complete valid JSON.
+
+**What is not yet re-verified end to end**: the two truncation cases after the allowance was
+raised. Both free-tier daily quotas (the configured `gemini-3.6-flash` and the
+`gemini-3.5-flash` used as a second source) were exhausted by this verification work itself,
+and a later run degraded to 2/12 purely on `RESOURCE_EXHAUSTED` — confirmed by grepping the
+run for outcomes, not assumed. The mechanism behind the fix is proven by direct token
+measurement; the end-to-end re-run needs a quota reset or a paid key, and should be the
+first thing done next.

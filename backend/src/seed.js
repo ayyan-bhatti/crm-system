@@ -28,18 +28,98 @@ const USERS = [
   { name: 'Omar Farooq', email: 'omar@simplecrm.test', role: ROLES.SALES_REP },
 ];
 
+// `imageUrl` uses picsum.photos, seeded per SKU so the same product always
+// gets the same photo across re-seeds. This is a stand-in, not real product
+// photography, but it means the storefront looks fully populated out of the
+// box rather than showing the generated "no photo yet" placeholder on every
+// single card — that placeholder exists for products created without
+// bothering to add one, not for the demo catalogue itself.
+function demoImage(sku) {
+  return `https://picsum.photos/seed/${sku.toLowerCase()}/480/480`;
+}
+
 const PRODUCTS = [
-  { name: 'Standing Desk', sku: 'FURN-001', price: 450, stockQty: 24, category: 'Furniture' },
-  { name: 'Ergonomic Chair', sku: 'FURN-002', price: 320, stockQty: 8, category: 'Furniture' },
-  { name: 'Filing Cabinet', sku: 'FURN-003', price: 180, stockQty: 40, category: 'Furniture' },
-  { name: '27" Monitor', sku: 'TECH-001', price: 290, stockQty: 15, category: 'Electronics' },
-  { name: 'Mechanical Keyboard', sku: 'TECH-002', price: 95, stockQty: 60, category: 'Electronics' },
-  { name: 'Wireless Mouse', sku: 'TECH-003', price: 35, stockQty: 4, category: 'Electronics' },
-  { name: 'USB-C Dock', sku: 'TECH-004', price: 145, stockQty: 22, category: 'Electronics' },
-  { name: 'Laser Printer', sku: 'TECH-005', price: 410, stockQty: 3, category: 'Electronics' },
-  { name: 'A4 Paper (5 reams)', sku: 'SUPP-001', price: 22, stockQty: 200, category: 'Supplies' },
-  { name: 'Whiteboard Markers', sku: 'SUPP-002', price: 12, stockQty: 6, category: 'Supplies' },
-];
+  {
+    name: 'Standing Desk',
+    sku: 'FURN-001',
+    price: 450,
+    stockQty: 24,
+    category: 'Furniture',
+    description: 'A height-adjustable desk that goes from sitting to standing in seconds.',
+  },
+  {
+    name: 'Ergonomic Chair',
+    sku: 'FURN-002',
+    price: 320,
+    stockQty: 8,
+    category: 'Furniture',
+    description: 'Full lumbar support and adjustable armrests for a full day at the desk.',
+  },
+  {
+    name: 'Filing Cabinet',
+    sku: 'FURN-003',
+    price: 180,
+    stockQty: 40,
+    category: 'Furniture',
+    description: 'A lockable three-drawer cabinet built for A4 and letter-size folders.',
+  },
+  {
+    name: '27" Monitor',
+    sku: 'TECH-001',
+    price: 290,
+    stockQty: 15,
+    category: 'Electronics',
+    description: 'A crisp 27-inch QHD display with a thin bezel and adjustable stand.',
+  },
+  {
+    name: 'Mechanical Keyboard',
+    sku: 'TECH-002',
+    price: 95,
+    stockQty: 60,
+    category: 'Electronics',
+    description: 'Hot-swappable switches and a compact layout for all-day typing.',
+  },
+  {
+    name: 'Wireless Mouse',
+    sku: 'TECH-003',
+    price: 35,
+    stockQty: 4,
+    category: 'Electronics',
+    description: 'A lightweight wireless mouse with a battery that lasts months, not days.',
+  },
+  {
+    name: 'USB-C Dock',
+    sku: 'TECH-004',
+    price: 145,
+    stockQty: 22,
+    category: 'Electronics',
+    description: 'One cable to your laptop, everything else plugged into the dock.',
+  },
+  {
+    name: 'Laser Printer',
+    sku: 'TECH-005',
+    price: 410,
+    stockQty: 3,
+    category: 'Electronics',
+    description: 'A reliable mono laser printer built for a busy shared office.',
+  },
+  {
+    name: 'A4 Paper (5 reams)',
+    sku: 'SUPP-001',
+    price: 22,
+    stockQty: 200,
+    category: 'Supplies',
+    description: 'Five reams of standard 80gsm A4, enough for a month of printing.',
+  },
+  {
+    name: 'Whiteboard Markers',
+    sku: 'SUPP-002',
+    price: 12,
+    stockQty: 6,
+    category: 'Supplies',
+    description: 'A pack of eight low-odour dry-erase markers in assorted colours.',
+  },
+].map((product) => ({ ...product, imageUrl: demoImage(product.sku) }));
 
 // `daysAgo` drives the AI-search demo: some customers have recent orders and
 // some have none in the last 30 days, so "customers with no orders in the last

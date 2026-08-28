@@ -1,5 +1,5 @@
 const mongoose = require('mongoose');
-const { ORDER_STATUS, ORDER_STATUS_VALUES } = require('../config/constants');
+const { ORDER_STATUS, ORDER_STATUS_VALUES, PAYMENT_METHOD_VALUES } = require('../config/constants');
 
 /**
  * A single line on an order.
@@ -173,6 +173,24 @@ const orderSchema = new mongoose.Schema({
   buyerId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Buyer',
+    default: null,
+  },
+
+  /**
+   * How a storefront order says it will be paid. Optional and null on every
+   * internal order — staff placing an order over the phone are recording a
+   * sale, not collecting a payment method — and on any storefront order
+   * placed before this field existed. Required at the point of checkout
+   * itself; see `shopCheckoutController`, not this schema, for that rule, for
+   * the same "don't reach back and invalidate old documents" reason
+   * `imageUrl` on Product is optional at the schema level too.
+   */
+  paymentMethod: {
+    type: String,
+    enum: {
+      values: PAYMENT_METHOD_VALUES,
+      message: `Payment method must be one of: ${PAYMENT_METHOD_VALUES.join(', ')}`,
+    },
     default: null,
   },
 

@@ -5,6 +5,7 @@ import useFetch from '../../hooks/useFetch';
 import { useToast } from '../../components/Toast';
 import {
   Card,
+  CardSkeleton,
   ErrorBanner,
   Field,
   PageHeader,
@@ -166,6 +167,8 @@ export default function UserList() {
         normal case and is impossible to miss in the one that matters.
       */}
       <PendingApprovals onDecided={reload} />
+
+      <StaffActivityDigestCard />
 
       {editing && (
         <EditUserForm
@@ -404,6 +407,72 @@ function InviteLinkPanel({ email, link, onDismiss }) {
 }
 
 /**
+ * Who has been active, who has not, and anything that looks off.
+ *
+ * Sits on the Users page rather than the dashboard because it is about the
+ * ACCOUNTS listed below it — an idle account named here is one row down, and
+ * the deactivate control for it is right there. "Activity" means records
+ * changed, from the audit trail, never sign-ins: see the service for why
+ * this data cannot honestly claim the latter.
+ */
+function StaffActivityDigestCard() {
+  const { data, loading, error } = useFetch(() => usersApi.activityDigest(), []);
+
+  return (
+    <Card className="mb-4 p-5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-sm font-semibold text-ink">Recent staff activity</h2>
+        {data && (
+          <span
+            className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${
+              data.mode === 'ai' ? 'bg-good-wash text-good-ink' : 'bg-warning-wash text-warning-ink'
+            }`}
+          >
+            {data.mode === 'ai' ? 'AI summary' : 'Counted summary'}
+          </span>
+        )}
+      </div>
+
+      {loading && <CardSkeleton lines={2} />}
+      <ErrorBanner message={error} />
+
+      {data && (
+        <>
+          <p className="mt-2 text-sm text-ink-2">{data.narrative}</p>
+          <dl className="mt-4 grid grid-cols-2 gap-3 text-xs sm:grid-cols-4">
+            <div>
+              <dt className="font-medium uppercase tracking-wide text-muted">Changes</dt>
+              <dd className="mt-0.5 text-sm font-semibold text-ink">{data.facts.totalWrites}</dd>
+            </div>
+            <div>
+              <dt className="font-medium uppercase tracking-wide text-muted">Active</dt>
+              <dd className="mt-0.5 text-sm font-semibold text-ink">
+                {data.facts.activeAccounts}
+              </dd>
+            </div>
+            <div>
+              <dt className="font-medium uppercase tracking-wide text-muted">Idle</dt>
+              <dd className="mt-0.5 text-sm font-semibold text-ink">
+                {data.facts.idleAccounts.length}
+              </dd>
+            </div>
+            <div>
+              <dt className="font-medium uppercase tracking-wide text-muted">Pending</dt>
+              <dd className="mt-0.5 text-sm font-semibold text-ink">
+                {data.facts.pendingAccounts}
+              </dd>
+            </div>
+          </dl>
+          <p className="mt-3 text-xs text-muted">
+            Last {data.facts.windowDays} days. Activity means records changed, not sign-ins.
+          </p>
+        </>
+      )}
+    </Card>
+  );
+}
+
+/**
  * Invite a colleague.
  *
  * NO PASSWORD FIELD, AND THAT IS THE POINT.
@@ -464,10 +533,15 @@ function InviteUserForm({ onInvited, onError }) {
           label="Email"
           type="email"
           required
+          hint="They'll receive their invite link here."
           value={form.email}
           onChange={(e) => setForm({ ...form, email: e.target.value })}
         />
-        <Field label="Role">
+        <Field
+          label="Role"
+          required
+          hint="Controls what this person can see and do — see the role guide if unsure."
+        >
           <select
             className={input}
             value={form.role}
@@ -557,6 +631,7 @@ function EditUserForm({ user, onCancel, onSaved, onError }) {
           label="Email"
           type="email"
           required
+          hint="Used to sign in — changing it takes effect immediately."
           value={form.email}
           onChange={(e) => setForm({ ...form, email: e.target.value })}
         />

@@ -14,6 +14,7 @@ import {
 import Can from '../../components/Can';
 import SearchSelect from '../../components/SearchSelect';
 import ActivityTimeline from '../../components/ActivityTimeline';
+import DraftMessageCard from '../../components/DraftMessageCard';
 import usePermissions from '../../hooks/usePermissions';
 import {
   btnDanger,
@@ -25,6 +26,7 @@ import {
   link,
   money,
   orderLabel,
+  PAYMENT_METHOD_LABELS,
   td,
   th,
 } from '../../ui';
@@ -50,6 +52,7 @@ export default function OrderDetail() {
    * survives the navigation that caused it.
    */
   const toast = useToast();
+  const { can } = usePermissions();
   const [busy, setBusy] = useState(false);
 
   const { data: order, loading, error, reload } = useFetch(() => ordersApi.get(id), [id]);
@@ -174,6 +177,12 @@ export default function OrderDetail() {
                 Completed {formatDate(order.completedAt)}
               </p>
             )}
+            {/* Only ever set on a storefront order — an internal sale has no payment method to report. */}
+            {order.paymentMethod && (
+              <p className="mt-1 text-xs text-muted">
+                Paying by {PAYMENT_METHOD_LABELS[order.paymentMethod] || order.paymentMethod}
+              </p>
+            )}
           </div>
         </div>
 
@@ -226,6 +235,22 @@ export default function OrderDetail() {
           shown are those recorded at the time of the order.
         </p>
       </Card>
+
+      {/*
+        The follow-up drafter, aimed at THIS order's customer.
+
+        Gated on `viewCustomers` because the endpoint behind it lives on the
+        customer router, which is manager-and-admin only — a rep offered this
+        button would get a 403 for a customer they are correctly barred from.
+        Also needs a populated customer: an order whose customer was deleted
+        has nobody to write to.
+      */}
+      {can.viewCustomers && order.customer?._id && (
+        <DraftMessageCard
+          customerId={order.customer._id}
+          subtitle={`To ${order.customer.name}, about this order`}
+        />
+      )}
 
       {/*
        * Last on the page on purpose. The order itself — what was sold, to

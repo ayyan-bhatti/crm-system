@@ -27,6 +27,20 @@ const addressSchema = new mongoose.Schema(
       required: [true, 'An address cannot be blank'],
       maxlength: [500, 'An address cannot be longer than 500 characters'],
     },
+    /**
+     * A separate field rather than folded into the free-text `address` block
+     * above, unlike the rest of it — a courier needs the city to route the
+     * parcel at all, so it is the one part of a delivery address worth being
+     * able to see and require independently of the free-text block. Still no
+     * postcode/street/country split: see the schema comment for why the rest
+     * stays one block.
+     */
+    city: {
+      type: String,
+      trim: true,
+      required: [true, 'A city is required so deliveries can be routed'],
+      maxlength: [100, 'City cannot exceed 100 characters'],
+    },
     phone: {
       type: String,
       trim: true,

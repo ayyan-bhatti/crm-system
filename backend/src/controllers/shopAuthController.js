@@ -154,14 +154,14 @@ const getMe = asyncHandler(async (req, res) => {
  * and verified belongs to the caller.
  */
 
-/** POST /api/shop/auth/addresses — body: { label, address, phone } */
+/** POST /api/shop/auth/addresses — body: { label, address, city, phone } */
 const addAddress = asyncHandler(async (req, res) => {
-  const { label, address, phone } = req.body;
-  if (!label || !address) {
-    throw ApiError.badRequest('An address needs a label and the address itself');
+  const { label, address, city, phone } = req.body;
+  if (!label || !address || !city) {
+    throw ApiError.badRequest('An address needs a label, city and the address itself');
   }
 
-  req.buyer.addresses.push({ label, address, phone: phone || '' });
+  req.buyer.addresses.push({ label, address, city, phone: phone || '' });
   await req.buyer.save();
 
   res.status(201).json({ success: true, data: { addresses: req.buyer.addresses } });
@@ -172,9 +172,10 @@ const updateAddress = asyncHandler(async (req, res) => {
   const entry = req.buyer.addresses.id(req.params.addressId);
   if (!entry) throw ApiError.notFound('Address not found');
 
-  const { label, address, phone } = req.body;
+  const { label, address, city, phone } = req.body;
   if (label !== undefined) entry.label = label;
   if (address !== undefined) entry.address = address;
+  if (city !== undefined) entry.city = city;
   if (phone !== undefined) entry.phone = phone;
 
   await req.buyer.save();

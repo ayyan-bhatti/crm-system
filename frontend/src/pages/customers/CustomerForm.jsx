@@ -144,10 +144,16 @@ export default function CustomerForm() {
               label="Email"
               type="email"
               required
+              hint="Used to match this customer to any storefront orders they place."
               value={form.email}
               onChange={(e) => update('email', e.target.value)}
             />
-            <Field label="Phone" value={form.phone} onChange={(e) => update('phone', e.target.value)} />
+            <Field
+              label="Phone"
+              hint="Needed if they place an order."
+              value={form.phone}
+              onChange={(e) => update('phone', e.target.value)}
+            />
             <Field
               label="Company"
               value={form.company}
@@ -169,7 +175,7 @@ export default function CustomerForm() {
             <div className="sm:col-span-2">
               <Field
                 label="Address"
-                hint="Where deliveries go. Shown to the rep working an order for this customer."
+                hint="Optional unless an order needs delivery — where deliveries go. Shown to the rep working an order for this customer."
               >
                 <textarea
                   rows={3}
@@ -196,7 +202,7 @@ export default function CustomerForm() {
           </div>
 
           {canReassign && (
-            <Field label="Assigned to">
+            <Field label="Assigned to" hint="Leave blank to assign later.">
               <select
                 className={input}
                 value={form.assignedTo}

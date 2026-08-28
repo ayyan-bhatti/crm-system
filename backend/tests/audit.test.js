@@ -100,7 +100,13 @@ describe('Audit logging', () => {
       const created = await api()
         .post('/api/products')
         .set(manager.headers)
-        .send({ name: 'Blue Widget', sku: 'BW-1', price: 10, stockQty: 5 });
+        .send({
+          name: 'Blue Widget',
+          sku: 'BW-1',
+          price: 10,
+          stockQty: 5,
+          imageUrl: 'https://picsum.photos/seed/bw-1/480',
+        });
 
       await api()
         .patch(`/api/products/${created.body.data._id}`)
@@ -177,7 +183,13 @@ describe('Audit logging', () => {
       await api()
         .post('/api/products')
         .set(manager.headers)
-        .send({ name: 'Widget', sku: 'AUDIT-1', price: 10, stockQty: 5 });
+        .send({
+          name: 'Widget',
+          sku: 'AUDIT-1',
+          price: 10,
+          stockQty: 5,
+          imageUrl: 'https://picsum.photos/seed/audit-1/480',
+        });
 
       const log = await AuditLog.findOne({});
 
@@ -194,7 +206,13 @@ describe('Audit logging', () => {
       await api()
         .post('/api/products')
         .set(manager.headers)
-        .send({ name: 'Widget', sku: 'AUDIT-1', price: 10, stockQty: 5 });
+        .send({
+          name: 'Widget',
+          sku: 'AUDIT-1',
+          price: 10,
+          stockQty: 5,
+          imageUrl: 'https://picsum.photos/seed/audit-1/480',
+        });
 
       await api().delete(`/api/users/${manager.user._id}`).set(admin.headers);
 
@@ -209,7 +227,13 @@ describe('Audit logging', () => {
         .post('/api/products')
         .set(manager.headers)
         .set('User-Agent', 'jest-test-agent')
-        .send({ name: 'Widget', sku: 'AUDIT-1', price: 10, stockQty: 5 });
+        .send({
+          name: 'Widget',
+          sku: 'AUDIT-1',
+          price: 10,
+          stockQty: 5,
+          imageUrl: 'https://picsum.photos/seed/audit-1/480',
+        });
 
       const log = await AuditLog.findOne({});
 
@@ -277,7 +301,13 @@ describe('Audit logging', () => {
       await api()
         .post('/api/products')
         .set(manager.headers)
-        .send({ name: 'Widget', sku: 'W-1', price: 5, stockQty: 5 });
+        .send({
+          name: 'Widget',
+          sku: 'W-1',
+          price: 5,
+          stockQty: 5,
+          imageUrl: 'https://picsum.photos/seed/w-1/480',
+        });
     });
 
     it('returns the trail to an admin', async () => {

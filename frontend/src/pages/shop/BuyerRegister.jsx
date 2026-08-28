@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { Link, Navigate, useNavigate } from 'react-router-dom';
+import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useBuyerAuth } from '../../context/BuyerAuthContext';
 import { errorMessage } from '../../api/client';
 import { Card, ErrorBanner, Field, Spinner } from '../../components/common';
@@ -19,6 +19,7 @@ function validate(form) {
 export default function BuyerRegister() {
   const { register, isSignedIn, loading: sessionLoading } = useBuyerAuth();
   const navigate = useNavigate();
+  const location = useLocation();
 
   const [form, setForm] = useState({ name: '', email: '', password: '' });
   const [touched, setTouched] = useState({});
@@ -59,7 +60,7 @@ export default function BuyerRegister() {
 
     try {
       await register(form);
-      navigate('/', { replace: true });
+      navigate(location.state?.from || '/', { replace: true });
     } catch (err) {
       justSubmitted.current = false;
       setError(errorMessage(err, 'Unable to create your account'));
@@ -119,7 +120,7 @@ export default function BuyerRegister() {
 
         <p className="mt-5 text-center text-sm text-ink-2">
           Already have an account?{' '}
-          <Link to="/login" className={link}>
+          <Link to="/login" state={location.state} className={link}>
             Sign in
           </Link>
         </p>

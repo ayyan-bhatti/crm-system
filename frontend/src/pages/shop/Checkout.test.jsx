@@ -144,7 +144,8 @@ describe('Checkout', () => {
         expect(shopCheckoutApi.checkout).toHaveBeenCalledWith(
           [{ product: 'p1', quantity: 1 }],
           undefined,
-          'addr-1'
+          'addr-1',
+          'cod'
         )
       );
       expect(await screen.findByText('CONFIRMATION PAGE')).toBeInTheDocument();

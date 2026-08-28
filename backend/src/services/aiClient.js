@@ -90,11 +90,32 @@ const BACKOFF_BASE_MS = 250;
  * Gemini counts thinking tokens against `maxOutputTokens`, so a caller asking
  * for 600 tokens of summary was really asking for "600 tokens of thinking and
  * summary combined" — and could get back a perfectly successful response with
- * no text in it. Measured at 68-109 thought tokens for a one-word reply at the
- * lowest thinking level, so 256 is comfortable head-room rather than a guess,
- * and it is spent only if the model actually uses it.
+ * no text in it.
+ *
+ * RAISED FROM 256, AND WHY THE OLD NUMBER WENT STALE.
+ *
+ * 256 was measured honestly, but against a model generation that barely
+ * thought: 68-109 thought tokens for a one-word reply. Current models spend
+ * far more. Measured again on a Gemini 3-class flash model with a real
+ * feature prompt (the staff activity digest), `thoughtsTokenCount` came back
+ * at 529-640 for a two-to-four-sentence answer whose actual text was ~55
+ * tokens. With a caller asking for 500, the old allowance made the real
+ * budget 756 — thinking ate 640 of it, and the JSON was cut off mid-string.
+ *
+ * The failure mode is the reason this matters more than the number does. A
+ * truncated reply is not an error: the request succeeds, `outcome: ok` is
+ * logged with a token count, and the only symptom is that `parseAndValidate`
+ * rejects unparseable JSON and the feature quietly serves its fallback. Every
+ * AI feature in the app looked like it was "degrading gracefully" when it was
+ * actually never getting a usable answer at all — found by running all twelve
+ * against a live key and noticing three fall back with no upstream failure in
+ * the log to explain it.
+ *
+ * 1024 covers the measured 640 with room for a longer prompt to think harder,
+ * and — as before — it is spent only if the model actually uses it, so this
+ * costs nothing on a model that thinks less.
  */
-const THINKING_ALLOWANCE_TOKENS = 256;
+const THINKING_ALLOWANCE_TOKENS = 1024;
 
 /**
  * SDK retries are turned OFF because this module does its own.

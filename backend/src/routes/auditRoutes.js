@@ -1,7 +1,12 @@
 const express = require('express');
-const { listAuditLogs, getAuditLog } = require('../controllers/auditController');
+const {
+  listAuditLogs,
+  getAuditLog,
+  getAuditDigest,
+} = require('../controllers/auditController');
 const { protect } = require('../middleware/auth');
 const { requireRole } = require('../middleware/roles');
+const { aiSearchLimiter, aiPerUserLimiter } = require('../middleware/rateLimit');
 const { ROLES } = require('../config/constants');
 
 const router = express.Router();
@@ -20,6 +25,9 @@ const router = express.Router();
 router.use(protect, requireRole(ROLES.ADMIN));
 
 router.get('/', listAuditLogs);
+// Before `/:id`, or "digest" is parsed as an id. Rate-limited like every
+// other endpoint that makes a paid model call.
+router.get('/digest', aiSearchLimiter, aiPerUserLimiter, getAuditDigest);
 router.get('/:id', getAuditLog);
 
 module.exports = router;

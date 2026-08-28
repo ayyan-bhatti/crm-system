@@ -47,11 +47,16 @@ export const shopCartApi = {
 
 export const shopCheckoutApi = {
   /** `guestDetails` is omitted for a signed-in buyer, who checks out from their account. */
-  checkout: (items, guestDetails, addressId) =>
+  checkout: (items, guestDetails, addressId, paymentMethod) =>
     shopClient
       .post(
         '/shop/checkout',
-        { items, ...guestDetails, ...(addressId ? { addressId } : {}) },
+        {
+          items,
+          ...guestDetails,
+          ...(addressId ? { addressId } : {}),
+          paymentMethod,
+        },
         { headers: { 'Idempotency-Key': idempotencyKey() } }
       )
       .then((r) => r.data.data),

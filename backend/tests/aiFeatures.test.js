@@ -87,6 +87,51 @@ describe('1. Storefront natural-language product search', () => {
     // Unit-level: the service module itself, not the AI path.
     expect(typeof shopSearchService.search).toBe('function');
   });
+
+  /**
+   * THE BUG THIS EXISTS FOR, found by running the fallback against a real
+   * catalogue rather than a fixture whose product names happened to contain
+   * the search words.
+   *
+   * The fallback split on whitespace and matched `name` only, so the single
+   * most likely thing a shopper types — a description of the thing, in a
+   * sentence — matched nothing at all. "something waterproof under $50"
+   * searched for the literal words "something" and "under" against product
+   * NAMES, and returned an empty catalogue while the product sat right
+   * there. Both halves are asserted: filler words are dropped, and the words
+   * that survive are matched against description and category too.
+   */
+  it('finds a product by its description and category, not just its name', async () => {
+    await createProduct({
+      name: 'Rain Jacket',
+      category: 'Outdoor',
+      description: 'A light waterproof shell for a wet weekend.',
+      price: 45,
+    });
+    await createProduct({ name: 'Desk Lamp', category: 'Home', description: 'A warm reading light.' });
+
+    const res = await api().get(
+      '/api/shop/products/search?q=' + encodeURIComponent('something waterproof under $50')
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.body.mode).toBe('fallback');
+    // "something" and "under" are filler and must not become search terms.
+    expect(res.body.terms).toContain('waterproof');
+    expect(res.body.terms).not.toContain('something');
+    expect(res.body.terms).not.toContain('under');
+    // The jacket matches on DESCRIPTION alone — "waterproof" is not in its name.
+    expect(res.body.data.map((p) => p.name)).toEqual(['Rain Jacket']);
+  });
+
+  it('finds a product by category alone', async () => {
+    await createProduct({ name: 'Rain Jacket', category: 'Outdoor', description: 'A shell.' });
+    await createProduct({ name: 'Desk Lamp', category: 'Home', description: 'A light.' });
+
+    const res = await api().get('/api/shop/products/search?q=outdoor');
+
+    expect(res.body.data.map((p) => p.name)).toEqual(['Rain Jacket']);
+  });
 });
 
 describe('2. "You might also like"', () => {
@@ -155,7 +200,7 @@ describe('3. Order-status assistant', () => {
     const order = await api()
       .post('/api/shop/checkout')
       .set('Authorization', `Bearer ${registered.body.data.token}`)
-      .send({ items: [{ product: product._id, quantity: 1 }] });
+      .send({ items: [{ product: product._id, quantity: 1 }], paymentMethod: 'cod' });
 
     const res = await api()
       .post('/api/shop/orders/ask')
@@ -188,7 +233,7 @@ describe("4. Customer summary includes storefront order history", () => {
     await api()
       .post('/api/shop/checkout')
       .set('Authorization', `Bearer ${registered.body.data.token}`)
-      .send({ items: [{ product: product._id, quantity: 1 }] });
+      .send({ items: [{ product: product._id, quantity: 1 }], paymentMethod: 'cod' });
 
     const res = await api().get(`/api/customers/${customer._id}/summary`).set(admin.headers);
 
@@ -472,6 +517,176 @@ describe('10. Plain-English change-request diff summary', () => {
 
     const result = await changeRequestSummaryService.summarize(request);
     expect(result.summary).toMatch(/cancel/i);
+  });
+});
+
+describe('11. Staff activity digest', () => {
+  it('is admin-only — a manager and a rep are both refused', async () => {
+    const admin = await createAdmin();
+    const manager = await createManager();
+    const rep = await createRep();
+
+    const adminRes = await api().get('/api/users/activity-digest').set(admin.headers);
+    const managerRes = await api().get('/api/users/activity-digest').set(manager.headers);
+    const repRes = await api().get('/api/users/activity-digest').set(rep.headers);
+
+    expect(adminRes.status).toBe(200);
+    expect(adminRes.body.data.mode).toBe('fallback');
+    expect(managerRes.status).toBe(403);
+    expect(repRes.status).toBe(403);
+  });
+
+  /**
+   * The counts must come from the real collections, not from anything the
+   * model produced — this is what makes the narrative trustworthy. An admin
+   * who has just written a product is "active"; a colleague who has written
+   * nothing is reported as idle.
+   */
+  it('counts real audit writes and names an account that has changed nothing', async () => {
+    const admin = await createAdmin();
+    await createManager({ name: 'Idle Colleague' });
+
+    await api()
+      .post('/api/products')
+      .set(admin.headers)
+      .send({
+        name: 'Tracked Widget',
+        sku: 'TRACK-1',
+        price: 5,
+        stockQty: 5,
+        imageUrl: 'https://picsum.photos/seed/track-1/480',
+      });
+
+    const res = await api().get('/api/users/activity-digest').set(admin.headers);
+    const { facts, narrative } = res.body.data;
+
+    expect(facts.totalWrites).toBeGreaterThanOrEqual(1);
+    expect(facts.mostActive.map((a) => a.name)).toContain(admin.user.name);
+    expect(facts.idleAccounts.map((a) => a.name)).toContain('Idle Colleague');
+    expect(narrative).toMatch(/change/i);
+  });
+
+  /** A pending sign-up is worth surfacing, and is not the same as an idle account. */
+  it('reports pending accounts separately from idle ones', async () => {
+    const admin = await createAdmin();
+
+    await api()
+      .post('/api/auth/register')
+      .send({
+        name: 'Hopeful Applicant',
+        email: 'hopeful@example.com',
+        password: 'Karachi-Ledger-72',
+        requestedRole: 'sales_rep',
+      });
+
+    const res = await api().get('/api/users/activity-digest').set(admin.headers);
+    const { facts } = res.body.data;
+
+    expect(facts.pendingAccounts).toBeGreaterThanOrEqual(1);
+    // Pending accounts are excluded from the idle list — they are not idle,
+    // they are waiting on the admin reading this.
+    expect(facts.idleAccounts.map((a) => a.name)).not.toContain('Hopeful Applicant');
+  });
+});
+
+describe('12. Audit digest', () => {
+  it('is admin-only, like the rest of the audit router', async () => {
+    const admin = await createAdmin();
+    const manager = await createManager();
+    const rep = await createRep();
+
+    const adminRes = await api().get('/api/audit-logs/digest').set(admin.headers);
+    const managerRes = await api().get('/api/audit-logs/digest').set(manager.headers);
+    const repRes = await api().get('/api/audit-logs/digest').set(rep.headers);
+
+    expect(adminRes.status).toBe(200);
+    expect(adminRes.body.data.mode).toBe('fallback');
+    expect(managerRes.status).toBe(403);
+    expect(repRes.status).toBe(403);
+  });
+
+  it('summarises real counts from the trail', async () => {
+    const admin = await createAdmin();
+
+    await api()
+      .post('/api/products')
+      .set(admin.headers)
+      .send({
+        name: 'Audited Widget',
+        sku: 'AUDITED-1',
+        price: 5,
+        stockQty: 5,
+        imageUrl: 'https://picsum.photos/seed/audited-1/480',
+      });
+
+    const res = await api().get('/api/audit-logs/digest').set(admin.headers);
+    const { facts, narrative } = res.body.data;
+
+    expect(facts.total).toBeGreaterThanOrEqual(1);
+    expect(facts.byAction.create).toBeGreaterThanOrEqual(1);
+    expect(facts.byEntity.product).toBeGreaterThanOrEqual(1);
+    expect(facts.byActor.map((a) => a.name)).toContain(admin.user.name);
+    expect(narrative).toMatch(/entr(y|ies)/i);
+  });
+
+  /**
+   * THE POINT OF THIS FEATURE, AND THE THING MOST LIKELY TO REGRESS.
+   *
+   * The digest must describe the rows the SCREEN is showing, not the whole
+   * trail — the controller shares one `buildAuditFilter` with the list
+   * endpoint so the two cannot drift. A digest that silently summarised
+   * everything would look authoritative while contradicting the table under
+   * it.
+   */
+  it('honours the same filters as the list, rather than summarising everything', async () => {
+    const admin = await createAdmin();
+
+    /*
+     * Both writes go through the API on purpose. `createCustomer()` writes
+     * straight through the model, which records no audit entry at all — so
+     * seeding with it would leave the trail holding only the product, and
+     * this test would compare 1 against 1 and pass for the wrong reason.
+     */
+    await api()
+      .post('/api/customers')
+      .set(admin.headers)
+      .send({ name: 'Audited Co', email: 'audited-co@example.com' });
+
+    await api()
+      .post('/api/products')
+      .set(admin.headers)
+      .send({
+        name: 'Filtered Widget',
+        sku: 'FILTER-1',
+        price: 5,
+        stockQty: 5,
+        imageUrl: 'https://picsum.photos/seed/filter-1/480',
+      });
+
+    const unfiltered = await api().get('/api/audit-logs/digest').set(admin.headers);
+    const productsOnly = await api()
+      .get('/api/audit-logs/digest?entity=product')
+      .set(admin.headers);
+
+    // The customer create is in the unfiltered total and must NOT be in the
+    // product-filtered one.
+    expect(unfiltered.body.data.facts.total).toBeGreaterThan(
+      productsOnly.body.data.facts.total
+    );
+    expect(unfiltered.body.data.facts.byEntity.customer).toBeGreaterThanOrEqual(1);
+    expect(Object.keys(productsOnly.body.data.facts.byEntity)).toEqual(['product']);
+    expect(productsOnly.body.data.facts.filtersApplied).toContain('entity');
+  });
+
+  it('says so plainly when the filters match nothing', async () => {
+    const admin = await createAdmin();
+
+    const res = await api()
+      .get('/api/audit-logs/digest?entity=order&action=delete')
+      .set(admin.headers);
+
+    expect(res.body.data.facts.total).toBe(0);
+    expect(res.body.data.narrative).toMatch(/no audit entries/i);
   });
 });
 

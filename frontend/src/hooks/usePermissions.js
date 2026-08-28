@@ -147,6 +147,19 @@ export const PERMISSIONS = {
    * "except your own colleagues' rows" and does not try to.
    */
   approveBuyerRequest: [ADMIN, MANAGER],
+
+  /**
+   * The internal CRM natural-language search box — the one that queries raw
+   * customer/order/product records directly, as distinct from the storefront's
+   * public product search (which is never gated by this table at all; see the
+   * note below on buyer-facing actions).
+   *
+   * Admin only. A manager or sales rep could otherwise phrase their way to the
+   * whole customer book in one sentence, which is exactly the access
+   * `viewCustomers`/`writeCustomers` above take care to withhold or restrict.
+   * Mirrors `requireAdmin` on `POST /api/ai-search`.
+   */
+  internalAiSearch: [ADMIN],
 };
 
 /*

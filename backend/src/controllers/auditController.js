@@ -35,9 +35,14 @@ const SORTABLE_FIELDS = ['createdAt', 'action', 'entity'];
  * is not caution, it is the only setting that does not undo the rest of the
  * authorisation model.
  */
-const listAuditLogs = asyncHandler(async (req, res) => {
-  const { entity, action, actor, entityId, from, to } = req.query;
-  const { page, limit, skip } = getPagination(req.query);
+/**
+ * The filter behind both the list and its AI digest.
+ *
+ * Extracted so the two cannot drift: a digest built from a different filter
+ * than the table it sits above would describe rows the reader cannot see.
+ */
+function buildAuditFilter(query = {}) {
+  const { entity, action, actor, entityId, from, to } = query;
 
   const filter = {};
 
@@ -48,6 +53,14 @@ const listAuditLogs = asyncHandler(async (req, res) => {
 
   const createdAt = getDateRange(from, to);
   if (createdAt) filter.createdAt = createdAt;
+
+  return filter;
+}
+
+const listAuditLogs = asyncHandler(async (req, res) => {
+  const { page, limit, skip } = getPagination(req.query);
+
+  const filter = buildAuditFilter(req.query);
 
   const sort = getSort(req.query, SORTABLE_FIELDS);
 
@@ -95,4 +108,25 @@ const getAuditLog = asyncHandler(async (req, res) => {
   return res.json({ success: true, data: log });
 });
 
-module.exports = { listAuditLogs, getAuditLog };
+/**
+ * GET /api/audit-logs/digest — admin only, same filters as the list.
+ *
+ * Deliberately reuses `buildAuditFilter` so the digest describes EXACTLY the
+ * rows the screen is showing. A summary computed over a different set than the
+ * one on screen would be worse than no summary: it would look authoritative
+ * and quietly contradict the table beneath it.
+ */
+const getAuditDigest = asyncHandler(async (req, res) => {
+  const { getDigest } = require('../services/auditDigestService');
+  const result = await getDigest(
+    buildAuditFilter(req.query),
+    req.user?._id?.toString() ?? null
+  );
+
+  res.json({
+    success: true,
+    data: { mode: result.mode, facts: result.facts, narrative: result.narrative },
+  });
+});
+
+module.exports = { listAuditLogs, getAuditLog, getAuditDigest };

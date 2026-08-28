@@ -201,6 +201,9 @@ export const usersApi = {
   create: (payload) => client.post('/users', payload).then((r) => r.data.data),
   update: (id, payload) => client.patch(`/users/${id}`, payload).then((r) => r.data.data),
   remove: (id) => client.delete(`/users/${id}`).then((r) => r.data),
+
+  /** Admin only: who has been active, who is idle, anything that looks off. */
+  activityDigest: () => client.get('/users/activity-digest').then((r) => r.data.data),
 };
 
 // --- dashboard + AI search --------------------------------------------------
@@ -215,6 +218,14 @@ export const dashboardApi = {
 export const auditApi = {
   list: (params) => client.get('/audit-logs', { params }).then((r) => r.data),
   get: (id) => client.get(`/audit-logs/${id}`).then((r) => r.data.data),
+
+  /**
+   * A plain-English summary of the CURRENTLY FILTERED range. Takes the same
+   * params as `list` for exactly that reason — see the controller's note on
+   * why a digest computed over a different set than the table would be worse
+   * than none at all.
+   */
+  digest: (params) => client.get('/audit-logs/digest', { params }).then((r) => r.data.data),
 };
 
 export const aiSearchApi = {

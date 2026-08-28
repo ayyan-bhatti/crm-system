@@ -11,9 +11,11 @@ const {
   approveUser,
   rejectUser,
   setUserStatus,
+  getActivityDigest,
 } = require('../controllers/userController');
 const { protect } = require('../middleware/auth');
 const { requireRole, requireManagerOrAdmin } = require('../middleware/roles');
+const { aiSearchLimiter, aiPerUserLimiter } = require('../middleware/rateLimit');
 const { ROLES } = require('../config/constants');
 
 const router = express.Router();
@@ -53,6 +55,16 @@ router.use(requireRole(ROLES.ADMIN));
 router.get('/pending', listPendingRequests);
 router.patch('/:id/approve', approveUser);
 router.patch('/:id/reject', rejectUser);
+
+/*
+ * The staff activity digest. Declared before `/:id`, or "activity-digest" is
+ * parsed as a user id, and rate-limited like every other paid model call.
+ *
+ * Admin only, inherited from the requireRole above — this reports who has and
+ * has not been changing records, which is oversight of colleagues rather than
+ * anyone's own work.
+ */
+router.get('/activity-digest', aiSearchLimiter, aiPerUserLimiter, getActivityDigest);
 
 router.route('/').get(listUsers).post(createUser);
 router.route('/:id').get(getUser).patch(updateUser).delete(deleteUser);
