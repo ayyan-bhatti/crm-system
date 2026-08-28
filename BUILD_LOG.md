@@ -3151,3 +3151,57 @@ changes, both of which affect every existing order-creation and customer-creatio
 app, not only the new ones.
 
 **Final totals: 923 backend + 215 frontend + 11 end-to-end**, lint clean on both packages.
+
+---
+
+## Storefront, phase 4: opening the approval queue to buyer requests — and a real conflict with an existing design
+
+`/api/change-requests` and its approve/reject actions now handle buyer-initiated cancel/edit
+requests, and a buyer is emailed the outcome. The mechanics — restore stock on an approved
+cancellation, re-price on an approved edit — needed no new code at all; phase 3's `applyChange`
+`cancel` branch and the existing generic `update` branch already do both, and phase 3's tests
+already proved it. What phase 4 actually had to resolve was **who is allowed to open the queue**,
+and that turned out to conflict with a rule already on record.
+
+### The brief assumed something the code did not do
+
+The storefront brief says a buyer's request should be "visible to admin and to any manager
+(not just one specific manager) alongside the existing manager-initiated requests" — phrasing
+that assumes managers already see the queue generally. They do not: `changeRequestRoutes.js` is
+admin-only, for a reason stated in its own comment — *"managers are who these requests come
+from, and an approver who can approve their own request is not an approver."* Opening the whole
+queue to managers would let a manager approve a colleague's customer edit, reversing a
+deliberate design this same engagement put in place, for a reason that still holds.
+
+**The two records disagree, and it is not obviously a mistake in either.** The buyer brief and
+the existing access rule were written for different problems and neither one mentions the other.
+Rather than guess which one the brief-writer would drop, the resolution keeps both true at once:
+the gate on the route moved from `requireAdmin` to `requireManagerOrAdmin`, but
+`changeRequestController.js` now filters and checks **per request** rather than per role — a
+manager's `GET` returns only buyer-initiated rows (their own staff-initiated ones stay invisible
+to them, unchanged), and an `approve`/`reject` call is checked against the specific request's
+`requestedByModel` before anything else runs: a manager may decide a buyer's request, never a
+colleague's. Recorded here explicitly because it is a genuine judgment call, not a small one —
+anyone reviewing this later should see the conflict was noticed and resolved on purpose, with
+the reasoning next to it, rather than assume the two documents simply agreed.
+
+### The notification is symmetric with the existing account-request one
+
+`notifyAdminsOfRequest` in `authController.js` already tells admins about a pending staff
+sign-up, best-effort, outside the write it accompanies. `notifyBuyerOfOutcome` in
+`changeRequestService.js` is the same shape the other direction: after approve or reject —
+never inside the transaction, so a mail outage cannot roll back a change that already happened —
+logged and swallowed on failure rather than surfacing to the person who just approved something.
+A staff-initiated request generates no such email; the requester is already signed into the CRM
+and can look the record up, and a manager whose edit was rejected does not need an inbox ping to
+find out.
+
+**6 new backend tests**: the queue answering a manager with a filtered, buyer-only list rather
+than a blanket 403; approve and reject each checked in both directions (refused for a
+staff-initiated request, allowed for a buyer's own); and the notification itself, captured via
+the same `mailer.sendMail` monkey-patch `invite.test.js` already established, including the
+negative case — no email at all for a staff-initiated decision. One existing test
+(`is refused to a manager and a sales rep`) had pinned the now-superseded blanket rule and was
+split into the rep-only 403 plus the new filtered-200 behaviour, rather than simply relaxed.
+
+**Final totals: 929 backend + 215 frontend + 11 end-to-end**, lint clean on both packages.

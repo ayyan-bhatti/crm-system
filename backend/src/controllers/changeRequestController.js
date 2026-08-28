@@ -1,9 +1,16 @@
 const asyncHandler = require('../utils/asyncHandler');
+const ApiError = require('../utils/ApiError');
 const changeRequestService = require('../services/changeRequestService');
 const { recordAudit } = require('../services/auditService');
+const { isAdmin } = require('../middleware/roles');
+const ChangeRequest = require('../models/ChangeRequest');
 
 /**
- * The administrator's approval queue for customer and order changes.
+ * The administrator's approval queue for customer and order changes — and,
+ * since the storefront was added, a manager's queue for BUYER-initiated ones
+ * specifically. See the long note in `routes/changeRequestRoutes.js` for why
+ * the split is per-request rather than a second route tree: a manager may
+ * see and decide a buyer's cancellation, never a colleague's customer edit.
  *
  * Separate from the ACCOUNT approvals in userController, deliberately. They
  * look alike and are answered by the same person, but they are different
@@ -12,16 +19,31 @@ const { recordAudit } = require('../services/auditService');
  * a customer deletion while looking for a colleague's signup.
  */
 
+/** A manager may only act on a request nobody on staff could have self-approved. */
+function assertMayDecide(user, request) {
+  if (isAdmin(user)) return;
+  if (request.requestedByModel === 'Buyer') return;
+
+  throw ApiError.forbidden(
+    'Only an administrator can decide a request made by a colleague.'
+  );
+}
+
 /**
  * GET /api/change-requests
  *
- * Everything waiting on a decision, oldest first. A queue is worked from the
- * front; newest-first would leave the longest wait permanently at the bottom.
+ * Everything waiting on a decision, oldest first, for an admin. A manager
+ * sees the same queue filtered to buyer-initiated requests only — the ones
+ * they are actually allowed to act on, so the list is not full of rows a
+ * click would only 403 on.
  */
 const listChangeRequests = asyncHandler(async (req, res) => {
   const data = await changeRequestService.listPending();
+  const visible = isAdmin(req.user)
+    ? data
+    : data.filter((request) => request.requestedByModel === 'Buyer');
 
-  res.json({ success: true, count: data.length, data });
+  res.json({ success: true, count: visible.length, data: visible });
 });
 
 /**
@@ -31,6 +53,10 @@ const listChangeRequests = asyncHandler(async (req, res) => {
  * can show what actually happened rather than only that something did.
  */
 const approveChangeRequest = asyncHandler(async (req, res) => {
+  const pending = await ChangeRequest.findById(req.params.id).select('requestedByModel');
+  if (!pending) throw ApiError.notFound('Change request not found');
+  assertMayDecide(req.user, pending);
+
   const { request, result } = await changeRequestService.approve(req.params.id, req.user);
 
   /*
@@ -68,6 +94,10 @@ const approveChangeRequest = asyncHandler(async (req, res) => {
  * the change is stored rather than written and reverted.
  */
 const rejectChangeRequest = asyncHandler(async (req, res) => {
+  const pending = await ChangeRequest.findById(req.params.id).select('requestedByModel');
+  if (!pending) throw ApiError.notFound('Change request not found');
+  assertMayDecide(req.user, pending);
+
   const request = await changeRequestService.reject(req.params.id, req.user, req.body?.note);
 
   /*

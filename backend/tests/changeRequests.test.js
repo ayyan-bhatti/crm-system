@@ -1,6 +1,7 @@
 const Customer = require('../src/models/Customer');
 const Order = require('../src/models/Order');
 const ChangeRequest = require('../src/models/ChangeRequest');
+const changeRequestService = require('../src/services/changeRequestService');
 const {
   api,
   createAdmin,
@@ -8,6 +9,7 @@ const {
   createRep,
   createCustomer,
   createProduct,
+  createBuyer,
 } = require('./helpers');
 
 /**
@@ -258,15 +260,30 @@ describe('deciding on a change', () => {
     });
 
     /**
-     * An approver who can approve their own request is not an approver, and
-     * managers are where these requests come from. The whole role is excluded
-     * rather than checked per request, which is a rule with no edge case.
+     * A sales rep never sees this queue at all — nothing in their role
+     * submits to it or decides from it.
      */
-    it('is refused to a manager and a sales rep', async () => {
+    it('is refused to a sales rep', async () => {
       const rep = await createRep();
-
-      expect((await queue(manager)).status).toBe(403);
       expect((await queue(rep)).status).toBe(403);
+    });
+
+    /*
+     * A manager may now open the queue — the storefront brief asks for a
+     * buyer's cancel/edit request to be visible to any manager, not admin
+     * alone. What a manager sees is filtered, though: their OWN
+     * staff-initiated request (an approver who can approve their own request
+     * is not an approver, the reason this queue was admin-only to begin
+     * with) is hidden from them exactly as it always was, even though the
+     * route itself now answers 200 rather than 403.
+     */
+    it('answers a manager, but hides staff-initiated requests from them', async () => {
+      await proposeCreate();
+
+      const res = await queue(manager);
+
+      expect(res.status).toBe(200);
+      expect(res.body.data).toHaveLength(0);
     });
 
     it('is refused to an anonymous caller', async () => {
@@ -386,11 +403,39 @@ describe('deciding on a change', () => {
       expect(res.body.message).toMatch(/no longer exists/i);
     });
 
-    it('is refused to a manager', async () => {
+    it('is refused to a manager for a staff-initiated request', async () => {
       const request = await proposeCreate();
 
       expect((await approve(request._id, manager)).status).toBe(403);
       expect(await Customer.countDocuments({ email: 'proposed@example.com' })).toBe(0);
+    });
+
+    /*
+     * The other half of the split: a manager MAY decide a request nobody on
+     * staff submitted. There is no self-approval conflict for a buyer's own
+     * cancellation, which is the entire reason the queue was reopened to
+     * managers at all.
+     */
+    it('is allowed for a manager deciding a buyer-initiated request', async () => {
+      const order = await Order.create({
+        customer: (await createCustomer(admin))._id,
+        items: [
+          { product: (await createProduct({ price: 5 }))._id, quantity: 1, priceAtOrder: 5 },
+        ],
+        total: 5,
+        createdBy: admin.user._id,
+      });
+      const buyer = await createBuyer();
+
+      const request = await changeRequestService.submit(
+        { entity: 'order', entityId: order._id, action: 'cancel', label: 'Buyer order' },
+        buyer
+      );
+
+      const res = await approve(request._id, manager);
+
+      expect(res.status).toBe(200);
+      expect((await Order.findById(order._id)).status).toBe('cancelled');
     });
 
     it('404s for a request that does not exist', async () => {
@@ -399,11 +444,33 @@ describe('deciding on a change', () => {
   });
 
   describe('rejecting', () => {
-    const reject = (id, note) =>
+    const reject = (id, note, actor = admin) =>
       api()
         .patch(`/api/change-requests/${id}/reject`)
-        .set(admin.headers)
+        .set(actor.headers)
         .send(note ? { note } : {});
+
+    it('is refused to a manager for a staff-initiated request, allowed for a buyer one', async () => {
+      const staffRequest = await proposeCreate();
+      expect((await reject(staffRequest._id, undefined, manager)).status).toBe(403);
+
+      const order = await Order.create({
+        customer: (await createCustomer(admin))._id,
+        items: [
+          { product: (await createProduct({ price: 5 }))._id, quantity: 1, priceAtOrder: 5 },
+        ],
+        total: 5,
+        createdBy: admin.user._id,
+      });
+      const buyerRequest = await changeRequestService.submit(
+        { entity: 'order', entityId: order._id, action: 'cancel', label: 'Buyer order' },
+        await createBuyer()
+      );
+
+      const res = await reject(buyerRequest._id, undefined, manager);
+      expect(res.status).toBe(200);
+      expect((await Order.findById(order._id)).status).toBe('pending');
+    });
 
     /** Nothing to undo, because nothing was ever applied. */
     it('changes nothing', async () => {
@@ -458,6 +525,75 @@ describe('deciding on a change', () => {
       await reject(request._id);
 
       expect((await reject(request._id)).status).toBe(400);
+    });
+  });
+
+  describe('notifying a buyer of the outcome', () => {
+    const mailer = require('../src/services/mailer');
+    const realSendMail = mailer.sendMail;
+    let sent;
+
+    beforeEach(() => {
+      sent = [];
+      mailer.sendMail = async (message) => {
+        sent.push(message);
+        return { delivered: true, transport: 'test' };
+      };
+    });
+
+    afterEach(() => {
+      mailer.sendMail = realSendMail;
+    });
+
+    async function buyerCancelRequest() {
+      const order = await Order.create({
+        customer: (await createCustomer(admin))._id,
+        items: [
+          { product: (await createProduct({ price: 5 }))._id, quantity: 1, priceAtOrder: 5 },
+        ],
+        total: 5,
+        createdBy: admin.user._id,
+      });
+      const buyer = await createBuyer({ email: 'notify-me@example.com' });
+
+      const request = await changeRequestService.submit(
+        { entity: 'order', entityId: order._id, action: 'cancel', label: 'Buyer order' },
+        buyer
+      );
+
+      return request;
+    }
+
+    it('emails the buyer when their request is approved', async () => {
+      const request = await buyerCancelRequest();
+
+      await api().patch(`/api/change-requests/${request._id}/approve`).set(admin.headers).send();
+
+      expect(sent).toHaveLength(1);
+      expect(sent[0].to).toBe('notify-me@example.com');
+      expect(sent[0].text).toMatch(/approved/i);
+    });
+
+    it('emails the buyer when their request is rejected, with the reason', async () => {
+      const request = await buyerCancelRequest();
+
+      await api()
+        .patch(`/api/change-requests/${request._id}/reject`)
+        .set(admin.headers)
+        .send({ note: 'Order already left the warehouse.' });
+
+      expect(sent).toHaveLength(1);
+      expect(sent[0].text).toMatch(/not approved/i);
+      expect(sent[0].text).toMatch(/already left the warehouse/i);
+    });
+
+    /** A staff-initiated request generates no buyer email — there is no buyer. */
+    it('sends no email for a staff-initiated request', async () => {
+      const request = await proposeCreate();
+
+      await api().patch(`/api/change-requests/${request._id}/approve`).set(admin.headers).send();
+
+      expect(sent).toHaveLength(0);
     });
   });
 

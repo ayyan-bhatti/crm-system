@@ -5,6 +5,7 @@ const ApiError = require('../utils/ApiError');
 const { withTransaction } = require('../utils/transaction');
 const { CHANGE_REQUEST_STATUS } = require('../config/constants');
 const { componentLogger } = require('../config/logger');
+const mailer = require('./mailer');
 
 const log = componentLogger('change-requests');
 
@@ -292,6 +293,8 @@ async function approve(requestId, actor) {
     'change approved and applied'
   );
 
+  await notifyBuyerOfOutcome(request, 'approved');
+
   return { request, result };
 }
 
@@ -300,7 +303,7 @@ async function approve(requestId, actor) {
  * ever written to it.
  */
 async function reject(requestId, actor, note = '') {
-  const request = await ChangeRequest.findById(requestId);
+  const request = await ChangeRequest.findById(requestId).populate('requestedBy', 'name email');
 
   if (!request) throw ApiError.notFound('Change request not found');
 
@@ -316,7 +319,50 @@ async function reject(requestId, actor, note = '') {
 
   log.info({ requestId: request._id, by: actor._id }, 'change rejected');
 
+  await notifyBuyerOfOutcome(request, 'rejected');
+
   return request;
+}
+
+/**
+ * Tell a buyer what happened to a request they made — best-effort, exactly
+ * like `notifyAdminsOfRequest` in `authController.js` is for a staff sign-up
+ * request. A mail outage must not roll back an approval that has already
+ * been applied inside its own transaction, so this runs after, outside it,
+ * and a failure here is logged rather than surfaced to the approver.
+ *
+ * Staff-initiated requests get no such email — the requester is signed in
+ * to the CRM and can just look at the record, and a manager whose customer
+ * edit was rejected does not need an inbox notification to find out.
+ */
+async function notifyBuyerOfOutcome(request, outcome) {
+  if (request.requestedByModel !== 'Buyer') return;
+
+  try {
+    const buyer = request.requestedBy?.email
+      ? request.requestedBy
+      : await require('../models/Buyer').findById(request.requestedBy).select('name email');
+
+    if (!buyer?.email) return;
+
+    const what = { cancel: 'cancellation', update: 'edit', delete: 'cancellation' }[
+      request.action
+    ] || 'change';
+
+    const body =
+      outcome === 'approved'
+        ? `Your ${what} request for order ${request.label} has been approved and applied.`
+        : `Your ${what} request for order ${request.label} was not approved.` +
+          (request.reviewNote ? ` Note from the team: ${request.reviewNote}` : '');
+
+    await mailer.sendMail({
+      to: buyer.email,
+      subject: `Update on your order ${request.label}`,
+      text: body,
+    });
+  } catch (err) {
+    log.warn({ err, requestId: request._id }, 'could not notify a buyer of a request outcome');
+  }
 }
 
 /** How many are waiting. Used for the badge on the admin's screen. */
