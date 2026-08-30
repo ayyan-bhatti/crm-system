@@ -142,6 +142,14 @@ export default function OrderList() {
                     <th className={th}>Items</th>
                     <th className={th}>Placed by</th>
                     <th className={th}>Status</th>
+                    {/*
+                      Delivery is its own column rather than being folded into
+                      Status. They answer different questions — "does this sale
+                      count and has stock moved" versus "where is the parcel" —
+                      and an order is routinely `pending` and `shipped` at the
+                      same time, which one column cannot express.
+                    */}
+                    <th className={th}>Delivery</th>
                     <th className={`${th} text-right`}>Total</th>
                   </tr>
                 </thead>
@@ -167,6 +175,14 @@ export default function OrderList() {
                       <td className={td}>{order.createdBy?.name || '—'}</td>
                       <td className={td}>
                         <StatusBadge value={order.status} />
+                      </td>
+                      <td className={td}>
+                        <StatusBadge value={order.fulfilment || 'processing'} />
+                        {order.estimatedDeliveryAt && order.fulfilment !== 'delivered' && (
+                          <span className="mt-1 block text-xs text-muted">
+                            Est. {formatDate(order.estimatedDeliveryAt)}
+                          </span>
+                        )}
                       </td>
                       <td className={`${td} text-right font-medium`}>{money(order.total)}</td>
                     </tr>

@@ -84,7 +84,49 @@ export const STATUS_STYLES = {
   admin: 'bg-brand-wash text-brand-ink',
   manager: 'bg-brand-wash text-brand-ink',
   sales_rep: 'bg-neutral-wash text-neutral-ink',
+  // Delivery. `cancelled` and `processing` are already defined above and mean
+  // the same thing here, so they are deliberately not repeated — a second
+  // definition of the same key would silently be the one that wins.
+  confirmed: 'bg-brand-wash text-brand-ink',
+  shipped: 'bg-brand-wash text-brand-ink',
+  out_for_delivery: 'bg-warning-wash text-warning-ink',
+  delivered: 'bg-good-wash text-good-ink',
+  // Payment
+  paid: 'bg-good-wash text-good-ink',
+  unpaid: 'bg-neutral-wash text-neutral-ink',
+  refunded: 'bg-warning-wash text-warning-ink',
+  failed: 'bg-critical-wash text-critical-ink',
 };
+
+// --- Delivery ----------------------------------------------------------------
+
+/**
+ * The delivery stages, in order, mirroring FULFILMENT_SEQUENCE on the server.
+ *
+ * DUPLICATED RATHER THAN FETCHED, and worth saying why: this drives a timeline
+ * that has to render before any request resolves, and an extra round trip to
+ * learn five constants that change roughly never would be a worse trade than
+ * the duplication. The server remains the authority — it validates every
+ * transition — so the cost of these drifting apart is a mislabelled step, not a
+ * wrong state.
+ */
+export const FULFILMENT_STEPS = [
+  { value: 'processing', label: 'Processing', hint: 'We have your order.' },
+  { value: 'confirmed', label: 'Confirmed', hint: 'Your order is being prepared.' },
+  { value: 'shipped', label: 'Shipped', hint: 'It has left our warehouse.' },
+  { value: 'out_for_delivery', label: 'Out for delivery', hint: 'It is with the courier today.' },
+  { value: 'delivered', label: 'Delivered', hint: 'It arrived.' },
+];
+
+export const FULFILMENT_LABELS = {
+  ...Object.fromEntries(FULFILMENT_STEPS.map((step) => [step.value, step.label])),
+  cancelled: 'Cancelled',
+};
+
+/** How far along the sequence a status is, or -1 for `cancelled`. */
+export function fulfilmentIndex(value) {
+  return FULFILMENT_STEPS.findIndex((step) => step.value === value);
+}
 
 /**
  * The chart colours, read from CSS custom properties rather than hard-coded, so
@@ -248,4 +290,51 @@ export function placeholderImage(product) {
   </svg>`;
 
   return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+}
+
+// --- Variants and galleries ---------------------------------------------------
+
+/**
+ * How a chosen variant reads on a line: "Midnight / M", or just "Midnight".
+ *
+ * Takes either shape the app produces — a live variant from the catalogue
+ * (`{ color: { name } , size }`) or the snapshot stored on an order line
+ * (`{ colorName, size }`). Two shapes exist for a good reason (the snapshot
+ * must survive the variant being renamed or deleted), and handling both here
+ * means no caller has to remember which one it is holding.
+ */
+export function variantLabel(variant) {
+  if (!variant) return '';
+  const colour = variant.colorName || variant.color?.name || '';
+  const size = variant.size || '';
+  return [colour, size].filter(Boolean).join(' / ');
+}
+
+/**
+ * Every image for a product, primary first, with the placeholder as a floor.
+ *
+ * Always returns at least one entry, which is what lets a gallery render
+ * `images[0]` unconditionally — the "no photo yet" placeholder is a real image,
+ * so there is no empty-array branch anywhere downstream.
+ */
+export function galleryFor(product) {
+  const all = [product?.imageUrl, ...(product?.images || [])].map((url) => (url || '').trim());
+  const real = all.filter(Boolean);
+  return real.length ? real : [placeholderImage(product)];
+}
+
+/**
+ * The lowest price a product is available at, for a card's "from $x".
+ *
+ * Returns null when nothing overrides the base price, so a caller can render
+ * the plain price rather than a misleading "from" on a product with exactly one
+ * price.
+ */
+export function priceRange(product) {
+  const prices = (product?.variants || []).map((v) => v.price ?? product.price);
+  if (prices.length === 0) return null;
+
+  const min = Math.min(...prices);
+  const max = Math.max(...prices);
+  return min === max ? null : { min, max };
 }

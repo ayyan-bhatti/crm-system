@@ -135,6 +135,22 @@ export default function App() {
                     {/* Buyer sign-in required — see the note at the top of
                         Checkout.jsx for why guest checkout was removed. */}
                     <Route path="checkout" element={<Checkout />} />
+                    {/*
+                      TWO ROUTES TO ONE PAGE, and both are needed.
+
+                      `/order-confirmation/:id` is the cash-on-delivery path,
+                      where an order already exists to link to.
+
+                      `/order-confirmation` with no id is where STRIPE sends the
+                      buyer back — it appends `?session_id=cs_…`, and at that
+                      moment there may well be no order to name yet, because the
+                      webhook that creates it can still be in flight. Requiring
+                      an id in the path would mean inventing one before the
+                      order exists, which is exactly the shortcut that ends with
+                      orders created by a redirect instead of by a confirmed
+                      payment.
+                    */}
+                    <Route path="order-confirmation" element={<OrderConfirmation />} />
                     <Route path="order-confirmation/:id" element={<OrderConfirmation />} />
                     <Route path="account/orders" element={<BuyerOrders />} />
                     <Route path="account/orders/:id" element={<BuyerOrderDetail />} />

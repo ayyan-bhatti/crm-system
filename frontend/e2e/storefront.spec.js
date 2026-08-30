@@ -23,7 +23,13 @@ const BUYER = {
   password: 'Storefront-Buyer-42',
 };
 
-/** Sign in to the internal CRM through the real form. */
+/**
+ * Sign in to the internal CRM through the real form.
+ *
+ * Deliberately NOT scoped through `main()` like the buyer helper below: the CRM
+ * sign-in page is outside the storefront shell entirely, so it has no
+ * newsletter form to collide with — and no `<main>` landmark to scope to.
+ */
 async function signInStaff(page, creds) {
   await page.goto('/crm/login');
   await page.getByLabel(/email/i).fill(creds.email);
@@ -32,20 +38,35 @@ async function signInStaff(page, creds) {
   await expect(page).not.toHaveURL(/\/crm\/login/);
 }
 
+/**
+ * The page's own content, excluding the storefront chrome.
+ *
+ * NEEDED SINCE THE FOOTER GREW A NEWSLETTER FORM. That form has its own email
+ * input, so an unscoped `getByLabel(/email/i)` now matches two fields on every
+ * single page and fails Playwright's strict mode. Scoping to `<main>` is the
+ * honest fix rather than making the selectors more specific one at a time:
+ * these tests are about what the PAGE does, and the footer is chrome that
+ * happens to be present on all of them.
+ *
+ * The same applies to text: "In stock" on a product page and "In stock now" in
+ * the footer's shortcut column are different things that read alike.
+ */
+const main = (page) => page.getByRole('main');
+
 /** Sign in to the storefront through the real buyer form. */
 async function signInBuyer(page, creds = BUYER) {
   await page.goto('/login');
-  await page.getByLabel(/email/i).fill(creds.email);
-  await page.getByLabel(/password/i).fill(creds.password);
-  await page.getByRole('button', { name: /sign in/i }).click();
+  await main(page).getByLabel(/email/i).fill(creds.email);
+  await main(page).getByLabel(/password/i).fill(creds.password);
+  await main(page).getByRole('button', { name: /sign in/i }).click();
   await expect(page).not.toHaveURL(/\/login/);
 }
 
 test.describe('Catalogue', () => {
-  test('the home page shows the seeded product as featured', async ({ page }) => {
+  test('the home page shows the seeded product in the New in grid', async ({ page }) => {
     await page.goto('/');
 
-    await expect(page.getByRole('heading', { name: /featured/i })).toBeVisible();
+    await expect(page.getByRole('heading', { name: /new in/i })).toBeVisible();
     await expect(page.getByRole('link', { name: /Blue Widget/i })).toBeVisible();
   });
 
@@ -93,7 +114,7 @@ test.describe('Product detail and guest cart', () => {
     await expect(page).toHaveURL(/\/products\/[a-f0-9]{24}/);
     await expect(page.getByRole('heading', { name: 'Blue Widget' })).toBeVisible();
     await expect(page.getByText('$25.00')).toBeVisible();
-    await expect(page.getByText(/in stock/i)).toBeVisible();
+    await expect(main(page).getByText('In stock', { exact: true })).toBeVisible();
 
     await page.getByRole('button', { name: /add to cart/i }).click();
 
@@ -135,11 +156,14 @@ test.describe('Product detail and guest cart', () => {
 
 test.describe('Checkout requires a buyer account', () => {
   /**
-   * Guest checkout was removed from the FRONTEND (Checkout.jsx) — the
-   * backend endpoint still accepts a guest payload (see
-   * `shopCheckoutController` and `attachBuyerIfPresent`), it is just
-   * unreachable from this UI now. A guest can still browse and build a
-   * cart freely; reaching the checkout form requires signing in.
+   * GUEST CHECKOUT IS GONE AT BOTH ENDS NOW.
+   *
+   * It was previously removed from this screen only, while the backend
+   * endpoint still accepted a guest payload. The endpoint now runs
+   * `protectBuyer` and the permissive middleware that made the old behaviour
+   * possible has been deleted outright, so there is no guest path left to
+   * reach from anywhere. A guest can still browse and build a cart freely;
+   * only buying requires an account.
    */
   test('sends a guest with items in the cart to sign in instead of a guest checkout form', async ({
     page,
@@ -171,10 +195,10 @@ test.describe('Buyer registration and session', () => {
   test('registers a new buyer account', async ({ page }) => {
     await page.goto('/register');
 
-    await page.getByLabel(/^name/i).fill(BUYER.name);
-    await page.getByLabel(/email/i).fill(BUYER.email);
-    await page.getByLabel(/password/i).fill(BUYER.password);
-    await page.getByRole('button', { name: /create account/i }).click();
+    await main(page).getByLabel(/^name/i).fill(BUYER.name);
+    await main(page).getByLabel(/email/i).fill(BUYER.email);
+    await main(page).getByLabel(/password/i).fill(BUYER.password);
+    await main(page).getByRole('button', { name: /create account/i }).click();
 
     // Registration signs the buyer straight in and lands on the shop home
     // (the app's front door, at "/" — see the note at the top of App.jsx).
@@ -185,10 +209,10 @@ test.describe('Buyer registration and session', () => {
   test('rejects a weak password with a visible message', async ({ page }) => {
     await page.goto('/register');
 
-    await page.getByLabel(/^name/i).fill('Weak Password');
-    await page.getByLabel(/email/i).fill('weak.password@example.com');
-    await page.getByLabel(/password/i).fill('short');
-    await page.getByRole('button', { name: /create account/i }).click();
+    await main(page).getByLabel(/^name/i).fill('Weak Password');
+    await main(page).getByLabel(/email/i).fill('weak.password@example.com');
+    await main(page).getByLabel(/password/i).fill('short');
+    await main(page).getByRole('button', { name: /create account/i }).click();
 
     await expect(page.getByText(/at least 10 characters/i)).toBeVisible();
     await expect(page).toHaveURL(/\/register/);
@@ -261,7 +285,7 @@ test.describe('Buyer address book', () => {
     await page.getByRole('button', { name: /save address/i }).click();
 
     await expect(page.getByText(/address added/i)).toBeVisible();
-    await expect(page.getByText('Home')).toBeVisible();
+    await expect(main(page).getByText('Home').first()).toBeVisible();
     await expect(page.getByText('45 Boat Basin, Clifton')).toBeVisible();
     await expect(page.getByText('Karachi')).toBeVisible();
   });
@@ -300,14 +324,60 @@ test.describe('Cart merge and buyer checkout', () => {
     await expect(page).toHaveURL(/\/checkout/);
     // Signed in with a saved address: no guest form, the saved address is
     // pre-selected (Checkout.jsx defaults to the first one).
-    await expect(page.getByText('Home', { exact: true })).toBeVisible();
-    await expect(page.getByText('45 Boat Basin, Clifton')).toBeVisible();
+    await expect(main(page).getByText('Home', { exact: true }).first()).toBeVisible();
+    await expect(page.getByText(/45 Boat Basin, Clifton/)).toBeVisible();
 
+    /*
+     * CASH ON DELIVERY, CHOSEN EXPLICITLY.
+     *
+     * Card is the default, and it is deliberately not what this test takes:
+     * the card path hands the browser to Stripe's own domain, which is not
+     * something an end-to-end run against a local server can or should follow.
+     * The Stripe flow is covered exhaustively at the API level in
+     * backend/tests/stripeCheckout.test.js — webhook signatures, order-only-
+     * after-payment, replay, refunds — with Stripe itself stubbed.
+     *
+     * What this test is for is the rest of the journey, which is identical
+     * either way: a guest cart surviving a sign-in, an address being chosen,
+     * an order being created and appearing in history.
+     */
+    await page.getByRole('radio', { name: /cash on delivery/i }).click();
     await page.getByRole('button', { name: /place order/i }).click();
 
     await expect(page).toHaveURL(/\/order-confirmation\/[a-f0-9]{24}/);
     await expect(page.getByRole('heading', { name: /thank you for your order/i })).toBeVisible();
     await expect(page.getByRole('link', { name: /view your orders/i })).toBeVisible();
+
+    // The delivery timeline is on the confirmation page, at its first stage.
+    await expect(page.getByRole('heading', { name: /where your order is/i })).toBeVisible();
+    await expect(main(page).getByText('Processing').first()).toBeVisible();
+  });
+
+  /**
+   * The card path, as far as it can be taken without leaving localhost.
+   *
+   * STRIPE IS NOT CONFIGURED in the e2e environment, so the server refuses the
+   * card path with a readable message rather than half-completing it. That is
+   * worth asserting on its own: the failure a shopper meets when payments are
+   * unconfigured should be a sentence telling them to use another method, not
+   * a blank page or a 500.
+   */
+  test('offers card payment and fails clearly when Stripe is not configured', async ({ page }) => {
+    await signInBuyer(page);
+    await page.goto('/products');
+    await page.getByRole('link', { name: /Blue Widget/i }).click();
+    await page.getByRole('button', { name: /add to cart/i }).click();
+
+    await page.goto('/checkout');
+    await expect(page.getByRole('radio', { name: /pay by card/i })).toBeChecked();
+    await expect(page.getByText(/never reach this site/i)).toBeVisible();
+
+    await page.getByRole('button', { name: /^pay/i }).click();
+
+    await expect(page.getByText(/card payment is not available/i)).toBeVisible();
+    // Still on checkout, cart intact — nothing half-happened.
+    await expect(page).toHaveURL(/\/checkout/);
+    await expect(page.getByLabel(/cart, 1 item/i)).toBeVisible();
   });
 });
 
@@ -343,7 +413,16 @@ test.describe('Buyer order history and actions', () => {
     // on staff. What the UI can show right now is the confirmation that the
     // request was sent; the order's own state stays "pending" throughout.
     await expect(page.getByText(/edit request has been sent for approval/i)).toBeVisible();
-    await expect(page.getByText(/^pending$/i)).toBeVisible();
+    /*
+     * The buyer's page shows the DELIVERY status, not the commercial one — so
+     * an untouched order reads "Processing" here rather than "pending".
+     * "Pending" is an answer to a question the buyer did not ask: it means
+     * staff have not marked the order fulfilled, which is internal
+     * bookkeeping. The order's own `status` is still pending throughout, and
+     * the line below proves the request did not change it.
+     */
+    await expect(main(page).getByText('Processing').first()).toBeVisible();
+    await expect(page.getByText(/already a change waiting|request different quantities/i).first()).toBeVisible();
 
     // A second request against the same order is refused server-side while
     // one is outstanding — proves the request really landed, not just the
@@ -413,7 +492,10 @@ test.describe('Staff decide the buyer requests', () => {
     await page.goto('/account/orders');
     await page.getByRole('link').filter({ hasText: /^ORD-|^#/ }).first().click();
 
-    await expect(page.getByText(/^cancelled$/i)).toBeVisible();
+    // Both axes agree: the order is commercially cancelled, and its delivery
+    // timeline is replaced rather than left showing a parcel on its way.
+    await expect(main(page).getByText('Cancelled').first()).toBeVisible();
+    await expect(page.getByText(/cancelled, so it is not on its way/i)).toBeVisible();
     await expect(page.getByText(/already cancelled and can no longer be changed/i)).toBeVisible();
   });
 });

@@ -70,6 +70,26 @@ export function BuyerAuthProvider({ children }) {
           return nextBuyer;
         }),
 
+      /**
+       * Re-read the buyer from the server.
+       *
+       * Needed because the buyer document carries the ADDRESS BOOK, and
+       * addresses are now edited from two places: the account page and, since
+       * checkout began requiring one, inline at checkout. Both then need the
+       * context to know about the new address — checkout in particular has to
+       * be able to select it immediately, which it cannot do if `buyer` still
+       * holds the list as it was a second ago.
+       *
+       * Re-fetching rather than patching the local copy with the response: the
+       * address endpoints already return the full updated array, but the buyer
+       * object has other fields, and "merge this fragment into that object" is
+       * the kind of thing that quietly loses a field the day one is added.
+       */
+      refresh: () => shopAuthApi.me().then((nextBuyer) => {
+        setBuyer(nextBuyer);
+        return nextBuyer;
+      }),
+
       logout,
     }),
     [buyer, loading, logout]

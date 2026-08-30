@@ -14,6 +14,10 @@ import { useBuyerAuth } from './BuyerAuthContext';
  * backend involvement, which is the right cost for state nobody but this
  * browser will ever read.
  *
+ * This is unchanged by checkout now requiring an account. Browsing and filling
+ * a cart are still completely open; only the act of buying moved behind a
+ * sign-in, and the cart is what carries a visitor's intent across that line.
+ *
  * THE MERGE
  *
  * The moment `isSignedIn` flips true — a login, or a registration — whatever
@@ -21,10 +25,32 @@ import { useBuyerAuth } from './BuyerAuthContext';
  * add on a shared line, same as adding twice), then the local copy is
  * cleared. Someone who adds three things while browsing and only signs in at
  * checkout does not lose them.
+ *
+ * A LINE IS A PRODUCT **AND** A VARIANT.
+ *
+ * Two colours of one shirt are two independent lines, so every lookup goes
+ * through `lineKey` rather than comparing product ids. Using the product alone
+ * would make "remove the blue one" impossible to express, and would silently
+ * merge two different things into one quantity.
  */
 
 const STORAGE_KEY = 'simplecrm_shop_cart';
 const CartContext = createContext(null);
+
+/**
+ * The identity of a cart line.
+ *
+ * Exported because the drawer and the checkout summary both need a stable React
+ * key, and a key derived differently in three places is a key that eventually
+ * disagrees with itself.
+ */
+export function lineKey(productId, variantId) {
+  return `${productId}::${variantId || ''}`;
+}
+
+function keyOfLine(line) {
+  return lineKey(line.product._id, line.variant?.variantId);
+}
 
 function readLocalCart() {
   try {
@@ -102,7 +128,11 @@ export function CartProvider({ children }) {
     (async () => {
       if (guestItems.length) {
         await shopCartApi.merge(
-          guestItems.map((line) => ({ product: line.product._id, quantity: line.quantity }))
+          guestItems.map((line) => ({
+            product: line.product._id,
+            quantity: line.quantity,
+            variantId: line.variant?.variantId || null,
+          }))
         );
         writeLocalCart([]);
       }
@@ -110,24 +140,51 @@ export function CartProvider({ children }) {
     })();
   }, [isSignedIn, loadServerCart]);
 
-  /** Add a line. `product` is the shape the product list/detail pages already have. */
+  /**
+   * Add a line.
+   *
+   * `product` is the shape the product list/detail pages already have;
+   * `variant` is the chosen one from `product.variants`, or null for a product
+   * that has none. The variant is stored in the SNAPSHOT shape the server uses
+   * on an order line (`colorName`/`colorHex`), so a guest cart in localStorage
+   * and a server cart present identically to every consumer — the drawer does
+   * not need to know which kind of cart it is rendering.
+   */
   const addItem = useCallback(
-    async (product, quantity = 1) => {
+    async (product, quantity = 1, variant = null) => {
+      const variantId = variant?._id || variant?.variantId || null;
+
       if (isSignedIn) {
-        const cart = await shopCartApi.addItem(product._id, quantity);
+        const cart = await shopCartApi.addItem(product._id, quantity, variantId);
         setItems(cart.items);
         return;
       }
 
+      const snapshot = variant
+        ? {
+            variantId,
+            colorName: variant.colorName || variant.color?.name || '',
+            colorHex: variant.colorHex || variant.color?.hex || '',
+            size: variant.size || '',
+          }
+        : null;
+
+      // The variant's own price when it overrides, so a guest's running total
+      // matches what checkout will charge.
+      const unitPrice = variant?.price ?? product.price;
+
       setItems((current) => {
-        const existing = current.find((line) => line.product._id === product._id);
+        const key = lineKey(product._id, variantId);
+        const existing = current.find((line) => keyOfLine(line) === key);
+
         const next = existing
           ? current.map((line) =>
-              line.product._id === product._id
-                ? { ...line, quantity: line.quantity + quantity }
-                : line
+              keyOfLine(line) === key ? { ...line, quantity: line.quantity + quantity } : line
             )
-          : [...current, { product, quantity }];
+          : [
+              ...current,
+              { product: { ...product, price: unitPrice }, quantity, variant: snapshot },
+            ];
 
         writeLocalCart(next);
         return next;
@@ -137,16 +194,17 @@ export function CartProvider({ children }) {
   );
 
   const updateItem = useCallback(
-    async (productId, quantity) => {
+    async (productId, quantity, variantId = null) => {
       if (isSignedIn) {
-        const cart = await shopCartApi.updateItem(productId, quantity);
+        const cart = await shopCartApi.updateItem(productId, quantity, variantId);
         setItems(cart.items);
         return;
       }
 
       setItems((current) => {
+        const key = lineKey(productId, variantId);
         const next = current.map((line) =>
-          line.product._id === productId ? { ...line, quantity } : line
+          keyOfLine(line) === key ? { ...line, quantity } : line
         );
         writeLocalCart(next);
         return next;
@@ -156,15 +214,16 @@ export function CartProvider({ children }) {
   );
 
   const removeItem = useCallback(
-    async (productId) => {
+    async (productId, variantId = null) => {
       if (isSignedIn) {
-        const cart = await shopCartApi.removeItem(productId);
+        const cart = await shopCartApi.removeItem(productId, variantId);
         setItems(cart.items);
         return;
       }
 
       setItems((current) => {
-        const next = current.filter((line) => line.product._id !== productId);
+        const key = lineKey(productId, variantId);
+        const next = current.filter((line) => keyOfLine(line) !== key);
         writeLocalCart(next);
         return next;
       });

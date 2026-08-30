@@ -15,12 +15,15 @@ import Can from '../../components/Can';
 import SearchSelect from '../../components/SearchSelect';
 import ActivityTimeline from '../../components/ActivityTimeline';
 import DraftMessageCard from '../../components/DraftMessageCard';
+import DeliveryTimeline from '../../components/DeliveryTimeline';
+import { Field } from '../../components/common';
 import usePermissions from '../../hooks/usePermissions';
 import {
   btnDanger,
   btnPrimary,
   btnSecondary,
   formatDate,
+  FULFILMENT_STEPS,
   humanize,
   input,
   link,
@@ -29,6 +32,7 @@ import {
   PAYMENT_METHOD_LABELS,
   td,
   th,
+  variantLabel,
 } from '../../ui';
 
 /**
@@ -183,6 +187,18 @@ export default function OrderDetail() {
                 Paying by {PAYMENT_METHOD_LABELS[order.paymentMethod] || order.paymentMethod}
               </p>
             )}
+            {/*
+              WHETHER MONEY HAS ACTUALLY MOVED, which is a different question
+              from how it was meant to. A card order is genuinely paid before
+              anyone picks it; a cash-on-delivery order is genuinely unpaid
+              until the courier collects. Whoever is about to dispatch a parcel
+              needs to know which of those they are looking at.
+            */}
+            {order.payment?.status && order.payment.status !== 'unpaid' && (
+              <div className="mt-1.5">
+                <StatusBadge value={order.payment.status} />
+              </div>
+            )}
           </div>
         </div>
 
@@ -207,6 +223,24 @@ export default function OrderDetail() {
                     <span className="text-muted">Deleted product</span>
                   )}
                   {item.product?.sku && <p className="text-xs text-muted">{item.product.sku}</p>}
+                  {/*
+                    Which colour and size actually went out. Read from the
+                    SNAPSHOT on the line rather than looked up on the product,
+                    so it stays correct after the variant is renamed or
+                    discontinued — see the note on the order item schema.
+                  */}
+                  {item.variant && (
+                    <p className="mt-0.5 flex items-center gap-1.5 text-xs text-ink-2">
+                      {item.variant.colorHex && (
+                        <span
+                          aria-hidden="true"
+                          className="inline-block h-2.5 w-2.5 rounded-full ring-1 ring-inset ring-ink/15"
+                          style={{ backgroundColor: item.variant.colorHex }}
+                        />
+                      )}
+                      {variantLabel(item.variant)}
+                    </p>
+                  )}
                 </td>
                 {/*
                   priceAtOrder, not the product's current price — this is what
@@ -498,6 +532,196 @@ function AssignmentPanel({ order, onChanged }) {
           </div>
         )}
       </Can>
+
+      {/*
+        DELIVERY LIVES IN THE SAME CARD AS ASSIGNMENT, DELIBERATELY.
+
+        The brief asked for these to read as one panel rather than two
+        disconnected sections, and the reason holds up: "who is accountable for
+        this order" and "where has it got to" are the two halves of one
+        question, and the person answering the second is usually the person
+        named in the first. Splitting them across two cards means the rep
+        updating a shipment has to look somewhere else to check the order is
+        even theirs.
+      */}
+      <FulfilmentSection order={order} onChanged={onChanged} />
     </Card>
+  );
+}
+
+/**
+ * Where the parcel is, and the form for moving it along.
+ *
+ * WHY THERE IS NO PERMISSION CHECK HERE
+ *
+ * The rule is about the RECORD, not the role: admin and manager see every
+ * order, a rep sees the ones assigned to them, and the server enforces exactly
+ * that. Anyone who can open this page can therefore update the order they are
+ * looking at. Adding a `<Can>` around it would have to duplicate a
+ * record-scoped rule as a role-scoped one, and the two would disagree the first
+ * time either changed.
+ */
+function FulfilmentSection({ order, onChanged }) {
+  const toast = useToast();
+  const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [fulfilment, setFulfilment] = useState(order.fulfilment || 'processing');
+  const [estimate, setEstimate] = useState(
+    order.estimatedDeliveryAt ? order.estimatedDeliveryAt.slice(0, 10) : ''
+  );
+  const [fieldError, setFieldError] = useState('');
+
+  const cancelled = order.status === 'cancelled';
+
+  /*
+   * The estimate becomes REQUIRED from `shipped` onwards — matching the server,
+   * which refuses the transition without one. Computed from the position in the
+   * sequence rather than by comparing against the literal string `shipped`, so
+   * jumping straight to `out_for_delivery` cannot slip past the rule.
+   */
+  const shippedIndex = FULFILMENT_STEPS.findIndex((s) => s.value === 'shipped');
+  const chosenIndex = FULFILMENT_STEPS.findIndex((s) => s.value === fulfilment);
+  const estimateRequired = chosenIndex >= shippedIndex;
+
+  /**
+   * A sensible default for the estimate: five days out.
+   *
+   * Offered rather than imposed — the field is still editable and still has to
+   * be confirmed. The point is that the common case ("it went out today,
+   * arrives in the usual window") does not require anyone to open a calendar
+   * and count.
+   */
+  function suggestDate() {
+    const date = new Date();
+    date.setDate(date.getDate() + 5);
+    setEstimate(date.toISOString().slice(0, 10));
+    setFieldError('');
+  }
+
+  async function save(event) {
+    event.preventDefault();
+    setFieldError('');
+
+    if (estimateRequired && !estimate) {
+      setFieldError('Set the date before marking this shipped — the customer sees it.');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      await ordersApi.updateFulfilment(order._id, fulfilment, estimate || undefined);
+      toast.success('Delivery status updated.');
+      setOpen(false);
+      onChanged();
+    } catch (err) {
+      toast.error(errorMessage(err, 'Could not update the delivery status'));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="mt-5 border-t border-hairline pt-5">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <p className="text-xs font-medium uppercase tracking-wide text-muted">Delivery</p>
+          <div className="mt-1.5">
+            <StatusBadge value={order.fulfilment || 'processing'} />
+          </div>
+          {order.estimatedDeliveryAt && !order.deliveredAt && (
+            <p className="mt-1 text-xs text-muted">
+              Customer is told: {formatDate(order.estimatedDeliveryAt)}
+            </p>
+          )}
+        </div>
+
+        {!cancelled && (
+          <button
+            type="button"
+            className={btnSecondary}
+            onClick={() => setOpen((value) => !value)}
+          >
+            {open ? 'Cancel' : 'Update delivery'}
+          </button>
+        )}
+      </div>
+
+      <div className="mt-4">
+        <DeliveryTimeline order={order} />
+      </div>
+
+      {/*
+        `noValidate` on the form below MATTERS, and its absence was a real bug.
+
+        `Field` puts a native `required` on the control, and the delivery
+        estimate is a `type="date"` input. With native validation left on, an
+        empty required date makes the BROWSER block submission and show its own
+        bubble — so `onSubmit` never fires, this component's own validation
+        never runs, and the specific, actionable message ("set the date before
+        marking this shipped — the customer sees it") is never displayed. What
+        the user gets instead is a generic browser tooltip that says nothing
+        about why the date matters.
+
+        Every other form in this app carries `noValidate` for the same reason:
+        the inline errors are ours, styled, wired to `aria-describedby`, and
+        able to explain themselves. Caught by an end-to-end test that clicked
+        save and found no error message at all.
+      */}
+      {open && !cancelled && (
+        <form
+          onSubmit={save}
+          noValidate
+          className="mt-4 space-y-4 border-t border-hairline pt-4"
+        >
+          <Field
+            label="Delivery status"
+            required
+            hint="What the customer sees on their order tracking page."
+          >
+            <select
+              className={input}
+              value={fulfilment}
+              onChange={(e) => setFulfilment(e.target.value)}
+            >
+              {FULFILMENT_STEPS.map((step) => (
+                <option key={step.value} value={step.value}>
+                  {step.label}
+                </option>
+              ))}
+            </select>
+          </Field>
+
+          <div>
+            <Field
+              label="Estimated delivery date"
+              type="date"
+              required={estimateRequired}
+              error={fieldError}
+              hint={
+                estimateRequired
+                  ? 'Required once an order has shipped — shown to the customer on their order tracking page.'
+                  : 'Optional until the order ships. Shown to the customer once set.'
+              }
+              value={estimate}
+              onChange={(e) => {
+                setEstimate(e.target.value);
+                setFieldError('');
+              }}
+            />
+            <button
+              type="button"
+              onClick={suggestDate}
+              className="mt-1.5 text-xs font-medium text-brand hover:underline"
+            >
+              Use the usual 5 days
+            </button>
+          </div>
+
+          <button type="submit" className={btnPrimary} disabled={saving}>
+            {saving ? <Spinner /> : 'Save delivery status'}
+          </button>
+        </form>
+      )}
+    </div>
   );
 }

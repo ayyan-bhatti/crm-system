@@ -60,13 +60,99 @@ describe('CartContext — guest cart', () => {
       await result.current.addItem(product(), 2);
     });
 
-    expect(result.current.items).toEqual([{ product: product(), quantity: 2 }]);
+    /*
+     * `variant: null` is part of the line shape now, deliberately, and it is
+     * present even for a product that has no variants. The alternative was to
+     * omit the key entirely for unvaried products, which would mean a guest
+     * cart and a server cart present two different shapes to the drawer — the
+     * server always includes it — and every consumer would need to know which
+     * kind of cart it was rendering.
+     */
+    expect(result.current.items).toEqual([{ product: product(), quantity: 2, variant: null }]);
     expect(result.current.count).toBe(2);
     expect(result.current.total).toBe(20);
     expect(shopCartApi.addItem).not.toHaveBeenCalled();
     expect(JSON.parse(localStorage.getItem(STORAGE_KEY))).toEqual([
-      { product: product(), quantity: 2 },
+      { product: product(), quantity: 2, variant: null },
     ]);
+  });
+
+  /**
+   * A LINE IS A PRODUCT **AND** A VARIANT.
+   *
+   * Two colours of one shirt are two rows, not one row of two. Keying the cart
+   * on the product id alone would silently merge them, and "remove the blue
+   * one" would then be impossible to express.
+   */
+  it('keeps two variants of one product as two separate lines', async () => {
+    const { result } = setup();
+    const midnight = { _id: 'v1', color: { name: 'Midnight', hex: '#111827' }, size: 'M', price: 10 };
+    const sand = { _id: 'v2', color: { name: 'Sand', hex: '#d6c7a1' }, size: 'M', price: 10 };
+
+    await act(async () => {
+      await result.current.addItem(product(), 1, midnight);
+    });
+    await act(async () => {
+      await result.current.addItem(product(), 2, sand);
+    });
+
+    expect(result.current.items).toHaveLength(2);
+    expect(result.current.count).toBe(3);
+    expect(result.current.items[0].variant).toEqual({
+      variantId: 'v1',
+      colorName: 'Midnight',
+      colorHex: '#111827',
+      size: 'M',
+    });
+
+    // ...and adding the same variant again merges onto its own line only.
+    await act(async () => {
+      await result.current.addItem(product(), 1, midnight);
+    });
+
+    expect(result.current.items).toHaveLength(2);
+    expect(result.current.items[0].quantity).toBe(2);
+    expect(result.current.items[1].quantity).toBe(2);
+  });
+
+  it('removes one variant line without touching the other', async () => {
+    const { result } = setup();
+    const midnight = { _id: 'v1', color: { name: 'Midnight', hex: '#111827' }, price: 10 };
+    const sand = { _id: 'v2', color: { name: 'Sand', hex: '#d6c7a1' }, price: 10 };
+
+    await act(async () => {
+      await result.current.addItem(product(), 1, midnight);
+    });
+    await act(async () => {
+      await result.current.addItem(product(), 1, sand);
+    });
+
+    await act(async () => {
+      await result.current.removeItem('p1', 'v1');
+    });
+
+    expect(result.current.items).toHaveLength(1);
+    expect(result.current.items[0].variant.variantId).toBe('v2');
+  });
+
+  /**
+   * A variant that costs more than its siblings is priced at ITS price, so a
+   * guest's running total matches what checkout will actually charge. Reading
+   * the product's base price here would understate the cart and produce a
+   * surprise at the till.
+   */
+  it("uses the variant's own price in the guest total", async () => {
+    const { result } = setup();
+
+    await act(async () => {
+      await result.current.addItem(product(), 2, {
+        _id: 'v9',
+        color: { name: 'Copper', hex: '#b06a3b' },
+        price: 125,
+      });
+    });
+
+    expect(result.current.total).toBe(250);
   });
 
   it('adding the same product twice merges quantities on one line rather than duplicating it', async () => {
@@ -145,7 +231,8 @@ describe('CartContext — signed-in buyer', () => {
       await result.current.addItem(product(), 1);
     });
 
-    expect(shopCartApi.addItem).toHaveBeenCalledWith('p1', 1);
+    // The third argument is the variant id — null for a product with none.
+    expect(shopCartApi.addItem).toHaveBeenCalledWith('p1', 1, null);
     expect(result.current.items).toEqual([{ product: product(), quantity: 1 }]);
     expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
   });
@@ -178,7 +265,9 @@ describe('CartContext — guest-to-buyer merge on sign-in', () => {
     rerender();
 
     await waitFor(() => expect(shopCartApi.merge).toHaveBeenCalledTimes(1));
-    expect(shopCartApi.merge).toHaveBeenCalledWith([{ product: 'g1', quantity: 3 }]);
+    expect(shopCartApi.merge).toHaveBeenCalledWith([
+      { product: 'g1', quantity: 3, variantId: null },
+    ]);
 
     await waitFor(() => expect(result.current.items).toEqual(serverCart.items));
     expect(localStorage.getItem(STORAGE_KEY)).toBe('[]');

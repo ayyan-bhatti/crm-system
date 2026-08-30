@@ -87,7 +87,9 @@ export default function DashboardLayout() {
           <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand text-sm font-bold text-white">
             S
           </span>
-          <span className="text-[15px] font-semibold tracking-tight text-ink">SimpleCRM</span>
+          <span className="font-display text-[16px] font-semibold tracking-tight text-ink">
+            SimpleCRM
+          </span>
         </div>
 
         {/*
@@ -151,7 +153,9 @@ export default function DashboardLayout() {
         {/* Mobile header: the sidebar is hidden below sm, so the nav repeats
             here as a scrolling row. */}
         <header className="flex h-16 items-center justify-between gap-4 border-b border-hairline bg-surface px-5 sm:hidden">
-          <span className="text-[15px] font-semibold tracking-tight text-ink">SimpleCRM</span>
+          <span className="font-display text-[16px] font-semibold tracking-tight text-ink">
+            SimpleCRM
+          </span>
           <div className="flex items-center gap-3">
             <Link to="/" className="text-sm font-medium text-ink-2 hover:text-ink">
               Store

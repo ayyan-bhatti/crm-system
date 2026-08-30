@@ -145,6 +145,21 @@ export const ordersApi = {
       .post(`/orders/${id}/transfer-request`, { assignedTo, reason })
       .then((r) => r.data),
 
+  /**
+   * Move an order along the delivery sequence.
+   *
+   * A separate endpoint from `update` for the same reason `assign` is one: it
+   * is a different kind of change, with a different audience and a different
+   * permission. `update` decides whether a sale counts and whether stock moves;
+   * this decides what the customer is told about a parcel — and unlike `assign`
+   * it is open to the rep holding the order, who is usually the person who
+   * actually knows it went out.
+   */
+  updateFulfilment: (id, fulfilment, estimatedDeliveryAt) =>
+    client
+      .patch(`/orders/${id}/fulfilment`, { fulfilment, estimatedDeliveryAt })
+      .then((r) => r.data.data),
+
   remove: (id) => client.delete(`/orders/${id}`).then((r) => r.data),
 };
 

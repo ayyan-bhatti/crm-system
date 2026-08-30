@@ -6,7 +6,17 @@ import { errorMessage } from '../../api/client';
 import { useToast } from '../../components/Toast';
 import useFetch from '../../hooks/useFetch';
 import { Card, ErrorBanner, PageHeader, Spinner, StatusBadge } from '../../components/common';
-import { btnPrimary, btnSecondary, formatDateTime, money, orderLabel, td, th } from '../../ui';
+import DeliveryTimeline from '../../components/DeliveryTimeline';
+import {
+  btnPrimary,
+  btnSecondary,
+  formatDateTime,
+  money,
+  orderLabel,
+  td,
+  th,
+  variantLabel,
+} from '../../ui';
 
 export default function BuyerOrderDetail() {
   const { id } = useParams();
@@ -84,8 +94,19 @@ export default function BuyerOrderDetail() {
       <PageHeader
         title={orderLabel(order)}
         subtitle={formatDateTime(order.createdAt)}
-        action={<StatusBadge value={order.status} />}
+        /*
+         * The DELIVERY status, not the commercial one. This is the buyer's
+         * page, and "pending" is an answer to a question they did not ask —
+         * it means "staff have not marked this fulfilled", which is internal
+         * bookkeeping. What they want to know is where the parcel is.
+         */
+        action={<StatusBadge value={order.fulfilment || 'processing'} />}
       />
+
+      <Card className="p-5">
+        <h2 className="mb-4 text-sm font-semibold text-ink">Where your order is</h2>
+        <DeliveryTimeline order={order} />
+      </Card>
 
       <Card className="p-5">
         <table className="w-full">
@@ -100,7 +121,23 @@ export default function BuyerOrderDetail() {
           <tbody className="divide-y divide-hairline">
             {order.items.map((item, index) => (
               <tr key={index}>
-                <td className={td}>{item.product?.name || 'Deleted product'}</td>
+                <td className={td}>
+                  {item.product?.name || 'Deleted product'}
+                  {/* Which colour and size. Two lines of the same product in
+                      different colours are otherwise indistinguishable. */}
+                  {item.variant && (
+                    <span className="mt-0.5 flex items-center gap-1.5 text-xs text-muted">
+                      {item.variant.colorHex && (
+                        <span
+                          aria-hidden="true"
+                          className="inline-block h-2.5 w-2.5 rounded-full ring-1 ring-inset ring-ink/15"
+                          style={{ backgroundColor: item.variant.colorHex }}
+                        />
+                      )}
+                      {variantLabel(item.variant)}
+                    </span>
+                  )}
+                </td>
                 <td className={`${td} text-right`}>{money(item.priceAtOrder)}</td>
                 <td className={`${td} text-right`}>{item.quantity}</td>
                 <td className={`${td} text-right`}>{money(item.priceAtOrder * item.quantity)}</td>

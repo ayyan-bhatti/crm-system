@@ -12,6 +12,7 @@ import {
   Spinner,
   StatusBadge,
 } from '../../components/common';
+import DeliveryTimeline from '../../components/DeliveryTimeline';
 import { btnSecondary, formatDate, input, link, money, orderLabel, td, th } from '../../ui';
 
 export default function BuyerOrders() {
@@ -59,7 +60,8 @@ export default function BuyerOrders() {
                 <tr>
                   <th className={th}>Order</th>
                   <th className={th}>Date</th>
-                  <th className={th}>Status</th>
+                  <th className={th}>Delivery</th>
+                  <th className={`${th} hidden sm:table-cell`}>Progress</th>
                   <th className={`${th} text-right`}>Total</th>
                 </tr>
               </thead>
@@ -73,7 +75,26 @@ export default function BuyerOrders() {
                     </td>
                     <td className={td}>{formatDate(order.createdAt)}</td>
                     <td className={td}>
-                      <StatusBadge value={order.status} />
+                      {/*
+                        The DELIVERY status, not the commercial one — this is
+                        the buyer's own list, and "pending" describes internal
+                        bookkeeping rather than anything they can act on.
+                      */}
+                      <StatusBadge value={order.fulfilment || 'processing'} />
+                      {order.estimatedDeliveryAt && order.fulfilment !== 'delivered' && (
+                        <span className="mt-1 block text-xs text-muted">
+                          Est. {formatDate(order.estimatedDeliveryAt)}
+                        </span>
+                      )}
+                    </td>
+                    {/*
+                      The compact timeline. Hidden below `sm` rather than
+                      squeezed: five dots and four connectors in a phone-width
+                      table column is a grey smudge, and the badge beside it
+                      already says the same thing in words.
+                    */}
+                    <td className={`${td} hidden w-40 sm:table-cell`}>
+                      <DeliveryTimeline order={order} compact />
                     </td>
                     <td className={`${td} text-right font-medium text-ink tabular`}>
                       {money(order.total)}

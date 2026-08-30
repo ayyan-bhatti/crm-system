@@ -73,11 +73,27 @@ const openTabAs = async (who) => {
  *
  * Yielding a macrotask here flushes any pending delivery while no tab is
  * mounted, so it lands on nobody.
+ *
+ * SEVERAL TURNS, NOT ONE — and the difference is not superstition. jsdom's
+ * BroadcastChannel does not guarantee delivery within a single macrotask, and
+ * under a full parallel run (27 files across several worker threads on a busy
+ * machine) one turn was demonstrably not enough: a leaked announcement
+ * survived the drain and landed on the next test's freshly-mounted tab. The
+ * symptom moved around — most recently the sign-out test, which saw its tab
+ * re-adopt a session it had just been told was gone — which is the signature
+ * of a leak rather than of any one test being wrong.
+ *
+ * Three turns is not a proof, and it is worth being honest that this is a
+ * boundary problem being widened rather than closed. Closing it properly would
+ * mean a per-test channel name, which `api/sessionChannel.js` deliberately does
+ * not expose: one name for the whole app is the behaviour under test.
  */
 beforeEach(async () => {
-  await new Promise((resolve) => {
-    setTimeout(resolve, 0);
-  });
+  for (let turn = 0; turn < 3; turn += 1) {
+    await new Promise((resolve) => {
+      setTimeout(resolve, 0);
+    });
+  }
 
   vi.clearAllMocks();
 });

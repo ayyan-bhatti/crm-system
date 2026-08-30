@@ -32,34 +32,80 @@ export const shopProductsApi = {
   search: (q) => shopClient.get('/shop/products/search', { params: { q } }).then((r) => r.data),
   recommendations: (id) =>
     shopClient.get(`/shop/products/${id}/recommendations`).then((r) => r.data),
+
+  /*
+   * The PUBLIC category list. The storefront used to call `productsApi.categories()`
+   * — the internal, staff-only one — which answered 401 for every shopper who
+   * did not also have a CRM session open, and the failure was swallowed by a
+   * `.catch(() => {})`. A category filter that renders nothing looks exactly
+   * like a category filter that was never built.
+   */
+  categories: () => shopClient.get('/shop/products/categories').then((r) => r.data.data),
+  colours: () => shopClient.get('/shop/products/colours').then((r) => r.data.data),
+};
+
+export const shopNewsletterApi = {
+  subscribe: (email) => shopClient.post('/shop/newsletter', { email }).then((r) => r.data),
 };
 
 export const shopCartApi = {
   get: () => shopClient.get('/shop/cart').then((r) => r.data.data),
-  addItem: (product, quantity) =>
-    shopClient.post('/shop/cart/items', { product, quantity }).then((r) => r.data.data),
-  updateItem: (product, quantity) =>
-    shopClient.patch(`/shop/cart/items/${product}`, { quantity }).then((r) => r.data.data),
-  removeItem: (product) =>
-    shopClient.delete(`/shop/cart/items/${product}`).then((r) => r.data.data),
+  addItem: (product, quantity, variantId) =>
+    shopClient
+      .post('/shop/cart/items', { product, quantity, variantId })
+      .then((r) => r.data.data),
+  /*
+   * The variant travels in the body / query string rather than the path.
+   *
+   * A line is identified by product AND variant, so `/items/:productId` alone
+   * is ambiguous the moment a cart holds two colours of one shirt. Putting the
+   * variant in a second path segment was the alternative and would have broken
+   * every existing URL for products that have no variants; this way those URLs
+   * are unchanged and simply carry no variant.
+   */
+  updateItem: (product, quantity, variantId = null) =>
+    shopClient
+      .patch(`/shop/cart/items/${product}`, { quantity, variantId })
+      .then((r) => r.data.data),
+  removeItem: (product, variantId = null) =>
+    shopClient
+      .delete(`/shop/cart/items/${product}`, { params: variantId ? { variantId } : {} })
+      .then((r) => r.data.data),
   merge: (items) => shopClient.post('/shop/cart/merge', { items }).then((r) => r.data.data),
 };
 
 export const shopCheckoutApi = {
-  /** `guestDetails` is omitted for a signed-in buyer, who checks out from their account. */
-  checkout: (items, guestDetails, addressId, paymentMethod) =>
+  /**
+   * Start a checkout. Returns the whole response body, not `data`, because the
+   * two payment paths return genuinely different things and the caller has to
+   * tell them apart:
+   *
+   *   { mode: 'stripe', data: { checkoutUrl } }  go and pay; no order exists yet
+   *   { mode: 'direct', data: <order> }          the order was created
+   *
+   * Unwrapping to `data` here would erase `mode` and leave the caller guessing
+   * from the shape of what it got, which is precisely the kind of inference
+   * that breaks the first time a field is added.
+   */
+  checkout: (items, addressId, paymentMethod) =>
     shopClient
       .post(
         '/shop/checkout',
-        {
-          items,
-          ...guestDetails,
-          ...(addressId ? { addressId } : {}),
-          paymentMethod,
-        },
+        { items, addressId, paymentMethod },
         { headers: { 'Idempotency-Key': idempotencyKey() } }
       )
-      .then((r) => r.data.data),
+      .then((r) => r.data),
+
+  /** What the confirmation page polls: cheap, and reports only what we know. */
+  session: (sessionId) =>
+    shopClient.get(`/shop/checkout/session/${sessionId}`).then((r) => r.data.data),
+
+  /**
+   * Ask Stripe directly, for when the redirect beat the webhook. Costs an
+   * outbound API call, so the page uses it once rather than in a loop.
+   */
+  reconcile: (sessionId) =>
+    shopClient.post(`/shop/checkout/session/${sessionId}/reconcile`).then((r) => r.data.data),
 };
 
 export const shopOrdersApi = {
