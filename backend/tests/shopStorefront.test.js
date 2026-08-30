@@ -20,7 +20,17 @@ function cookieValue(res, name) {
   return decodeURIComponent(header.slice(name.length + 1).split(';')[0]);
 }
 
-/** A signed-in buyer agent, with its CSRF token ready to send on writes. */
+/**
+ * A signed-in buyer agent, with its CSRF token ready to send on writes AND a
+ * saved delivery address.
+ *
+ * The address is part of the fixture rather than something each test adds,
+ * because checkout now REQUIRES one. That requirement replaced a silent
+ * "use addresses[0]" fallback, which was fine when a guest could type an
+ * address inline and is a parcel sent to the wrong flat now that buyers
+ * routinely have several. Every checkout test would otherwise open with the
+ * same four lines of setup.
+ */
 async function buyerAgent(overrides = {}) {
   const agent = request.agent(app);
   const res = await agent.post('/api/shop/auth/register').send({
@@ -33,7 +43,17 @@ async function buyerAgent(overrides = {}) {
   const csrf = cookieValue(res, SHOP_CSRF_COOKIE);
   const write = (method, url) => agent[method](url).set(SHOP_CSRF_HEADER, csrf);
 
-  return { agent, res, write };
+  const address = await write('post', '/api/shop/auth/addresses').send({
+    label: 'Home',
+    address: '12 Canal Road',
+    city: 'Lahore',
+    phone: '0300-1234567',
+  });
+
+  const addresses = address.body.data?.addresses || [];
+  const addressId = addresses.length ? String(addresses[addresses.length - 1]._id) : null;
+
+  return { agent, res, write, addressId };
 }
 
 describe('Storefront catalogue', () => {
@@ -158,45 +178,66 @@ describe('Buyer cart', () => {
 });
 
 describe('Checkout', () => {
-  const GUEST = { name: 'Sana Malik', email: 'sana@example.com', phone: '0300-1234567', paymentMethod: 'cod' };
-
-  it('places a guest order and creates a matching Customer', async () => {
+  /*
+   * GUEST CHECKOUT IS GONE, AND THESE ARE THE TESTS THAT KEEP IT GONE.
+   *
+   * The four tests that used to exercise it — a guest order creating a matching
+   * Customer, a second guest order matching the same one, a guest idempotency
+   * replay, a guest with no name being refused — are not "removed because they
+   * broke". The behaviour they described was deliberately reversed, so a test
+   * asserting it would be asserting a bug. What replaces them is the inverse
+   * claim, stated at the same three layers the old ones covered: the endpoint
+   * refuses an anonymous caller, it refuses one carrying guest details, and no
+   * order or customer results either way.
+   *
+   * The `refuses ... with no name or email` case is deliberately NOT translated
+   * into "refuses with no name". A signed-in buyer HAS a name; that validation
+   * only existed to catch an empty guest form and has nothing left to guard.
+   */
+  it('refuses an anonymous checkout outright — there is no guest path', async () => {
     const product = await createProduct({ price: 20 });
 
     const res = await api()
       .post('/api/shop/checkout')
-      .send({ ...GUEST, items: [{ product: product._id, quantity: 2 }] });
+      .send({ items: [{ product: product._id, quantity: 2 }], paymentMethod: 'cod' });
 
-    expect(res.status).toBe(201);
-    expect(res.body.data.source).toBe('storefront');
-    expect(res.body.data.buyerId).toBeNull();
-    expect(res.body.data.status).toBe('pending');
-
-    const customer = await Customer.findOne({ email: 'sana@example.com' });
-    expect(customer).not.toBeNull();
-    expect(String(res.body.data.customer._id)).toBe(String(customer._id));
+    expect(res.status).toBe(401);
+    expect(await Order.countDocuments({})).toBe(0);
   });
 
-  it('matches a second guest order to the same Customer rather than duplicating it', async () => {
-    const product = await createProduct({ price: 5 });
+  it('still refuses when guest details are supplied in the body', async () => {
+    const product = await createProduct({ price: 20 });
 
-    await api()
-      .post('/api/shop/checkout')
-      .send({ ...GUEST, items: [{ product: product._id, quantity: 1 }] });
-    await api()
-      .post('/api/shop/checkout')
-      .send({ ...GUEST, items: [{ product: product._id, quantity: 1 }] });
+    /*
+     * The exact body the old guest flow accepted. It must not be a way back in:
+     * the rejection has to come from the missing session, not from a missing
+     * field, so sending a complete guest payload is the interesting case rather
+     * than an incomplete one.
+     */
+    const res = await api().post('/api/shop/checkout').send({
+      name: 'Sana Malik',
+      email: 'sana@example.com',
+      phone: '0300-1234567',
+      address: '9 Mall Road',
+      city: 'Lahore',
+      paymentMethod: 'cod',
+      items: [{ product: product._id, quantity: 1 }],
+    });
 
-    expect(await Customer.countDocuments({ email: 'sana@example.com' })).toBe(1);
-    expect(await Order.countDocuments({})).toBe(2);
+    expect(res.status).toBe(401);
+    expect(await Customer.countDocuments({ email: 'sana@example.com' })).toBe(0);
+    expect(await Order.countDocuments({})).toBe(0);
   });
 
-  it('does not decrement stock for a pending storefront order', async () => {
+  it('does not decrement stock for a pending, unpaid storefront order', async () => {
     const product = await createProduct({ price: 5, stockQty: 10 });
+    const { write, addressId } = await buyerAgent();
 
-    await api()
-      .post('/api/shop/checkout')
-      .send({ ...GUEST, items: [{ product: product._id, quantity: 3 }] });
+    await write('post', '/api/shop/checkout').send({
+      items: [{ product: product._id, quantity: 3 }],
+      paymentMethod: 'cod',
+      addressId,
+    });
 
     const reloaded = await require('../src/models/Product').findById(product._id);
     expect(reloaded.stockQty).toBe(10);
@@ -204,30 +245,35 @@ describe('Checkout', () => {
 
   it('replays the same order on a retried checkout with the same idempotency key', async () => {
     const product = await createProduct({ price: 15 });
+    const { agent, write, addressId } = await buyerAgent();
     const key = 'checkout-retry-key-123456';
+    const body = {
+      items: [{ product: product._id, quantity: 1 }],
+      paymentMethod: 'cod',
+      addressId,
+    };
 
-    const first = await api()
-      .post('/api/shop/checkout')
+    const first = await write('post', '/api/shop/checkout')
       .set('Idempotency-Key', key)
-      .send({ ...GUEST, items: [{ product: product._id, quantity: 1 }] });
-
-    const second = await api()
-      .post('/api/shop/checkout')
+      .send(body);
+    const second = await write('post', '/api/shop/checkout')
       .set('Idempotency-Key', key)
-      .send({ ...GUEST, items: [{ product: product._id, quantity: 1 }] });
+      .send(body);
 
     expect(second.status).toBe(201);
     expect(second.body.data._id).toBe(first.body.data._id);
     expect(await Order.countDocuments({})).toBe(1);
+    expect(agent).toBeDefined();
   });
 
   it('links a signed-in buyer to the order and to their matched Customer', async () => {
     const product = await createProduct({ price: 30 });
-    const { write, res: registered } = await buyerAgent();
+    const { write, res: registered, addressId } = await buyerAgent();
 
     const res = await write('post', '/api/shop/checkout').send({
       items: [{ product: product._id, quantity: 1 }],
       paymentMethod: 'cod',
+      addressId,
     });
 
     expect(res.status).toBe(201);
@@ -242,16 +288,15 @@ describe('Checkout', () => {
 
   it("reuses the buyer's linked Customer on a second order, not a fresh match", async () => {
     const product = await createProduct({ price: 5 });
-    const { write } = await buyerAgent();
+    const { write, addressId } = await buyerAgent();
+    const body = {
+      items: [{ product: product._id, quantity: 1 }],
+      paymentMethod: 'cod',
+      addressId,
+    };
 
-    const firstOrder = await write('post', '/api/shop/checkout').send({
-      items: [{ product: product._id, quantity: 1 }],
-      paymentMethod: 'cod',
-    });
-    const secondOrder = await write('post', '/api/shop/checkout').send({
-      items: [{ product: product._id, quantity: 1 }],
-      paymentMethod: 'cod',
-    });
+    const firstOrder = await write('post', '/api/shop/checkout').send(body);
+    const secondOrder = await write('post', '/api/shop/checkout').send(body);
 
     expect(secondOrder.body.data.customer._id).toBe(firstOrder.body.data.customer._id);
     expect(await Customer.countDocuments({ email: 'bilal@example.com' })).toBe(1);
@@ -259,26 +304,52 @@ describe('Checkout', () => {
 
   it('empties the buyer cart on a successful checkout', async () => {
     const product = await createProduct({ price: 5 });
-    const { write } = await buyerAgent();
+    const { write, addressId } = await buyerAgent();
 
     await write('post', '/api/shop/cart/items').send({ product: product._id, quantity: 2 });
     await write('post', '/api/shop/checkout').send({
       items: [{ product: product._id, quantity: 1 }],
       paymentMethod: 'cod',
+      addressId,
     });
 
     const cart = await write('get', '/api/shop/cart');
     expect(cart.body.data.items).toHaveLength(0);
   });
 
-  it('refuses a guest checkout with no name or email', async () => {
-    const product = await createProduct();
+  /*
+   * The address requirement, which replaced a silent `addresses[0]` fallback.
+   * Worth its own test because the old behaviour was not an error — it quietly
+   * picked one, which is exactly the kind of "helpful" default that posts a
+   * parcel to someone's previous flat.
+   */
+  it('refuses a checkout with no delivery address chosen', async () => {
+    const product = await createProduct({ price: 5 });
+    const { write } = await buyerAgent();
 
-    const res = await api()
-      .post('/api/shop/checkout')
-      .send({ items: [{ product: product._id, quantity: 1 }] });
+    const res = await write('post', '/api/shop/checkout').send({
+      items: [{ product: product._id, quantity: 1 }],
+      paymentMethod: 'cod',
+    });
 
     expect(res.status).toBe(400);
+    expect(res.body.message).toMatch(/delivery address/i);
+    expect(await Order.countDocuments({})).toBe(0);
+  });
+
+  it("refuses an address id that is not one of the buyer's own", async () => {
+    const product = await createProduct({ price: 5 });
+    const { write } = await buyerAgent();
+    const stranger = await buyerAgent({ email: 'stranger@example.com' });
+
+    const res = await write('post', '/api/shop/checkout').send({
+      items: [{ product: product._id, quantity: 1 }],
+      paymentMethod: 'cod',
+      addressId: stranger.addressId,
+    });
+
+    expect(res.status).toBe(400);
+    expect(await Order.countDocuments({})).toBe(0);
   });
 });
 
@@ -291,10 +362,12 @@ describe("A buyer's own orders", () => {
     await mine.write('post', '/api/shop/checkout').send({
       items: [{ product: product._id, quantity: 1 }],
       paymentMethod: 'cod',
+      addressId: mine.addressId,
     });
     await theirs.write('post', '/api/shop/checkout').send({
       items: [{ product: product._id, quantity: 1 }],
       paymentMethod: 'cod',
+      addressId: theirs.addressId,
     });
 
     const res = await mine.write('get', '/api/shop/orders');
@@ -309,6 +382,7 @@ describe("A buyer's own orders", () => {
     const theirOrder = await theirs.write('post', '/api/shop/checkout').send({
       items: [{ product: product._id, quantity: 1 }],
       paymentMethod: 'cod',
+      addressId: theirs.addressId,
     });
 
     const res = await mine.write('get', `/api/shop/orders/${theirOrder.body.data._id}`);
@@ -333,11 +407,12 @@ describe("A buyer's own orders", () => {
   describe('request-cancel', () => {
     it('queues a cancellation for a pending order, labelled as coming from the buyer', async () => {
       const product = await createProduct({ price: 5 });
-      const { write } = await buyerAgent();
+      const { write, addressId } = await buyerAgent();
 
       const order = await write('post', '/api/shop/checkout').send({
         items: [{ product: product._id, quantity: 1 }],
         paymentMethod: 'cod',
+        addressId,
       });
 
       const res = await write(
@@ -356,11 +431,12 @@ describe("A buyer's own orders", () => {
     it('refuses a cancel request against an order that is not pending', async () => {
       const admin = await createAdmin();
       const product = await createProduct({ price: 5 });
-      const { write, agent } = await buyerAgent({ email: 'notpending@example.com' });
+      const { write, agent, addressId } = await buyerAgent({ email: 'notpending@example.com' });
 
       const order = await write('post', '/api/shop/checkout').send({
         items: [{ product: product._id, quantity: 1 }],
         paymentMethod: 'cod',
+        addressId,
       });
 
       await api()
@@ -379,11 +455,12 @@ describe("A buyer's own orders", () => {
 
     it('still enforces one outstanding request per order', async () => {
       const product = await createProduct({ price: 5 });
-      const { write } = await buyerAgent();
+      const { write, addressId } = await buyerAgent();
 
       const order = await write('post', '/api/shop/checkout').send({
         items: [{ product: product._id, quantity: 1 }],
         paymentMethod: 'cod',
+        addressId,
       });
 
       await write('post', `/api/shop/orders/${order.body.data._id}/request-cancel`);
@@ -402,11 +479,12 @@ describe("A buyer's own orders", () => {
     it('leaves the order cancelled but not deleted once approved', async () => {
       const admin = await createAdmin();
       const product = await createProduct({ price: 5 });
-      const { write } = await buyerAgent();
+      const { write, addressId } = await buyerAgent();
 
       const order = await write('post', '/api/shop/checkout').send({
         items: [{ product: product._id, quantity: 1 }],
         paymentMethod: 'cod',
+        addressId,
       });
 
       const requested = await write(
@@ -426,11 +504,12 @@ describe("A buyer's own orders", () => {
     it('queues an item change for a pending order', async () => {
       const product = await createProduct({ price: 5 });
       const other = await createProduct({ price: 8 });
-      const { write } = await buyerAgent();
+      const { write, addressId } = await buyerAgent();
 
       const order = await write('post', '/api/shop/checkout').send({
         items: [{ product: product._id, quantity: 1 }],
         paymentMethod: 'cod',
+        addressId,
       });
 
       const res = await write(
@@ -449,11 +528,12 @@ describe("A buyer's own orders", () => {
     it('re-prices the order at approval time, not at request time', async () => {
       const admin = await createAdmin();
       const product = await createProduct({ price: 5 });
-      const { write } = await buyerAgent();
+      const { write, addressId } = await buyerAgent();
 
       const order = await write('post', '/api/shop/checkout').send({
         items: [{ product: product._id, quantity: 1 }],
         paymentMethod: 'cod',
+        addressId,
       });
 
       const requested = await write(

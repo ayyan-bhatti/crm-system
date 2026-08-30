@@ -5,7 +5,13 @@ const Customer = require('../models/Customer');
 const User = require('../models/User');
 const ApiError = require('../utils/ApiError');
 const asyncHandler = require('../utils/asyncHandler');
-const { ORDER_STATUS, USER_STATUS } = require('../config/constants');
+const {
+  ORDER_STATUS,
+  USER_STATUS,
+  FULFILMENT_STATUS,
+  FULFILMENT_SEQUENCE,
+  FULFILMENT_LABELS,
+} = require('../config/constants');
 const {
   hasFullRecordAccess,
   canAccessCustomer,
@@ -24,6 +30,7 @@ const {
 const { withTransaction } = require('../utils/transaction');
 const { recordAudit } = require('../services/auditService');
 const { nextOrderNumber, parseOrderNumber } = require('../services/orderNumber');
+const { refundOrderIfPaid } = require('../services/refundService');
 
 const SORTABLE_FIELDS = ['total', 'status', 'createdAt'];
 
@@ -156,24 +163,44 @@ async function buildOrderItems(rawItems, session = null) {
     throw ApiError.badRequest('An order must contain at least one item');
   }
 
-  // Merge duplicate lines for the same product first. Otherwise two lines of 6
-  // against a stock of 10 would each pass the check individually and oversell.
+  /*
+   * Merge duplicate lines first. Otherwise two lines of 6 against a stock of 10
+   * would each pass the check individually and oversell.
+   *
+   * THE KEY IS PRODUCT **AND** VARIANT, which is the whole change here. Keying
+   * on the product alone would merge a medium blue and a large red into one
+   * line of two, check that combined quantity against one of the two variants'
+   * stock, and write a single line that has lost half of what was ordered. Two
+   * colours of the same shirt are two independent things to count.
+   */
   const merged = new Map();
   for (const line of rawItems) {
     const productId = line.product;
     const quantity = Number(line.quantity);
+    const variantId = line.variantId || line.variant?.variantId || null;
 
     if (!mongoose.isValidObjectId(productId)) {
       throw ApiError.badRequest(`Invalid product id: ${productId}`);
+    }
+    if (variantId && !mongoose.isValidObjectId(variantId)) {
+      throw ApiError.badRequest(`Invalid variant id: ${variantId}`);
     }
     if (!Number.isInteger(quantity) || quantity < 1) {
       throw ApiError.badRequest('Each item needs an integer quantity of at least 1');
     }
 
-    merged.set(String(productId), (merged.get(String(productId)) || 0) + quantity);
+    const key = `${productId}::${variantId || ''}`;
+    const existing = merged.get(key);
+
+    if (existing) {
+      existing.quantity += quantity;
+    } else {
+      merged.set(key, { productId: String(productId), variantId, quantity });
+    }
   }
 
-  const productIds = [...merged.keys()];
+  const lines = [...merged.values()];
+  const productIds = [...new Set(lines.map((line) => line.productId))];
   const products = await Product.find({ _id: { $in: productIds } }).session(session);
 
   if (products.length !== productIds.length) {
@@ -182,22 +209,76 @@ async function buildOrderItems(rawItems, session = null) {
     throw ApiError.badRequest(`Unknown product id(s): ${missing.join(', ')}`);
   }
 
+  const byId = new Map(products.map((p) => [String(p._id), p]));
+
   const items = [];
   let total = 0;
 
-  for (const product of products) {
-    const quantity = merged.get(String(product._id));
+  for (const line of lines) {
+    const product = byId.get(line.productId);
+    const hasVariants = product.variants && product.variants.length > 0;
 
-    // Advisory — see the note above. decrementStock is what actually enforces it.
-    if (quantity > product.stockQty) {
+    /*
+     * A PRODUCT WITH VARIANTS CANNOT BE ORDERED WITHOUT NAMING ONE.
+     *
+     * Refused loudly rather than defaulted to the first variant. "Defaulting"
+     * here would mean silently choosing a colour on the customer's behalf and
+     * shipping it — a mistake that is only discovered when the parcel is
+     * opened, by which point it has cost a return. The storefront disables
+     * Add to Cart until a variant is chosen; this is the server-side half of
+     * the same rule, for anything that reaches the API another way.
+     */
+    if (hasVariants && !line.variantId) {
       throw ApiError.badRequest(
-        `Insufficient stock for "${product.name}" (${product.sku}): ` +
-          `requested ${quantity}, available ${product.stockQty}`
+        `"${product.name}" is sold in specific colours — choose one before ordering.`
       );
     }
 
-    items.push({ product: product._id, quantity, priceAtOrder: product.price });
-    total += quantity * product.price;
+    /*
+     * The converse, and it matters just as much: a variant id against a product
+     * that has none means the caller and the catalogue disagree about what is
+     * being sold. Accepting it would write a snapshot referring to a variant
+     * that does not exist.
+     */
+    if (!hasVariants && line.variantId) {
+      throw ApiError.badRequest(`"${product.name}" is not sold in variants.`);
+    }
+
+    const variant = hasVariants ? product.variants.id(line.variantId) : null;
+
+    if (hasVariants && !variant) {
+      throw ApiError.badRequest(`That colour is no longer available for "${product.name}".`);
+    }
+
+    // The price of the variant if it overrides, else the product's own.
+    const price = variant?.priceOverride ?? product.price;
+    const available = variant ? variant.stockQty : product.stockQty;
+    const describe = variant
+      ? `"${product.name}" (${[variant.color.name, variant.size].filter(Boolean).join(' / ')})`
+      : `"${product.name}" (${product.sku})`;
+
+    // Advisory — see the note above. decrementStock is what actually enforces it.
+    if (line.quantity > available) {
+      throw ApiError.badRequest(
+        `Insufficient stock for ${describe}: requested ${line.quantity}, available ${available}`
+      );
+    }
+
+    items.push({
+      product: product._id,
+      quantity: line.quantity,
+      priceAtOrder: price,
+      variant: variant
+        ? {
+            variantId: variant._id,
+            colorName: variant.color.name,
+            colorHex: variant.color.hex,
+            size: variant.size || '',
+          }
+        : null,
+    });
+
+    total += line.quantity * price;
   }
 
   // Round to cents — floating-point multiplication of prices otherwise produces
@@ -228,11 +309,40 @@ async function decrementStock(items, session = null) {
   const applied = [];
 
   for (const item of items) {
-    const result = await Product.updateOne(
-      { _id: item.product, stockQty: { $gte: item.quantity } },
-      { $inc: { stockQty: -item.quantity } },
-      { session }
-    );
+    const variantId = item.variant?.variantId || null;
+
+    /*
+     * TWO SHAPES OF THE SAME ATOMIC GUARANTEE.
+     *
+     * For a plain product it is the original: match only if the document still
+     * has enough, and decrement in the same operation.
+     *
+     * For a variant it is `$elemMatch` plus the positional `$`. The filter says
+     * "this product, AND it contains an array element with this id that has at
+     * least this much stock"; `variants.$` then addresses precisely the element
+     * that matched. Both halves are needed and the reason is easy to get wrong:
+     * writing `{ 'variants._id': v, 'variants.stockQty': { $gte: q } }` would
+     * match a product where ONE variant has the id and a DIFFERENT variant has
+     * the stock — Mongo evaluates dotted conditions independently across the
+     * array unless they are wrapped in `$elemMatch`. That version passes every
+     * single-variant test and oversells the moment a product has two colours.
+     *
+     * The parent `stockQty` is decremented in the SAME update, which is what
+     * keeps the denormalised total (see the pre-save hook on Product) honest
+     * without a second, raceable write.
+     */
+    const filter = variantId
+      ? {
+          _id: item.product,
+          variants: { $elemMatch: { _id: variantId, stockQty: { $gte: item.quantity } } },
+        }
+      : { _id: item.product, stockQty: { $gte: item.quantity } };
+
+    const update = variantId
+      ? { $inc: { 'variants.$.stockQty': -item.quantity, stockQty: -item.quantity } }
+      : { $inc: { stockQty: -item.quantity } };
+
+    const result = await Product.updateOne(filter, update, { session });
 
     if (result.modifiedCount !== 1) {
       // Without a transaction, put back whatever we already took. With one, the
@@ -240,8 +350,13 @@ async function decrementStock(items, session = null) {
       if (!session) await restoreStock(applied, null);
 
       const product = await Product.findById(item.product).session(session);
+      const label = product ? product.name : item.product;
+      const variantLabel = item.variant?.colorName
+        ? ` (${[item.variant.colorName, item.variant.size].filter(Boolean).join(' / ')})`
+        : '';
+
       throw ApiError.badRequest(
-        `Insufficient stock to complete this order for "${product ? product.name : item.product}"`
+        `Insufficient stock to complete this order for "${label}"${variantLabel}`
       );
     }
 
@@ -249,15 +364,60 @@ async function decrementStock(items, session = null) {
   }
 }
 
-/** Add stock back — used when cancelling a completed order, and on rollback. */
+/** Add stock back — used when cancelling an order whose stock was taken, and on rollback. */
 async function restoreStock(items, session = null) {
   for (const item of items) {
+    const variantId = item.variant?.variantId || null;
+
+    if (variantId) {
+      /*
+       * Restoring a variant is NOT symmetrical with taking it, and the
+       * asymmetry is deliberate. There is no `$gte` guard because putting stock
+       * back cannot oversell — but there IS a real possibility the variant has
+       * since been deleted from the product, in which case `variants.$` matches
+       * nothing and the update is a silent no-op.
+       *
+       * The parent total is therefore restored by a SEPARATE update that always
+       * matches, so a cancelled order for a discontinued colour still credits
+       * the product's headline stock rather than quietly losing the units. The
+       * two writes are in the caller's transaction, so they land together.
+       */
+      await Product.updateOne(
+        { _id: item.product, 'variants._id': variantId },
+        { $inc: { 'variants.$.stockQty': item.quantity } },
+        { session }
+      );
+      await Product.updateOne(
+        { _id: item.product },
+        { $inc: { stockQty: item.quantity } },
+        { session }
+      );
+      continue;
+    }
+
     await Product.updateOne(
       { _id: item.product },
       { $inc: { stockQty: item.quantity } },
       { session }
     );
   }
+}
+
+/**
+ * Have this order's units actually left inventory?
+ *
+ * READS TWO FIELDS BECAUSE THE DATABASE HOLDS TWO GENERATIONS OF ORDER.
+ *
+ * `stockTakenAt` is the real answer and is set by everything written since card
+ * payment arrived. Orders that predate it have it null while genuinely having
+ * had their stock taken — for those, a set `completedAt` is the proof, because
+ * under the old rules completion was the only thing that ever moved stock.
+ *
+ * Consulting both is what let this change ship without a data migration. See
+ * the long note on `stockTakenAt` in models/Order.js.
+ */
+function stockIsTaken(order) {
+  return Boolean(order.stockTakenAt || order.completedAt);
 }
 
 /**
@@ -489,6 +649,37 @@ const updateOrder = asyncHandler(async (req, res) => {
   const { status, items: rawItems } = req.body;
 
   /*
+   * A CANCELLATION REFUNDS BEFORE IT DOES ANYTHING ELSE.
+   *
+   * This block costs one extra read of the order, and buys the ordering
+   * guarantee described in services/refundService.js: money goes back before
+   * stock does, and the Stripe call happens outside the transaction so an
+   * automatic write-conflict retry cannot issue a second refund.
+   *
+   * The access check is repeated here rather than deferred to the transaction
+   * below, and that repetition is the point — without it, this endpoint would
+   * issue a real refund on somebody else's order and only then discover the
+   * caller was not allowed to touch it. The check inside the transaction
+   * remains the authoritative one; this is the one that has to happen before
+   * money moves.
+   */
+  if (status === ORDER_STATUS.CANCELLED) {
+    const existing = await Order.findById(req.params.id).populate('customer');
+    if (!existing) throw ApiError.notFound('Order not found');
+
+    if (!canAccessOrderDocument(req.user, existing)) {
+      throw ApiError.forbidden('You do not have access to this order');
+    }
+
+    // Re-cancelling an already-cancelled order must not refund again. Stripe's
+    // idempotency key would catch it anyway; not asking is better than relying
+    // on being told no.
+    if (existing.status !== ORDER_STATUS.CANCELLED) {
+      await refundOrderIfPaid(existing);
+    }
+  }
+
+  /*
    * Transactional for the same reason creation is: a completion decrements
    * stock AND stamps completedAt, and a cancellation restores stock AND clears
    * it. If half of either pair lands, the guard that stops stock being taken
@@ -574,20 +765,34 @@ const updateOrder = asyncHandler(async (req, res) => {
       }
 
       if (status === ORDER_STATUS.COMPLETED) {
-        // completedAt is the guard: if it is already set, the stock for this
-        // order has been taken once and must not be taken again.
-        if (!found.completedAt) {
+        /*
+         * `stockIsTaken` is the guard, and it is now a genuinely different
+         * question from "is this completed". A card-paid storefront order has
+         * had its stock taken at the moment of payment while still sitting
+         * here as `pending`; completing it must stamp the completion WITHOUT
+         * decrementing a second time for the same units.
+         */
+        if (!stockIsTaken(found)) {
           await decrementStock(found.items, session);
-          found.completedAt = new Date();
+          found.stockTakenAt = new Date();
         }
+        found.completedAt = found.completedAt || new Date();
         found.status = ORDER_STATUS.COMPLETED;
       } else if (status === ORDER_STATUS.CANCELLED) {
-        // Only give stock back if it was actually taken.
-        if (found.completedAt) {
+        // Only give stock back if it was actually taken — which, again, is no
+        // longer the same thing as "was completed".
+        if (stockIsTaken(found)) {
           await restoreStock(found.items, session);
+          found.stockTakenAt = null;
           found.completedAt = null;
         }
         found.status = ORDER_STATUS.CANCELLED;
+        /*
+         * A cancelled order has no delivery state. Leaving `fulfilment` at
+         * whatever it was would show the buyer a timeline still marching
+         * towards their door under a heading that says the order is cancelled.
+         */
+        found.fulfilment = FULFILMENT_STATUS.CANCELLED;
       } else if (status === ORDER_STATUS.PENDING) {
         throw ApiError.badRequest(`An order cannot move from ${from} back to pending`);
       } else {
@@ -689,7 +894,7 @@ const deleteOrder = asyncHandler(async (req, res) => {
       throw ApiError.forbidden('You do not have access to this order');
     }
 
-    if (order.completedAt) await restoreStock(order.items, session);
+    if (stockIsTaken(order)) await restoreStock(order.items, session);
 
     const before = order.toObject({ depopulate: true });
     await order.deleteOne({ session });
@@ -810,6 +1015,19 @@ async function placeOrder(
     source = 'internal',
     buyerId = null,
     paymentMethod = null,
+    payment = null,
+    /**
+     * Take the stock now even though the order is not being completed.
+     *
+     * Exists for exactly one caller: an order built from a Stripe webhook,
+     * where the money is already gone and the inventory is therefore genuinely
+     * committed, but nobody has picked or posted anything so `completed` would
+     * be a lie. Defaults false, so every pre-existing caller behaves precisely
+     * as it did.
+     */
+    takeStock = false,
+    /** Pre-priced lines from a pending checkout — see the note below. */
+    prebuiltItems = null,
   },
   session
 ) {
@@ -821,8 +1039,22 @@ async function placeOrder(
   }
 
   const completing = status === ORDER_STATUS.COMPLETED;
+  const shouldTakeStock = completing || takeStock;
 
-  const { items, total } = await buildOrderItems(rawItems, session);
+  /*
+   * A CARD-PAID ORDER IS PRICED AT WHAT WAS CHARGED, NOT AT TODAY'S PRICE.
+   *
+   * Every other path re-prices from the live catalogue, deliberately, so that a
+   * request sitting in an approval queue over a price rise applies the new
+   * price. A paid checkout is the one case where that is wrong: Stripe has
+   * already taken a specific amount, and rebuilding the lines from current
+   * prices would produce an order whose total disagrees with the money in the
+   * account. The snapshot on the PendingCheckout is the authority, so it is
+   * passed straight through.
+   */
+  const { items, total } = prebuiltItems
+    ? prebuiltItems
+    : await buildOrderItems(rawItems, session);
 
   /*
    * The human-readable number, allocated atomically.
@@ -850,6 +1082,10 @@ async function placeOrder(
         total,
         status: completing ? ORDER_STATUS.COMPLETED : ORDER_STATUS.PENDING,
         completedAt: completing ? new Date() : null,
+        // See `stockTakenAt` in models/Order.js: this and `completedAt` are now
+        // separate facts, and a paid-but-unfulfilled order sets only this one.
+        stockTakenAt: shouldTakeStock ? new Date() : null,
+        ...(payment ? { payment } : {}),
         createdBy: actorId,
         /*
          * Whoever the person placing the order named, or nobody.
@@ -871,7 +1107,7 @@ async function placeOrder(
 
   // Stock moves last. If it fails, throwing here aborts the transaction and the
   // order above is never written — no compensation to remember.
-  if (completing) await decrementStock(items, session);
+  if (shouldTakeStock) await decrementStock(items, session);
 
   return created;
 }
@@ -1015,12 +1251,145 @@ const requestOrderTransfer = asyncHandler(async (req, res) => {
   });
 });
 
+/**
+ * PATCH /api/orders/:id/fulfilment — admin, manager, or the assigned rep.
+ *
+ * Body: { "fulfilment": "shipped", "estimatedDeliveryAt": "2026-09-04" }
+ *
+ * A SEPARATE ENDPOINT FROM PATCH /api/orders/:id, for the same reason
+ * `assignOrder` is one: it is a different kind of change with a different
+ * permission and a different audience. `status` decides whether a sale counts
+ * and whether stock moves; this decides what the customer is told about a
+ * parcel. Expressing both through one handler would mean a field-by-field
+ * permission check inside a shared body — which is exactly where this class of
+ * rule goes wrong quietly.
+ *
+ * WHO MAY DO IT, AND WHY IT INCLUDES A REP
+ *
+ * The rep holding an order is usually the person who physically knows it went
+ * out. Withholding this from them would leave the one person with the fact
+ * unable to record it, and would push every shipment update through a manager
+ * who is repeating what they were told. `canAccessOrderDocument` already
+ * encodes "admin and manager see everything, a rep sees what is assigned to
+ * them", so it is reused rather than restated.
+ */
+const updateFulfilment = asyncHandler(async (req, res) => {
+  const { fulfilment, estimatedDeliveryAt } = req.body;
+
+  if (!FULFILMENT_SEQUENCE.includes(fulfilment)) {
+    throw ApiError.badRequest(
+      `Fulfilment status must be one of: ${FULFILMENT_SEQUENCE.join(', ')}`
+    );
+  }
+
+  const order = await Order.findById(req.params.id).populate('customer');
+  if (!order) throw ApiError.notFound('Order not found');
+
+  if (!canAccessOrderDocument(req.user, order)) {
+    throw ApiError.forbidden('You do not have access to this order');
+  }
+
+  /*
+   * A cancelled order has no delivery state to advance. Refused explicitly:
+   * silently accepting it would let somebody mark a cancelled order "shipped",
+   * and the buyer's tracking page would then contradict the cancellation email
+   * they already had.
+   */
+  if (order.status === ORDER_STATUS.CANCELLED) {
+    throw ApiError.badRequest('This order was cancelled, so it has no delivery status.');
+  }
+
+  const before = order.toObject({ depopulate: true });
+  const from = order.fulfilment;
+
+  /*
+   * A DELIVERY ESTIMATE IS REQUIRED THE MOMENT SOMETHING SHIPS.
+   *
+   * This is the one field the customer will actually look for, and "shipped,
+   * arriving at some point" is barely more informative than "processing". The
+   * requirement is enforced here rather than only in the form so that it holds
+   * for any caller — and it applies to `shipped` and everything after it, so an
+   * order dragged straight to `out_for_delivery` cannot skip past the check.
+   */
+  const shippedOrLater =
+    FULFILMENT_SEQUENCE.indexOf(fulfilment) >= FULFILMENT_SEQUENCE.indexOf(FULFILMENT_STATUS.SHIPPED);
+
+  if (shippedOrLater) {
+    const estimate = estimatedDeliveryAt || order.estimatedDeliveryAt;
+
+    if (!estimate) {
+      throw ApiError.badRequest(
+        'Set an estimated delivery date before marking this order shipped — it is shown ' +
+          'to the customer on their order tracking page.'
+      );
+    }
+
+    const parsed = new Date(estimate);
+    if (Number.isNaN(parsed.getTime())) {
+      throw ApiError.badRequest('The estimated delivery date is not a valid date');
+    }
+
+    order.estimatedDeliveryAt = parsed;
+  } else if (estimatedDeliveryAt) {
+    // Accepted before shipment too — a rep who knows the date early may as well
+    // record it — but never demanded.
+    const parsed = new Date(estimatedDeliveryAt);
+    if (Number.isNaN(parsed.getTime())) {
+      throw ApiError.badRequest('The estimated delivery date is not a valid date');
+    }
+    order.estimatedDeliveryAt = parsed;
+  }
+
+  /*
+   * Timestamps are stamped once and then left alone. Re-stamping `shippedAt`
+   * because somebody corrected `out_for_delivery` back to `shipped` would
+   * rewrite when the parcel actually left, which is the one thing the field is
+   * for.
+   */
+  if (fulfilment === FULFILMENT_STATUS.SHIPPED && !order.shippedAt) {
+    order.shippedAt = new Date();
+  }
+  if (fulfilment === FULFILMENT_STATUS.DELIVERED && !order.deliveredAt) {
+    order.deliveredAt = new Date();
+  }
+
+  order.fulfilment = fulfilment;
+  await order.save();
+  await order.populate(ORDER_POPULATE);
+
+  /*
+   * Audited with the words rather than the enum values, and naming both ends.
+   * "delivery: Processing → Shipped" is readable by whoever opens the trail a
+   * year later; `out_for_delivery` on its own is not even obviously a change.
+   *
+   * Moving BACKWARDS is permitted rather than refused, and the trail is why
+   * that is safe: people mis-click, and an order wrongly marked delivered has
+   * to be correctable by the person who did it rather than by a database
+   * edit. Every correction is recorded with both ends, so a suspicious pattern
+   * is visible.
+   */
+  await recordAudit(req, {
+    action: 'update',
+    entity: 'order',
+    entityId: order._id,
+    label: order.orderNumber || String(order._id),
+    before,
+    after: order.toObject({ depopulate: true }),
+    note: `delivery: ${FULFILMENT_LABELS[from]} → ${FULFILMENT_LABELS[fulfilment]}`,
+  });
+
+  res.json({ success: true, data: order });
+});
+
 module.exports = {
   listOrders,
   requestOrderTransfer,
   placeOrder,
   buildOrderItems,
   restoreStock,
+  decrementStock,
+  stockIsTaken,
+  updateFulfilment,
   getOrder,
   createOrder,
   updateOrder,

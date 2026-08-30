@@ -212,8 +212,26 @@ const shopRegisterLimiter = createLimiter({
   message: 'Too many accounts created from this address. Please try again later.',
 });
 
+/**
+ * Newsletter sign-up: 5 per hour per IP.
+ *
+ * Same reasoning as `registerLimiter`, and the same number, because it is the
+ * same shape of risk: an unauthenticated caller creating unbounded rows in a
+ * collection. It is the cheapest kind of endpoint to abuse — no password, no
+ * email round-trip, one field — so it gets the tight limit rather than the
+ * generous one. Nobody legitimately submits a sixth address in an hour, and
+ * somebody fixing a typo twice never reaches it.
+ */
+const newsletterLimiter = createLimiter({
+  name: 'newsletter',
+  windowMs: 60 * 60 * 1000,
+  max: 5,
+  message: 'Too many sign-ups from this address. Please try again later.',
+});
+
 module.exports = {
   createLimiter,
+  newsletterLimiter,
   loginLimiter,
   registerLimiter,
   passwordResetLimiter,

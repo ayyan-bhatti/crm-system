@@ -156,7 +156,54 @@ const env = {
    * ready behind it.
    */
   geminiModel: process.env.GEMINI_MODEL || 'gemini-3.6-flash',
+
+  /* -------------------------------------------------------------------------
+   * Stripe
+   *
+   * Three values, and it is worth being explicit about which one does what,
+   * because two of them are secrets that do completely different jobs and
+   * swapping them produces a confusing failure rather than an obvious one.
+   *
+   *   STRIPE_SECRET_KEY     `sk_test_...`  authenticates OUR calls TO Stripe:
+   *                                        creating a Checkout Session,
+   *                                        issuing a refund.
+   *   STRIPE_WEBHOOK_SECRET `whsec_...`    verifies STRIPE'S calls TO US. It is
+   *                                        NOT an API key and cannot be used as
+   *                                        one; it is the shared secret the
+   *                                        signature on an incoming webhook is
+   *                                        computed with.
+   *   STRIPE_PUBLISHABLE_KEY `pk_test_...` not read here at all — it belongs to
+   *                                        the frontend build. Named in the
+   *                                        README so nobody hunts for it.
+   *
+   * Getting the webhook secret wrong does not stop payments: the buyer pays
+   * happily, Stripe posts the event, we reject the signature, and no order is
+   * ever created. That failure is silent from the buyer's side and expensive,
+   * so `/api/internal/ai-status`'s sibling — the payments block on
+   * `/api/health` — reports whether both are configured.
+   * ---------------------------------------------------------------------- */
+  stripeSecretKey: process.env.STRIPE_SECRET_KEY || '',
+  stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET || '',
+
+  /**
+   * Where Stripe sends the buyer back to. Defaults to the app's own URL, which
+   * is right in every deployment where the storefront and API share a domain.
+   */
+  stripeSuccessPath: process.env.STRIPE_SUCCESS_PATH || '/order-confirmation',
+  stripeCancelPath: process.env.STRIPE_CANCEL_PATH || '/checkout',
 };
+
+/**
+ * Whether card payment is available at all.
+ *
+ * Deliberately NOT fatal when unset, matching how a missing GEMINI_API_KEY is
+ * handled: the storefront still works, card checkout is hidden, and
+ * cash-on-delivery remains. A shop that refuses to boot because one payment
+ * method is unconfigured is a worse outcome than a shop that takes orders by
+ * another route — but a shop that OFFERS a card button leading nowhere is worse
+ * than both, so the button is gated on this rather than shown optimistically.
+ */
+env.stripeEnabled = Boolean(env.stripeSecretKey);
 
 env.isTest = env.nodeEnv === 'test';
 env.isProduction = env.nodeEnv === 'production';
@@ -329,6 +376,30 @@ if (env.isTest) {
         'feature is falling back to its non-AI path: AI search is a plain ' +
         'keyword search, and customer summaries are generated from the figures ' +
         'rather than written. Check GET /api/internal/ai-status to confirm.'
+    );
+  }
+
+  // --- STRIPE (a warning, not an error) ----------------------------------
+  /*
+   * Same reasoning as the Gemini warning above, with one addition that makes
+   * it more urgent rather than less: a HALF-configured Stripe is worse than an
+   * unconfigured one. With a secret key and no webhook secret the buyer reaches
+   * the card form, pays, and no order is ever created — because the event that
+   * creates it cannot be verified. Nothing in that sequence looks like an error
+   * to the person who just spent money, which is why the half-configured case
+   * is called out separately rather than folded into "not configured".
+   */
+  if (env.isProduction && env.stripeSecretKey && !env.stripeWebhookSecret) {
+    console.warn(
+      '[config] STRIPE_SECRET_KEY is set but STRIPE_WEBHOOK_SECRET is not. Card ' +
+        'payments will be TAKEN and no order will ever be created, because the ' +
+        'webhook that creates it cannot be verified. Set the webhook secret from ' +
+        'the Stripe dashboard (Developers → Webhooks → your endpoint → signing secret).'
+    );
+  } else if (env.isProduction && !env.stripeSecretKey) {
+    console.warn(
+      '[config] STRIPE_SECRET_KEY is not set. The storefront will run, but card ' +
+        'checkout is hidden and only cash-on-delivery and bank transfer are offered.'
     );
   }
 

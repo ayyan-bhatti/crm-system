@@ -208,6 +208,39 @@ app.use(
   })
 );
 
+/**
+ * THE STRIPE WEBHOOK, MOUNTED BEFORE THE JSON PARSER. THIS ORDER IS LOAD-BEARING.
+ *
+ * Stripe signs the exact bytes it sends. `express.json()` consumes the request
+ * stream and hands the route a parsed object, and re-serialising that object
+ * produces different bytes — different key order, different whitespace,
+ * different unicode escaping — so the computed signature would never match the
+ * one in the header. Every event would be rejected as a forgery, silently, and
+ * the only symptom would be that paid orders never appear.
+ *
+ * `express.raw` gives the handler a Buffer, which is what
+ * `stripe.webhooks.constructEvent` needs. It is scoped to this one path, so
+ * every other route still gets the parsed body it expects.
+ *
+ * Three other things follow from putting it here, all deliberate:
+ *
+ *   - It is ABOVE the CSRF pair. Stripe is a server, holds no cookie, and could
+ *     not present a CSRF token; the signature IS its authentication, and it is a
+ *     stronger one.
+ *   - It is above the config guard, so `ensureDb` is applied explicitly here.
+ *     A webhook arriving at a misconfigured deployment should fail loudly and be
+ *     retried by Stripe rather than be swallowed by a generic 500 page.
+ *   - It does NOT live in routes/shopRoutes.js with the rest of the storefront,
+ *     because that router applies the buyer CSRF middleware to everything under
+ *     it. The mount is here, the handler is in a controller like every other.
+ */
+app.post(
+  '/api/shop/stripe/webhook',
+  express.raw({ type: 'application/json', limit: '1mb' }),
+  ensureDb,
+  require('./controllers/stripeWebhookController').handleStripeWebhook
+);
+
 // Parse JSON request bodies (with a sane size cap).
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true }));

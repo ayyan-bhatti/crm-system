@@ -119,6 +119,102 @@ const getProduct = asyncHandler(async (req, res) => {
 });
 
 /** POST /api/products — managers and admins only. */
+/**
+ * Validate and normalise a `variants` array from a request body.
+ *
+ * DONE HERE RATHER THAN LEFT TO THE SCHEMA, for the same reason `resolveAssignee`
+ * in the order controller validates before saving: Mongoose's message for a
+ * failed subdocument validator names a path (`variants.2.color.hex`) and the
+ * person filling in the form needs to know which ROW is wrong and why.
+ *
+ * The duplicate check is the part that is not merely cosmetic. Two rows for the
+ * same colour and size are not a typo to be tidied — they are two independent
+ * stock pools for one buyable thing, so half the stock becomes unreachable
+ * (nothing can pick the second one) and the product's headline `stockQty`
+ * over-reports what can actually be sold.
+ */
+function normaliseVariants(raw) {
+  if (raw === undefined) return undefined;
+
+  if (!Array.isArray(raw)) {
+    throw ApiError.badRequest('variants must be a list');
+  }
+
+  if (raw.length > 40) {
+    throw ApiError.badRequest('A product can have at most 40 variants');
+  }
+
+  const seen = new Set();
+
+  return raw.map((entry, index) => {
+    const row = index + 1;
+    const colorName = String(entry?.color?.name ?? entry?.colorName ?? '').trim();
+    const colorHex = String(entry?.color?.hex ?? entry?.colorHex ?? '').trim();
+    const size = String(entry?.size ?? '').trim();
+    const stockQty = Number(entry?.stockQty);
+
+    if (!colorName) {
+      throw ApiError.badRequest(`Variant ${row} needs a colour name`);
+    }
+    if (!/^#[0-9a-fA-F]{6}$/.test(colorHex)) {
+      throw ApiError.badRequest(
+        `Variant ${row} ("${colorName}") needs a six-digit hex colour like #1a2b3c`
+      );
+    }
+    if (!Number.isInteger(stockQty) || stockQty < 0) {
+      throw ApiError.badRequest(
+        `Variant ${row} ("${colorName}") needs a whole quantity of 0 or more`
+      );
+    }
+
+    const key = `${colorName.toLowerCase()}::${size.toLowerCase()}`;
+    if (seen.has(key)) {
+      throw ApiError.badRequest(
+        `Variant ${row} repeats "${colorName}${size ? ` / ${size}` : ''}". ` +
+          'Combine them into one row with the total quantity.'
+      );
+    }
+    seen.add(key);
+
+    const priceOverride =
+      entry?.priceOverride === undefined ||
+      entry?.priceOverride === null ||
+      entry?.priceOverride === ''
+        ? null
+        : Number(entry.priceOverride);
+
+    if (priceOverride !== null && (Number.isNaN(priceOverride) || priceOverride < 0)) {
+      throw ApiError.badRequest(`Variant ${row} ("${colorName}") has an invalid price`);
+    }
+
+    /*
+     * `_id` is carried through when the client sends one, so an EDIT keeps the
+     * same variant ids. Dropping them would mint new ones on every save, which
+     * would orphan the `variantId` snapshot on every existing order line and
+     * make live stock for that colour unaddressable.
+     */
+    return {
+      ...(entry?._id ? { _id: entry._id } : {}),
+      color: { name: colorName, hex: colorHex.toLowerCase() },
+      size,
+      stockQty,
+      priceOverride,
+    };
+  });
+}
+
+/** Validate an image gallery: a list of non-empty URL strings. */
+function normaliseImages(raw) {
+  if (raw === undefined) return undefined;
+  if (!Array.isArray(raw)) throw ApiError.badRequest('images must be a list');
+
+  const cleaned = raw.map((url) => String(url || '').trim()).filter(Boolean);
+  if (cleaned.length > 8) {
+    throw ApiError.badRequest('A product can have at most 8 additional images');
+  }
+  return cleaned;
+}
+
 const createProduct = asyncHandler(async (req, res) => {
   const { name, sku, price, stockQty, category, lowStockThreshold, imageUrl, description } =
     req.body;
@@ -133,15 +229,26 @@ const createProduct = asyncHandler(async (req, res) => {
     throw ApiError.badRequest('Image URL is required for a new product');
   }
 
+  const variants = normaliseVariants(req.body.variants);
+  const images = normaliseImages(req.body.images);
+
   const product = await Product.create({
     name,
     sku,
     price,
+    /*
+     * When variants are supplied their sum IS the stock, and any `stockQty` in
+     * the body is ignored rather than merged. Two sources of truth for one
+     * number is how they drift; the model's pre-save hook enforces the same
+     * rule on every later write. See the note on that hook.
+     */
     stockQty,
     category,
     lowStockThreshold,
     imageUrl,
     description,
+    ...(variants ? { variants } : {}),
+    ...(images ? { images } : {}),
   });
 
   await recordAudit(req, {
@@ -176,8 +283,16 @@ const updateProduct = asyncHandler(async (req, res) => {
     if (req.body[field] !== undefined) product[field] = req.body[field];
   });
 
+  const variants = normaliseVariants(req.body.variants);
+  const images = normaliseImages(req.body.images);
+
+  if (variants !== undefined) product.variants = variants;
+  if (images !== undefined) product.images = images;
+
   // save() rather than findByIdAndUpdate() so schema validators (min: 0 on
-  // price and stock) run against the new values.
+  // price and stock) run against the new values — and so the pre-save hook that
+  // keeps `stockQty` equal to the sum of the variants actually fires. That hook
+  // is why `stockQty` is deliberately NOT recomputed by hand here.
   await product.save();
 
   // Stock edits are the ones worth being able to trace later: a manual

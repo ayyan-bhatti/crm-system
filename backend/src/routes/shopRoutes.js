@@ -5,6 +5,7 @@ const shopProductRoutes = require('./shopProductRoutes');
 const shopCartRoutes = require('./shopCartRoutes');
 const shopCheckoutRoutes = require('./shopCheckoutRoutes');
 const shopOrderRoutes = require('./shopOrderRoutes');
+const shopNewsletterRoutes = require('./shopNewsletterRoutes');
 
 /**
  * The storefront's route tree, mounted once at `/api/shop` in app.js.
@@ -28,5 +29,16 @@ router.use('/products', shopProductRoutes);
 router.use('/cart', shopCartRoutes);
 router.use('/checkout', shopCheckoutRoutes);
 router.use('/orders', shopOrderRoutes);
+router.use('/newsletter', shopNewsletterRoutes);
+
+/*
+ * NOTE: `/api/shop/stripe/webhook` is NOT mounted here, and cannot be.
+ *
+ * It needs the raw, unparsed request body to verify Stripe's signature, so it
+ * is registered in app.js BEFORE `express.json()` runs. It also has no business
+ * behind the buyer CSRF pair applied at the top of this file: Stripe is a
+ * server, not a browser, holds no cookie, and could never present a CSRF token.
+ * Both constraints point the same way — see the mount and its comment in app.js.
+ */
 
 module.exports = router;

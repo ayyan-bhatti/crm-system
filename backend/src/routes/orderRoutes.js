@@ -6,6 +6,7 @@ const {
   updateOrder,
   assignOrder,
   requestOrderTransfer,
+  updateFulfilment,
   deleteOrder,
 } = require('../controllers/orderController');
 const {
@@ -79,6 +80,25 @@ router.patch('/:id/assign', requireManagerOrAdmin, assignOrder);
  * can already do directly, which is harmless.
  */
 router.post('/:id/transfer-request', requestOrderTransfer);
+
+/*
+ * Moving an order along the delivery sequence, and setting the date the
+ * customer is told to expect it.
+ *
+ * NO ROLE MIDDLEWARE, and that is the considered choice rather than an
+ * omission. The rule is about the RECORD, not the role — admin and manager see
+ * every order, a rep sees the ones assigned to them, and `canAccessOrderDocument`
+ * inside the handler already encodes exactly that. Gating the route to
+ * manager-or-admin would leave the person who physically posted the parcel
+ * unable to say so, and every shipment update would arrive second-hand through
+ * somebody repeating what they were told.
+ *
+ * Separate from PATCH /:id for the same reason `/assign` is: `status` decides
+ * whether a sale counts and whether stock moves, this decides what the customer
+ * is told about a parcel, and they have different audiences and different
+ * permissions. See the note above updateFulfilment.
+ */
+router.patch('/:id/fulfilment', updateFulfilment);
 
 /*
  * The notes timeline.

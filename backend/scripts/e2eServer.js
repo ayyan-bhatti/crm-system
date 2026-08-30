@@ -30,6 +30,39 @@ process.env.MONGOMS_DOWNLOAD_DIR =
   process.env.MONGOMS_DOWNLOAD_DIR ||
   path.resolve(__dirname, '..', 'node_modules', '.cache', 'mongodb-memory-server');
 
+/*
+ * NO AI IN THE END-TO-END RUN. THIS LINE MAKES THAT TRUE RATHER THAN ASSUMED.
+ *
+ * storefront.spec.js has always documented that "GEMINI_API_KEY is unset in the
+ * e2e environment (see e2eServer.js)" and asserted on the documented
+ * `mode: 'fallback'` path accordingly. Nothing here actually unset it. What was
+ * really happening is that `backend/.env` carries a real key for manual local
+ * testing, so every end-to-end run was making live model calls — and the
+ * fallback assertions passed only because that key's daily free-tier quota
+ * happened to be exhausted. The day the quota reset, the search test started
+ * failing with "Results for" instead of "Showing keyword matches for", which is
+ * the AI path working correctly.
+ *
+ * A test suite whose outcome depends on somebody else's rate limit is not a
+ * test suite. It also meant every run spent real quota, slowly, invisibly.
+ *
+ * Set to an EMPTY STRING rather than deleted: `config/env.js` runs dotenv,
+ * which only fills in keys that are absent from `process.env`. Deleting the key
+ * would let the value in `.env` take its place; assigning an empty one is
+ * present-but-falsy, which is exactly what `env.geminiApiKey` treats as
+ * unconfigured.
+ */
+process.env.GEMINI_API_KEY = '';
+
+/*
+ * Stripe is left unconfigured for the same reason, and the storefront spec
+ * asserts on that: an end-to-end run must not depend on a payment processor
+ * being reachable, and the card path's real behaviour is covered exhaustively
+ * at the API level in tests/stripeCheckout.test.js with Stripe stubbed.
+ */
+process.env.STRIPE_SECRET_KEY = '';
+process.env.STRIPE_WEBHOOK_SECRET = '';
+
 const mongoose = require('mongoose');
 const { MongoMemoryReplSet } = require('mongodb-memory-server');
 
@@ -86,6 +119,20 @@ const SEED = {
     password: 'Lahore-Ledger-53',
     role: 'manager',
   },
+  /*
+   * A sales rep, added in round 3 so the end-to-end run can prove all THREE
+   * staff roles still work after the CRM's visual update — which the round's
+   * definition of done asks for by name. A rep is also the only role whose
+   * access is record-scoped rather than role-scoped (they see the orders
+   * assigned to them and nothing else), so it is the one that a UI change can
+   * break in a way the other two would not reveal.
+   */
+  rep: {
+    name: 'Sara Iqbal',
+    email: 'e2e-rep@example.com',
+    password: 'Multan-Ledger-64',
+    role: 'sales_rep',
+  },
   customer: {
     name: 'Karachi Traders',
     email: 'contact@karachitraders.example',
@@ -103,6 +150,27 @@ const SEED = {
     // cards, and a placeholder is a correct but less representative render.
     imageUrl: 'https://picsum.photos/seed/e2e-bw-1/480/480',
     description: 'A dependable blue widget, used by the end-to-end specs.',
+  },
+  /*
+   * A product WITH variants, alongside the one without.
+   *
+   * Both shapes are seeded deliberately. A catalogue where every product has
+   * colours would exercise only the variant path and would quietly stop
+   * proving that the pre-variant path — which every existing product in a real
+   * deployment is on — still works. "Sold out in one colour" is included so the
+   * storefront's disabled-swatch state has something real to render.
+   */
+  variantProduct: {
+    name: 'Trail Jacket',
+    sku: 'E2E-TJ-1',
+    price: 80,
+    category: 'Outerwear',
+    imageUrl: 'https://picsum.photos/seed/e2e-tj-1/480/480',
+    description: 'A weatherproof jacket, sold in two colours.',
+    variants: [
+      { color: { name: 'Midnight', hex: '#111827' }, size: 'M', stockQty: 6 },
+      { color: { name: 'Sand', hex: '#d6c7a1' }, size: 'M', stockQty: 0 },
+    ],
   },
 };
 
@@ -123,8 +191,12 @@ async function main() {
 
   const admin = await User.create(SEED.admin);
   await User.create(SEED.manager);
+  await User.create(SEED.rep);
   await Customer.create({ ...SEED.customer, createdBy: admin._id, assignedTo: admin._id });
   await Product.create(SEED.product);
+  // `create`, not `insertMany`, so the pre-save hook that keeps `stockQty`
+  // equal to the sum of the variants actually runs.
+  await Product.create(SEED.variantProduct);
 
   const server = app.listen(PORT, () => {
     // Playwright waits for the port, but this line makes a failed boot obvious

@@ -6,6 +6,7 @@ const {
   createCustomer,
   createProduct,
   createBuyer,
+  addAddress,
 } = require('./helpers');
 const Order = require('../src/models/Order');
 const ChangeRequest = require('../src/models/ChangeRequest');
@@ -197,10 +198,14 @@ describe('3. Order-status assistant', () => {
       .post('/api/shop/auth/register')
       .send({ name: 'Buyer', email: 'ask@example.com', password: 'Karachi-Ledger-72' });
 
+    // Checkout requires a chosen delivery address since guest checkout was
+    // removed — it no longer silently falls back to the first saved one.
+    const addressId = await addAddress(registered.body.data.token);
+
     const order = await api()
       .post('/api/shop/checkout')
       .set('Authorization', `Bearer ${registered.body.data.token}`)
-      .send({ items: [{ product: product._id, quantity: 1 }], paymentMethod: 'cod' });
+      .send({ items: [{ product: product._id, quantity: 1 }], paymentMethod: 'cod', addressId });
 
     const res = await api()
       .post('/api/shop/orders/ask')
@@ -230,10 +235,12 @@ describe("4. Customer summary includes storefront order history", () => {
     const registered = await api()
       .post('/api/shop/auth/register')
       .send({ name: 'Buyer', email: 'channel-mix@example.com', password: 'Karachi-Ledger-72' });
+    const addressId = await addAddress(registered.body.data.token);
+
     await api()
       .post('/api/shop/checkout')
       .set('Authorization', `Bearer ${registered.body.data.token}`)
-      .send({ items: [{ product: product._id, quantity: 1 }], paymentMethod: 'cod' });
+      .send({ items: [{ product: product._id, quantity: 1 }], paymentMethod: 'cod', addressId });
 
     const res = await api().get(`/api/customers/${customer._id}/summary`).set(admin.headers);
 

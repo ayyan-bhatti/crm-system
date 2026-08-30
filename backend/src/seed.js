@@ -34,9 +34,52 @@ const USERS = [
 // box rather than showing the generated "no photo yet" placeholder on every
 // single card — that placeholder exists for products created without
 // bothering to add one, not for the demo catalogue itself.
-function demoImage(sku) {
-  return `https://picsum.photos/seed/${sku.toLowerCase()}/480/480`;
+function demoImage(sku, index = 0) {
+  return `https://picsum.photos/seed/${sku.toLowerCase()}${index ? `-${index}` : ''}/640/640`;
 }
+
+/**
+ * The variants a few of the seeded products are sold in.
+ *
+ * DELIBERATELY NOT ON EVERY PRODUCT, and that is the point rather than
+ * laziness. Half the catalogue keeps a flat `stockQty` and no variants at all,
+ * because that is the shape every product had before this feature existed and
+ * it has to keep working — the storefront card, the detail page, the order form
+ * and the stock decrement all have a branch for it. A demo catalogue where
+ * every product has colours would exercise only the new path and would quietly
+ * stop proving that the old one still works.
+ *
+ * Quantities are chosen so the seeded shop shows off the states the UI has to
+ * render: a colour that is sold out, a product that is low on stock overall,
+ * and one variant priced above its siblings.
+ */
+const VARIANTS = {
+  'FURN-002': [
+    { color: { name: 'Graphite', hex: '#3f4045' }, size: 'Standard', stockQty: 5 },
+    { color: { name: 'Bone', hex: '#e8e1d5' }, size: 'Standard', stockQty: 3 },
+    // Sold out, so the storefront's disabled-swatch state has something to show.
+    { color: { name: 'Forest', hex: '#2f4f3a' }, size: 'Standard', stockQty: 0 },
+  ],
+  'TECH-002': [
+    { color: { name: 'Midnight', hex: '#111827' }, size: 'Full', stockQty: 18 },
+    { color: { name: 'Midnight', hex: '#111827' }, size: 'Compact', stockQty: 22 },
+    { color: { name: 'Sand', hex: '#d6c7a1' }, size: 'Compact', stockQty: 12 },
+    // Priced above the others, so "from $95" renders on the card.
+    {
+      color: { name: 'Copper', hex: '#b06a3b' },
+      size: 'Compact',
+      stockQty: 8,
+      priceOverride: 125,
+    },
+  ],
+  'TECH-003': [
+    { color: { name: 'Midnight', hex: '#111827' }, stockQty: 2 },
+    { color: { name: 'Cloud', hex: '#eef1f5' }, stockQty: 2 },
+  ],
+  'SUPP-002': [
+    { color: { name: 'Assorted', hex: '#7c5cd6' }, stockQty: 6 },
+  ],
+};
 
 const PRODUCTS = [
   {
@@ -119,7 +162,31 @@ const PRODUCTS = [
     category: 'Supplies',
     description: 'A pack of eight low-odour dry-erase markers in assorted colours.',
   },
-].map((product) => ({ ...product, imageUrl: demoImage(product.sku) }));
+].map((product) => {
+  const variants = VARIANTS[product.sku];
+
+  return {
+    ...product,
+    imageUrl: demoImage(product.sku),
+    /*
+     * A second image on every product, so the storefront card's hover-swap has
+     * something to swap TO. A card whose hover state does nothing looks broken
+     * rather than restrained, and with one seeded image that is what every card
+     * would do.
+     */
+    images: [demoImage(product.sku, 2), demoImage(product.sku, 3)],
+    ...(variants ? { variants } : {}),
+    /*
+     * Where a product has variants, its own `stockQty` is the SUM of them. The
+     * model's pre-save hook enforces exactly this, but `insertMany` does not run
+     * that hook — so the value is computed here rather than left to be quietly
+     * wrong in the one place the whole demo catalogue comes from.
+     */
+    ...(variants
+      ? { stockQty: variants.reduce((sum, v) => sum + v.stockQty, 0) }
+      : {}),
+  };
+});
 
 // `daysAgo` drives the AI-search demo: some customers have recent orders and
 // some have none in the last 30 days, so "customers with no orders in the last

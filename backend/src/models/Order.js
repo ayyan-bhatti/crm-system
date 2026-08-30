@@ -1,5 +1,36 @@
 const mongoose = require('mongoose');
-const { ORDER_STATUS, ORDER_STATUS_VALUES, PAYMENT_METHOD_VALUES } = require('../config/constants');
+const {
+  ORDER_STATUS,
+  ORDER_STATUS_VALUES,
+  PAYMENT_METHOD_VALUES,
+  FULFILMENT_STATUS,
+  FULFILMENT_STATUS_VALUES,
+  PAYMENT_STATUS,
+  PAYMENT_STATUS_VALUES,
+} = require('../config/constants');
+
+/**
+ * WHICH variant of the product went out on this line.
+ *
+ * A SNAPSHOT, exactly like `priceAtOrder` beside it, and for exactly the same
+ * reason: the colour is copied here rather than looked up through `variantId`
+ * so that renaming "Midnight" to "Navy" — or deleting the variant outright when
+ * the line is discontinued — cannot rewrite what a customer was sent last
+ * March. `variantId` is kept alongside so live stock can still be addressed
+ * while the variant does exist; the copy is what survives it.
+ *
+ * Absent entirely on a line for a product with no variants, which is every
+ * order placed before this existed.
+ */
+const orderItemVariantSchema = new mongoose.Schema(
+  {
+    variantId: { type: mongoose.Schema.Types.ObjectId, default: null },
+    colorName: { type: String, default: '' },
+    colorHex: { type: String, default: '' },
+    size: { type: String, default: '' },
+  },
+  { _id: false }
+);
 
 /**
  * A single line on an order.
@@ -24,6 +55,10 @@ const orderItemSchema = new mongoose.Schema(
       type: Number,
       required: true,
       min: [0, 'Price cannot be negative'],
+    },
+    variant: {
+      type: orderItemVariantSchema,
+      default: null,
     },
   },
   { _id: false }
@@ -138,9 +173,41 @@ const orderSchema = new mongoose.Schema({
     ref: 'User',
     default: null,
   },
-  // Set when the order first transitions to `completed`. Used to guarantee
-  // stock is only ever decremented once per order.
+  // Set when the order first transitions to `completed`.
   completedAt: {
+    type: Date,
+    default: null,
+  },
+
+  /**
+   * When this order's stock was actually taken out of inventory.
+   *
+   * THIS, NOT `completedAt`, IS NOW THE STOCK GUARD — and the split is the
+   * single most consequential change Stripe forced, so it is worth being exact
+   * about why.
+   *
+   * The rule used to be "stock moves when an order is completed", with
+   * `completedAt` doubling as both the timestamp and the once-only guard. That
+   * held while every order was placed by staff and fulfilled later. A card
+   * payment breaks it: the money is taken at checkout, so the inventory is
+   * genuinely gone at checkout, but the order is emphatically NOT completed —
+   * nobody has picked or posted anything. Decrementing while leaving
+   * `completedAt` null would have meant the eventual completion decremented a
+   * second time, quietly, for the same units.
+   *
+   * So the two facts are now stored separately: `completedAt` means "this sale
+   * is closed", `stockTakenAt` means "these units have left".
+   *
+   * NO BACKFILL, DELIBERATELY. Every order written before this field existed
+   * has `stockTakenAt: null` while genuinely having had its stock taken if it
+   * was completed — so every read of the guard goes through
+   * `orderController.stockIsTaken()`, which treats a set `completedAt` as proof
+   * of the same thing. A migration would have been the other option, and it
+   * would have had to be right first time against live data to avoid inventing
+   * or destroying inventory. A two-line helper that is correct for both shapes
+   * is the cheaper and safer answer.
+   */
+  stockTakenAt: {
     type: Date,
     default: null,
   },
@@ -192,6 +259,86 @@ const orderSchema = new mongoose.Schema({
       message: `Payment method must be one of: ${PAYMENT_METHOD_VALUES.join(', ')}`,
     },
     default: null,
+  },
+
+  /**
+   * WHERE THE PARCEL IS — the buyer-facing axis, orthogonal to `status`.
+   *
+   * See the long note beside FULFILMENT_STATUS in config/constants.js for why
+   * this is a second field rather than a longer version of the first. In short:
+   * `status` decides whether stock moves, delivery does not, and merging them
+   * would put the stock decrement on the wrong event.
+   *
+   * Defaults to `processing`, which is truthful for every order ever placed
+   * including the ones that predate this field — none of them has been said to
+   * have shipped.
+   */
+  fulfilment: {
+    type: String,
+    enum: {
+      values: FULFILMENT_STATUS_VALUES,
+      message: `Fulfilment must be one of: ${FULFILMENT_STATUS_VALUES.join(', ')}`,
+    },
+    default: FULFILMENT_STATUS.PROCESSING,
+  },
+
+  /** When staff marked it shipped. Null until they do. */
+  shippedAt: {
+    type: Date,
+    default: null,
+  },
+
+  /**
+   * The date the customer is told to expect it.
+   *
+   * A DATE, NOT A DAY-COUNT. The brief offered either; a stored date is the
+   * right one because a count has to be resolved against a shipment date that
+   * may not exist yet, and "3–5 business days" rendered against an order that
+   * has not shipped means nothing. Staff set this when they mark the order
+   * shipped, and the form offers a sensible default computed from that day.
+   */
+  estimatedDeliveryAt: {
+    type: Date,
+    default: null,
+  },
+
+  /** When it actually arrived, if anyone said so. */
+  deliveredAt: {
+    type: Date,
+    default: null,
+  },
+
+  /**
+   * What Stripe knows about this order, mirrored locally.
+   *
+   * Mirrored rather than fetched on demand: the order list shows payment state
+   * for every row, and a live API call per row is out of the question. Stripe
+   * remains the source of truth — this is a cache the webhook keeps current,
+   * and the ids are here so anything can be reconciled against the dashboard.
+   *
+   * `status: 'unpaid'` is correct and meaningful for a cash-on-delivery order
+   * and for every order placed before payments existed: this app has not seen
+   * money for it. That is a fact, not a gap.
+   */
+  payment: {
+    status: {
+      type: String,
+      enum: {
+        values: PAYMENT_STATUS_VALUES,
+        message: `Payment status must be one of: ${PAYMENT_STATUS_VALUES.join(', ')}`,
+      },
+      default: PAYMENT_STATUS.UNPAID,
+    },
+    /** Stripe's Checkout Session id (`cs_test_...`). */
+    sessionId: { type: String, default: null },
+    /** Stripe's PaymentIntent id (`pi_...`) — what a refund is issued against. */
+    paymentIntentId: { type: String, default: null },
+    /** In minor units (cents), as Stripe reports it — never a float. */
+    amountPaid: { type: Number, default: null },
+    currency: { type: String, default: null },
+    paidAt: { type: Date, default: null },
+    refundId: { type: String, default: null },
+    refundedAt: { type: Date, default: null },
   },
 
   createdAt: {
@@ -273,6 +420,32 @@ orderSchema.index({ assignedTo: 1, createdAt: -1, _id: -1 });
 orderSchema.index(
   { orderNumber: 1 },
   { unique: true, partialFilterExpression: { orderNumber: { $type: 'string' } } }
+);
+
+/*
+ * The delivery queue: "what is waiting to be shipped", which is the filter
+ * staff actually work from. Carries `createdAt` and `_id` for the same
+ * total-ordering reason as every other sorting index in this file.
+ */
+orderSchema.index({ fulfilment: 1, createdAt: -1, _id: -1 });
+
+/*
+ * Finding the order a Stripe webhook is talking about.
+ *
+ * The webhook arrives knowing only a session id, and it can arrive TWICE —
+ * Stripe retries until it gets a 2xx, and a network blip on our side is enough
+ * to earn a retry for an event already handled. The unique constraint is what
+ * makes the second delivery a no-op rather than a second order: two documents
+ * can never share a session id, so a duplicate insert is refused by the
+ * database rather than by a check that could be raced.
+ *
+ * PARTIAL rather than sparse, for the same reason `orderNumber` above is:
+ * `sessionId` defaults to null and a sparse unique index only skips ABSENT
+ * fields, so every cash-on-delivery order past the first would collide on null.
+ */
+orderSchema.index(
+  { 'payment.sessionId': 1 },
+  { unique: true, partialFilterExpression: { 'payment.sessionId': { $type: 'string' } } }
 );
 
 module.exports = mongoose.model('Order', orderSchema);

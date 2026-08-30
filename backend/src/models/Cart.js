@@ -12,6 +12,25 @@ const cartItemSchema = new mongoose.Schema(
       required: [true, 'Quantity is required'],
       min: [1, 'Quantity must be at least 1'],
     },
+    /**
+     * Which colour/size, for a product sold in variants. Null otherwise.
+     *
+     * ONLY THE ID IS STORED, unlike an order line, which snapshots the colour
+     * name and hex. The difference is deliberate and follows from what each
+     * thing is for: an order is a record of what was sent and must stay
+     * readable after the variant is renamed or discontinued, whereas a cart is
+     * a live intention and SHOULD track the catalogue — if a colour is renamed
+     * while it sits in someone's cart, the cart should say the new name, and if
+     * it is discontinued the line should stop being buyable rather than
+     * preserving a colour nobody can supply.
+     *
+     * This is the same reasoning that keeps price out of the cart: a cart is
+     * not a quote.
+     */
+    variantId: {
+      type: mongoose.Schema.Types.ObjectId,
+      default: null,
+    },
   },
   { _id: false }
 );

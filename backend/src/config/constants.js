@@ -74,25 +74,127 @@ const CUSTOMER_STATUS = {
   INACTIVE: 'inactive',
 };
 
+/**
+ * The COMMERCIAL state of an order: does it count, and has its stock moved.
+ *
+ * Deliberately left exactly as it was when delivery tracking arrived. It would
+ * have been tempting to grow this enum into the delivery sequence — one status
+ * field, one badge, less to explain — and it is the wrong shape, for a reason
+ * worth writing down because the alternative looks simpler right up until it
+ * breaks:
+ *
+ *   `completed` is what MOVES STOCK. Every stock guarantee in this app hangs
+ *   off that transition. Delivery is a different axis entirely — an order can
+ *   be shipped and not yet delivered while being, commercially, entirely
+ *   settled — and folding the two together would mean stock moved on arrival
+ *   at the customer's door rather than when the parcel left, which is both
+ *   wrong and unfixable without re-deriving the whole thing.
+ *
+ * So: this answers "is this sale real and has inventory moved". FULFILMENT_STATUS
+ * below answers "where is the parcel". See models/Order.js.
+ */
 const ORDER_STATUS = {
   PENDING: 'pending',
   COMPLETED: 'completed',
   CANCELLED: 'cancelled',
 };
 
+/**
+ * Where the parcel is. The buyer-facing half of an order's state.
+ *
+ * `processing` is the default for every order, including every order that
+ * existed before this field did — which is true of them in the only sense that
+ * matters: nobody has said it shipped.
+ *
+ * `cancelled` is here as well as in ORDER_STATUS, and that is not duplication.
+ * A cancelled order has no delivery state, and a timeline that still reads
+ * "Processing" under a cancelled order is a lie the buyer will notice.
+ */
+const FULFILMENT_STATUS = {
+  PROCESSING: 'processing',
+  CONFIRMED: 'confirmed',
+  SHIPPED: 'shipped',
+  OUT_FOR_DELIVERY: 'out_for_delivery',
+  DELIVERED: 'delivered',
+  CANCELLED: 'cancelled',
+};
+
+/**
+ * The delivery stages in order, for the buyer's timeline and for validating a
+ * staff member's status change. `cancelled` is absent on purpose: it is an exit
+ * from the sequence, not a step along it, so it has no position to compare.
+ */
+const FULFILMENT_SEQUENCE = [
+  FULFILMENT_STATUS.PROCESSING,
+  FULFILMENT_STATUS.CONFIRMED,
+  FULFILMENT_STATUS.SHIPPED,
+  FULFILMENT_STATUS.OUT_FOR_DELIVERY,
+  FULFILMENT_STATUS.DELIVERED,
+];
+
+/** Human wording, shared by the API's audit notes and the UI's badges. */
+const FULFILMENT_LABELS = {
+  processing: 'Processing',
+  confirmed: 'Confirmed',
+  shipped: 'Shipped',
+  out_for_delivery: 'Out for delivery',
+  delivered: 'Delivered',
+  cancelled: 'Cancelled',
+};
+
 /** Default stock level at or below which a product counts as "low stock". */
 const DEFAULT_LOW_STOCK_THRESHOLD = 10;
 
 /**
- * How a storefront order says it will be paid. This is a demo storefront with
- * no real payment processor behind it — nothing here is charged — so the
- * value is purely informational: what a rep or admin sees on the order when
- * deciding how to fulfil it.
+ * How a storefront order is paid.
+ *
+ * `card` IS NO LONGER INFORMATIONAL, and that is the substantive change here.
+ * It now means "paid through Stripe Checkout", and an order carrying it has
+ * genuinely had money taken — see services/stripeService.js and the webhook.
+ * The other two remain what they always were: a note to whoever fulfils the
+ * order about how they will collect, with no processor involved.
+ *
+ * The old values are kept rather than replaced. Orders placed before Stripe
+ * existed carry them, and rewriting history to say a demo order was paid by
+ * card would be a lie told by a migration.
  */
 const PAYMENT_METHOD = {
   COD: 'cod',
   CARD: 'card',
   BANK_TRANSFER: 'bank_transfer',
+};
+
+/** Which payment methods actually go through Stripe. */
+const STRIPE_PAYMENT_METHODS = [PAYMENT_METHOD.CARD];
+
+/**
+ * Whether money has moved, tracked separately from how it was meant to move.
+ *
+ * `unpaid` is correct for a cash-on-delivery order AND for every order placed
+ * before payments existed — in both cases this app has not seen a payment, and
+ * saying so is more useful than a null nobody can interpret.
+ */
+const PAYMENT_STATUS = {
+  UNPAID: 'unpaid',
+  PAID: 'paid',
+  REFUNDED: 'refunded',
+  FAILED: 'failed',
+};
+
+/**
+ * The lifecycle of a checkout that has been started but not yet paid for.
+ *
+ * This exists because of a rule stated plainly in the round-3 brief and worth
+ * repeating at the definition: NO ORDER IS CREATED UNTIL THE WEBHOOK CONFIRMS
+ * PAYMENT. Between "buyer clicked Pay" and "Stripe told us it worked" there is
+ * a real interval, and something has to hold the intent across it without
+ * reserving stock. That something is a PendingCheckout in `pending`.
+ */
+const PENDING_CHECKOUT_STATUS = {
+  PENDING: 'pending',
+  COMPLETED: 'completed',
+  FAILED: 'failed',
+  EXPIRED: 'expired',
 };
 
 module.exports = {
@@ -107,7 +209,16 @@ module.exports = {
   CUSTOMER_STATUS_VALUES: Object.values(CUSTOMER_STATUS),
   ORDER_STATUS,
   ORDER_STATUS_VALUES: Object.values(ORDER_STATUS),
+  FULFILMENT_STATUS,
+  FULFILMENT_STATUS_VALUES: Object.values(FULFILMENT_STATUS),
+  FULFILMENT_SEQUENCE,
+  FULFILMENT_LABELS,
   DEFAULT_LOW_STOCK_THRESHOLD,
   PAYMENT_METHOD,
   PAYMENT_METHOD_VALUES: Object.values(PAYMENT_METHOD),
+  STRIPE_PAYMENT_METHODS,
+  PAYMENT_STATUS,
+  PAYMENT_STATUS_VALUES: Object.values(PAYMENT_STATUS),
+  PENDING_CHECKOUT_STATUS,
+  PENDING_CHECKOUT_STATUS_VALUES: Object.values(PENDING_CHECKOUT_STATUS),
 };

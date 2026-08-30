@@ -1,37 +1,56 @@
+const mongoose = require('mongoose');
 const Customer = require('../models/Customer');
+const Buyer = require('../models/Buyer');
 const Cart = require('../models/Cart');
+const Product = require('../models/Product');
+const PendingCheckout = require('../models/PendingCheckout');
 const ApiError = require('../utils/ApiError');
 const asyncHandler = require('../utils/asyncHandler');
 const { withTransaction } = require('../utils/transaction');
-const { placeOrder, ORDER_POPULATE } = require('./orderController');
+const { placeOrder, buildOrderItems, ORDER_POPULATE } = require('./orderController');
 const { matchOrCreateCustomer } = require('../services/storefrontCustomerService');
 const { recordAudit } = require('../services/auditService');
-const { PAYMENT_METHOD_VALUES } = require('../config/constants');
+const stripeService = require('../services/stripeService');
+const { publicOrigin } = require('../utils/publicUrl');
+const { PAYMENT_METHOD_VALUES, STRIPE_PAYMENT_METHODS } = require('../config/constants');
 
 /**
  * POST /api/shop/checkout
  *
- * Reuses `placeOrder()` — the same pricing-at-time-of-order, atomic order
- * numbering and stock-decrement guarantees every other order in this app
- * gets. A storefront order is not a structurally different kind of order;
- * the only difference is who is calling: an unauthenticated guest or a
- * signed-in buyer instead of staff. See `services/storefrontCustomerService`
- * for the customer-matching half of this, and `middleware/idempotency.js`
- * for why the same `Idempotency-Key` header works here too — a dropped
- * response on a checkout button is the same lost-connection problem it
- * solves for the internal order form, just with a less forgiving audience:
- * staff can look an order up and ask; a guest who is not sure their order
- * went through has no such recourse and will otherwise just try again.
+ * THERE IS NO GUEST CHECKOUT. This overrides the round-1 decision, and the
+ * change is enforced here rather than only in the UI — the route now runs
+ * `protectBuyer`, so an unauthenticated POST is a 401 before this function is
+ * reached. Browsing, searching and filling a cart remain completely open; only
+ * buying requires an account.
  *
- * STOREFRONT ORDERS ALWAYS START `pending`, REGARDLESS OF WHAT WAS SENT.
+ * The previous version accepted a `{ name, email, address }` body from an
+ * anonymous caller and created a Customer from it. That shape is gone: it is
+ * not merely unused, it is unreachable, and the middleware is what makes that
+ * true rather than a conditional inside the handler.
  *
- * `status` is never read from the request body here. A staff-placed order
- * may be recorded as already `completed` (an over-the-phone sale being
- * entered after the fact); nothing about a storefront checkout is ever
- * after the fact — stock should not move until staff actually fulfil it.
+ * TWO PATHS OUT OF THIS FUNCTION, AND THEY RETURN DIFFERENT THINGS
+ *
+ *   card (Stripe)  NO ORDER IS CREATED. A PendingCheckout is written, a Stripe
+ *                  Checkout Session is opened, and the buyer is handed a URL to
+ *                  go and pay at. The order is created later, by the webhook,
+ *                  and only if the money actually arrives. Responds 200 with
+ *                  `{ mode: 'stripe', checkoutUrl }`.
+ *
+ *   cod / bank     No processor is involved, so there is nothing to wait for.
+ *                  The order is created immediately and unpaid, exactly as it
+ *                  was before Stripe existed. Responds 201 with the order.
+ *
+ * Keeping the second path is a deliberate choice rather than leftover code.
+ * Cash on delivery is a real way this shop's customers pay, it was built at the
+ * previous round's explicit request, and deleting it because a card processor
+ * arrived would remove a working feature to make a diagram tidier. What it does
+ * NOT do is pretend to be a payment: such an order carries
+ * `payment.status: 'unpaid'`, truthfully, until somebody collects.
  */
 const checkout = asyncHandler(async (req, res) => {
+  const buyer = req.buyer;
   const rawItems = req.body.items;
+
   if (!Array.isArray(rawItems) || rawItems.length === 0) {
     throw ApiError.badRequest('A checkout needs at least one item');
   }
@@ -43,55 +62,189 @@ const checkout = asyncHandler(async (req, res) => {
     );
   }
 
-  const buyer = req.buyer || null;
+  /*
+   * A DELIVERY ADDRESS IS NOW REQUIRED, not defaulted to `addresses[0]`.
+   *
+   * The old fallback was written when a guest could type one inline and a buyer
+   * might have exactly one saved. With accounts mandatory and multiple
+   * addresses normal, silently posting to whichever address happens to sort
+   * first is a parcel sent to somebody's old flat. The storefront already
+   * insists on a selection; this is the server refusing to guess.
+   */
+  const chosen = req.body.addressId ? buyer.addresses.id(req.body.addressId) : null;
 
-  let name;
-  let email;
-  let phone = '';
-  let address = '';
-  let city = '';
-
-  if (buyer) {
-    name = buyer.name;
-    email = buyer.email;
-
-    const chosen = req.body.addressId
-      ? buyer.addresses.id(req.body.addressId)
-      : buyer.addresses[0];
-
-    if (req.body.addressId && !chosen) {
-      throw ApiError.badRequest('That is not one of your saved addresses');
-    }
-
-    if (chosen) {
-      address = chosen.address;
-      city = chosen.city || '';
-      phone = chosen.phone || '';
-    }
-  } else {
-    ({ name, email, phone = '', address = '', city = '' } = req.body);
-
-    if (!name || !email) {
-      throw ApiError.badRequest('Name and email are required to check out as a guest');
-    }
+  if (!chosen) {
+    throw ApiError.badRequest(
+      req.body.addressId
+        ? 'That is not one of your saved addresses'
+        : 'Choose a delivery address before checking out'
+    );
   }
 
+  const shipping = {
+    label: chosen.label || '',
+    address: chosen.address || '',
+    city: chosen.city || '',
+    phone: chosen.phone || '',
+  };
+
+  if (STRIPE_PAYMENT_METHODS.includes(paymentMethod)) {
+    return startStripeCheckout(req, res, { buyer, rawItems, shipping });
+  }
+
+  return placeUnpaidOrder(req, res, { buyer, rawItems, shipping, paymentMethod });
+});
+
+/**
+ * The card path: price the cart, open a Stripe session, and stop.
+ *
+ * NOTHING PERSISTENT ABOUT THE ORDER HAPPENS HERE. No Order document, no stock
+ * movement, no Customer created. The only write is the PendingCheckout, which
+ * is disposable by design (it carries a TTL) and reserves nothing.
+ */
+async function startStripeCheckout(req, res, { buyer, rawItems, shipping }) {
+  if (!stripeService.isEnabled()) {
+    throw ApiError.badRequest(
+      'Card payment is not available at the moment. Choose cash on delivery instead.'
+    );
+  }
+
+  /*
+   * Priced through the SAME function every other order path uses.
+   *
+   * That is what makes a card order obey identical rules to a staff-placed one:
+   * variant required where variants exist, variant rejected where they do not,
+   * per-variant price overrides applied, duplicate lines merged on product AND
+   * variant, and an advisory stock check that produces a readable error. Writing
+   * a second, simpler pricing routine here is how the two would drift.
+   */
+  const { items, total } = await buildOrderItems(rawItems);
+
+  if (total <= 0) {
+    /*
+     * Stripe refuses a zero-amount session, and it would be an odd thing to
+     * want. Caught here so the buyer gets a sentence rather than a raw SDK
+     * error surfacing through the error handler.
+     */
+    throw ApiError.badRequest('This cart has no payable total.');
+  }
+
+  // Names for Stripe's line items — the buyer sees these on the hosted page,
+  // so they have to say what was actually bought, variant included.
+  const products = await Product.find({ _id: { $in: items.map((i) => i.product) } }).select('name');
+  const nameById = new Map(products.map((p) => [String(p._id), p.name]));
+
+  const lines = items.map((item) => ({
+    productName: nameById.get(String(item.product)) || 'Item',
+    quantity: item.quantity,
+    priceAtCheckout: item.priceAtOrder,
+    variant: item.variant,
+  }));
+
+  /*
+   * The id is generated BEFORE the Stripe call so it can travel in the
+   * session's metadata, and the document is written after so it can carry the
+   * session id back. Both directions are needed: the webhook arrives holding a
+   * session and must find the intent, and the confirmation page arrives holding
+   * a session and must find the order.
+   *
+   * The alternative — write the document first with a placeholder session id —
+   * would need `stripeSessionId` to be nullable, which would cost the unique
+   * index that makes webhook replay safe.
+   */
+  const pendingId = new mongoose.Types.ObjectId();
+
+  const session = await stripeService.createCheckoutSession({
+    pendingId,
+    lines,
+    buyerEmail: buyer.email,
+    /*
+     * `publicOrigin`, not `requestOrigin`. This URL is where a browser is sent
+     * after paying, so it has to be the FRONTEND's origin — which on a laptop
+     * is a different port from the API the request arrived on, and on a
+     * deployment is whatever APP_URL says. `requestOrigin` would send the buyer
+     * to the API port, where the confirmation page is not served.
+     */
+    origin: publicOrigin(req),
+  });
+
+  await PendingCheckout.create({
+    _id: pendingId,
+    buyer: buyer._id,
+    stripeSessionId: session.id,
+    items: lines.map((line, index) => ({
+      product: items[index].product,
+      quantity: line.quantity,
+      priceAtCheckout: line.priceAtCheckout,
+      variant: line.variant || undefined,
+    })),
+    total,
+    shipping,
+  });
+
+  /*
+   * 200, not 201. Nothing has been created that the buyer owns — this is a
+   * redirect instruction, and reporting "created" for an order that does not
+   * exist is exactly the confusion this whole flow is built to avoid.
+   */
+  res.json({
+    success: true,
+    mode: 'stripe',
+    data: { checkoutUrl: session.url, sessionId: session.id },
+  });
+}
+
+/**
+ * The cash-on-delivery / bank-transfer path: an order now, money later.
+ *
+ * Unchanged in substance from the pre-Stripe implementation — same
+ * pricing-at-time-of-order, atomic numbering and "storefront orders always
+ * start pending" rules. `payment.status` is left at its `unpaid` default, which
+ * is the literal truth about an order nobody has paid for yet.
+ */
+async function placeUnpaidOrder(req, res, { buyer, rawItems, shipping, paymentMethod }) {
   const order = await withTransaction(async (session) => {
     /*
-     * A returning buyer already linked to a `Customer` skips matching
-     * entirely and orders straight against it — matching by email again
-     * would be redundant, and could in principle resolve somewhere else if
-     * the buyer's account email were ever changed after the link was made.
+     * RE-READ THE BUYER INSIDE THE TRANSACTION RATHER THAN USING `req.buyer`.
+     *
+     * A latent bug fixed here rather than carried forward. `session.withTransaction`
+     * retries its callback on a transient error — a write conflict between two
+     * concurrent checkouts, or the implicit collection creation MongoDB performs
+     * on the first order a fresh database ever sees. The retry re-runs this
+     * function but does NOT rewind a Mongoose document captured outside it.
+     *
+     * `req.buyer` is exactly such a document. On attempt 1 the line below sets
+     * `linkedCustomerId` on it and the matching insert is then rolled back; on
+     * attempt 2 the buyer still believes it is linked, takes the `findById`
+     * branch, and resolves an id that no longer exists — so a perfectly valid
+     * checkout fails with "Customer not found".
+     *
+     * It went unnoticed because the retry only fires under contention, which a
+     * single-threaded test never produces. It surfaced while building the Stripe
+     * webhook, where the first order on an empty database reliably triggers the
+     * collection-creation retry, and the identical shape was sitting here.
      */
-    const customer = buyer?.linkedCustomerId
-      ? await Customer.findById(buyer.linkedCustomerId).session(session)
-      : await matchOrCreateCustomer({ email, name, phone, address, city }, session);
+    const freshBuyer = await Buyer.findById(buyer._id).session(session);
+    if (!freshBuyer) throw ApiError.notFound('Buyer not found');
+
+    const customer = freshBuyer.linkedCustomerId
+      ? await Customer.findById(freshBuyer.linkedCustomerId).session(session)
+      : await matchOrCreateCustomer(
+          {
+            email: freshBuyer.email,
+            name: freshBuyer.name,
+            phone: shipping.phone,
+            address: shipping.address,
+            city: shipping.city,
+          },
+          session
+        );
 
     if (!customer) throw ApiError.notFound('Customer not found');
 
-    if (buyer && !buyer.linkedCustomerId) {
-      buyer.linkedCustomerId = customer._id;
-      await buyer.save({ session });
+    if (!freshBuyer.linkedCustomerId) {
+      freshBuyer.linkedCustomerId = customer._id;
+      await freshBuyer.save({ session });
     }
 
     const placed = await placeOrder(
@@ -101,42 +254,75 @@ const checkout = asyncHandler(async (req, res) => {
         status: 'pending',
         assignedTo: null,
         source: 'storefront',
-        buyerId: buyer ? buyer._id : null,
+        buyerId: buyer._id,
         paymentMethod,
       },
       session
     );
 
-    // A signed-in buyer's cart is spent the moment their order is placed —
-    // inside the same transaction, so a rollback of the order leaves the
-    // cart untouched rather than emptying it for nothing.
-    if (buyer) {
-      await Cart.updateOne({ buyer: buyer._id }, { items: [] }, { session });
-    }
+    // The cart is spent the moment the order is placed — inside the same
+    // transaction, so a rollback leaves it untouched rather than emptying it
+    // for nothing.
+    await Cart.updateOne({ buyer: buyer._id }, { items: [] }, { session });
 
     return placed;
   });
 
   /*
-   * `recordAudit` reads `req.user` for its actor snapshot, which does not
-   * exist on a guest or buyer request — it degrades to an empty actor rather
-   * than erroring, but an audit entry with no actor at all is not useful. The
-   * buyer or guest's identity goes in the note instead.
+   * `recordAudit` reads `req.user` for its actor snapshot, which does not exist
+   * on a buyer request — it degrades to an empty actor rather than erroring,
+   * but an entry with no actor at all is not useful. The buyer's identity goes
+   * in the note instead.
    */
   await recordAudit(req, {
     action: 'create',
     entity: 'order',
     entityId: order._id,
-    label: `Order ${order._id}`,
+    label: `Order ${order.orderNumber || order._id}`,
     after: order,
-    note: buyer
-      ? `Storefront checkout by buyer ${buyer.email}`
-      : `Storefront guest checkout by ${email}`,
+    note: `Storefront checkout by buyer ${buyer.email} (${paymentMethod})`,
   });
 
   await order.populate(ORDER_POPULATE);
 
-  res.status(201).json({ success: true, data: order });
+  res.status(201).json({ success: true, mode: 'direct', data: order });
+}
+
+/**
+ * GET /api/shop/checkout/session/:sessionId
+ *
+ * What the confirmation page asks after Stripe redirects the buyer back.
+ *
+ * THE REDIRECT IS NOT PROOF OF PAYMENT and this endpoint does not treat it as
+ * such. It reports what the database currently knows, which is one of three
+ * honest answers: the order exists (the webhook has been and gone), the
+ * checkout failed or expired, or it is still pending — in which case the page
+ * says "confirming your payment" and polls, rather than inventing an outcome.
+ *
+ * A buyer can and does arrive here before the webhook does; on a fast
+ * connection the redirect wins the race perhaps a third of the time. Treating
+ * that as failure would show a payment error to somebody who has just paid
+ * successfully, which is the worst available lie.
+ */
+const getCheckoutSession = asyncHandler(async (req, res) => {
+  const pending = await PendingCheckout.findOne({
+    stripeSessionId: req.params.sessionId,
+    // Scoped to the caller. A session id is not secret enough to be an
+    // authorisation token, and it names an order with an address on it.
+    buyer: req.buyer._id,
+  }).populate({ path: 'order', populate: ORDER_POPULATE });
+
+  if (!pending) throw ApiError.notFound('That checkout could not be found');
+
+  res.json({
+    success: true,
+    data: {
+      status: pending.status,
+      note: pending.note || '',
+      total: pending.total,
+      order: pending.order || null,
+    },
+  });
 });
 
-module.exports = { checkout };
+module.exports = { checkout, getCheckoutSession };

@@ -202,12 +202,27 @@ async function applyChange(request, session) {
    */
   if (request.action === 'cancel') {
     // Lazy required — see the note on the `create` branch above for why.
-    const { restoreStock } = require('../controllers/orderController');
+    const { restoreStock, stockIsTaken } = require('../controllers/orderController');
+    const { FULFILMENT_STATUS } = require('../config/constants');
 
-    if (doc.completedAt) await restoreStock(doc.items, session);
+    /*
+     * By the time execution reaches here the refund has ALREADY been issued, in
+     * `approve()`, before this transaction was opened. See the long note there
+     * and in services/refundService.js for why the money moves first and why
+     * the Stripe call cannot be inside a transaction.
+     *
+     * The guard is `stockIsTaken` rather than `completedAt` because those are
+     * now two different facts: a card-paid order has had its stock taken while
+     * still sitting as `pending`, and cancelling it must put those units back.
+     * Reading `completedAt` alone would silently keep the stock of every
+     * refunded card order out of inventory.
+     */
+    if (stockIsTaken(doc)) await restoreStock(doc.items, session);
 
     doc.status = 'cancelled';
     doc.completedAt = null;
+    doc.stockTakenAt = null;
+    doc.fulfilment = FULFILMENT_STATUS.CANCELLED;
     await doc.save({ session });
     return doc;
   }
@@ -275,6 +290,25 @@ async function approve(requestId, actor) {
 
   if (request.status !== CHANGE_REQUEST_STATUS.PENDING) {
     throw ApiError.badRequest(`This request was already ${request.status}`);
+  }
+
+  /*
+   * MONEY GOES BACK BEFORE ANYTHING ELSE HAPPENS.
+   *
+   * Deliberately outside — and before — the transaction below. Two reasons,
+   * both spelled out at length in services/refundService.js: a MongoDB
+   * transaction can be retried automatically on a write conflict, which would
+   * re-issue the refund; and if the refund fails, nothing at all should have
+   * changed, which is exactly what "throw before opening the transaction"
+   * gives us.
+   *
+   * `refundOrderIfPaid` returns null for the common case of an order nobody
+   * ever paid for, so this line is a no-op for every cancellation that predates
+   * card payment.
+   */
+  if (request.action === 'cancel' && request.entity === 'order') {
+    const { refundOrderIfPaid } = require('./refundService');
+    await refundOrderIfPaid(request.entityId);
   }
 
   const result = await withTransaction(async (session) => {

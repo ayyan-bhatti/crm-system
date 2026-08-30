@@ -1,6 +1,76 @@
 const mongoose = require('mongoose');
 const { DEFAULT_LOW_STOCK_THRESHOLD } = require('../config/constants');
 
+/**
+ * One buyable combination of a product: a colour, optionally a size, and the
+ * stock that specific combination has.
+ *
+ * `_id` IS DELIBERATELY LEFT ON (most embedded schemas in this app turn it
+ * off). It is the address by which a single variant's stock is decremented
+ * atomically:
+ *
+ *   { _id: productId, variants: { $elemMatch: { _id: v, stockQty: { $gte: q } } } }
+ *   { $inc: { 'variants.$.stockQty': -q } }
+ *
+ * Without a stable id per variant there is nothing to match on but the colour
+ * name, which is user-supplied, editable, and duplicable — so the atomic
+ * guarantee would rest on a string somebody can change from a form. It is also
+ * what an order line snapshots, so a rep reading a two-year-old order can still
+ * tell which variant went out even after the product has been re-coloured.
+ *
+ * `priceOverride` is null for the overwhelmingly common case where every colour
+ * of a thing costs the same. Null rather than a copy of the product price
+ * because a copy would silently stop tracking the parent the moment the parent
+ * changed — the same bug `priceAtOrder` on an order line exists to CREATE
+ * deliberately, and which here would be entirely accidental.
+ */
+const variantSchema = new mongoose.Schema({
+  color: {
+    name: {
+      type: String,
+      required: [true, 'A variant needs a colour name'],
+      trim: true,
+      maxlength: [40, 'Colour name cannot exceed 40 characters'],
+    },
+    /*
+     * The swatch. Validated for shape rather than trusted, because it is
+     * interpolated straight into a `style` attribute on the storefront — an
+     * unvalidated string there is a small but real injection surface, and
+     * "#f00" vs "red" vs "javascript:..." is exactly the kind of difference a
+     * regex should be deciding rather than a designer's memory.
+     */
+    hex: {
+      type: String,
+      required: [true, 'A variant needs a colour swatch'],
+      trim: true,
+      match: [/^#[0-9a-fA-F]{6}$/, 'Colour must be a six-digit hex code like #1a2b3c'],
+    },
+  },
+  /**
+   * Optional second dimension. Empty string, not null, so that a product whose
+   * variants are colour-only compares cleanly against one whose variants have
+   * sizes — `''` is a value the UI can render as "one size" without a
+   * null-check at every use.
+   */
+  size: {
+    type: String,
+    trim: true,
+    default: '',
+    maxlength: [24, 'Size cannot exceed 24 characters'],
+  },
+  stockQty: {
+    type: Number,
+    required: [true, 'A variant needs its own stock quantity'],
+    min: [0, 'Stock quantity cannot be negative'],
+    default: 0,
+  },
+  priceOverride: {
+    type: Number,
+    min: [0, 'Price cannot be negative'],
+    default: null,
+  },
+});
+
 const productSchema = new mongoose.Schema({
   name: {
     type: String,
@@ -61,10 +131,71 @@ const productSchema = new mongoose.Schema({
     default: '',
     maxlength: [2000, 'Description cannot exceed 2000 characters'],
   },
+
+  /**
+   * Additional photographs, beyond `imageUrl`.
+   *
+   * `imageUrl` REMAINS THE PRIMARY IMAGE rather than becoming `images[0]`, and
+   * this is the deliberate part. Every product in the database already has
+   * `imageUrl` populated, every card and cart line already reads it, and the
+   * card's hover-swap wants "the second image, if there is one" — which is
+   * exactly what this array is. Collapsing both into one array would have meant
+   * a migration, a rewrite of six read sites, and a window in which a product
+   * with no images renders nothing; keeping them separate costs one helper
+   * (`galleryFor`) and breaks nothing.
+   */
+  images: {
+    type: [String],
+    default: [],
+    validate: {
+      validator: (list) => list.length <= 8,
+      message: 'A product can have at most 8 additional images',
+    },
+  },
+
+  /**
+   * Colour (and optionally size) combinations, each with its own stock.
+   *
+   * EMPTY IS A FIRST-CLASS STATE, NOT A MISSING ONE. A product with no variants
+   * is sold as a single undifferentiated thing whose stock is `stockQty`, which
+   * is precisely what every product in this database was before this field
+   * existed. Nothing about the storefront, the order form, the stock decrement
+   * or the AI reorder suggestions changes for those products. See
+   * `orderController.buildOrderItems` for the one branch that tells them apart.
+   */
+  variants: {
+    type: [variantSchema],
+    default: [],
+  },
+
   createdAt: {
     type: Date,
     default: Date.now,
   },
+});
+
+/**
+ * Keep the product's headline `stockQty` equal to the sum of its variants.
+ *
+ * WHY DENORMALISE AT ALL, GIVEN IT CAN DRIFT
+ *
+ * Because a dozen things read `stockQty` and none of them care about colour:
+ * the low-stock filter, the reorder-suggestion AI, the dashboard tiles, the
+ * order form's live warning, the storefront's `inStock` boolean. Rewriting all
+ * of them to sum an array — and to sum it inside a MongoDB query, which means
+ * `$expr` and no index — would be a large change to make a small number of
+ * screens marginally more correct.
+ *
+ * Drift is prevented rather than tolerated: this hook owns the value on every
+ * save, and `decrementStock` adjusts both the variant and the parent in ONE
+ * atomic update so the two cannot separate even under concurrency. The sum is
+ * never computed from a read-then-write.
+ */
+productSchema.pre('save', function syncStockFromVariants(next) {
+  if (this.variants && this.variants.length > 0) {
+    this.stockQty = this.variants.reduce((sum, v) => sum + (v.stockQty || 0), 0);
+  }
+  next();
 });
 
 /**

@@ -61,43 +61,22 @@ const protectBuyer = asyncHandler(async (req, res, next) => {
   return next();
 });
 
-/**
- * Attach `req.buyer` if the caller is signed in, without requiring it.
+/*
+ * REMOVED: `attachBuyerIfPresent`, the "signed in, or not, either is fine"
+ * variant of the above.
  *
- * Checkout is the one route a guest and a signed-in buyer both use — the
- * whole reason a guest checkout is supported at all. This is `protectBuyer`
- * with the "or else fail" removed: a present-and-valid session populates
- * `req.buyer` exactly as it would there, a missing or invalid one is treated
- * as "checking out as a guest" rather than an error. Anything downstream
- * that actually requires a buyer (the cart, `/api/shop/auth/me`) still uses
- * `protectBuyer`, which does fail.
+ * It existed for exactly one caller — the checkout endpoint — because guest
+ * checkout was a feature: a visitor could type a name and address at the till
+ * and buy without an account. That decision has been reversed. Buying now
+ * requires an account; browsing, searching and filling a cart do not, and none
+ * of those ever used this.
+ *
+ * Deleted rather than left in place unused, deliberately. A permissive auth
+ * helper sitting in the middleware folder is an invitation: the next person who
+ * wants a route to work for logged-out visitors finds it, uses it, and
+ * reintroduces an anonymous write path that nobody reviewed. There is now no
+ * such helper to reach for, so making a buyer route optional-auth requires
+ * writing one on purpose.
  */
-const attachBuyerIfPresent = asyncHandler(async (req, res, next) => {
-  const header = req.headers.authorization || '';
 
-  let token = null;
-
-  if (header.startsWith('Bearer ')) {
-    token = header.slice('Bearer '.length).trim();
-  } else if (req.cookies?.[SHOP_ACCESS_COOKIE]) {
-    token = req.cookies[SHOP_ACCESS_COOKIE];
-  }
-
-  if (!token) return next();
-
-  let payload;
-  try {
-    payload = verifyToken(token);
-  } catch {
-    return next();
-  }
-
-  if (payload.kind !== 'buyer') return next();
-
-  const buyer = await Buyer.findById(payload.id);
-  if (buyer) req.buyer = buyer;
-
-  return next();
-});
-
-module.exports = { protectBuyer, attachBuyerIfPresent };
+module.exports = { protectBuyer };

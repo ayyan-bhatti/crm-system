@@ -98,6 +98,31 @@ async function createBuyer(overrides = {}) {
   });
 }
 
+/**
+ * Save a delivery address for a buyer and return its id.
+ *
+ * Exists because checkout REQUIRES one since guest checkout was removed — the
+ * endpoint no longer silently falls back to `addresses[0]`, so every test that
+ * places a storefront order needs a real address to point at. Takes a bearer
+ * token rather than an agent so it works for both the token-based tests and the
+ * cookie-based ones.
+ */
+async function addAddress(token, overrides = {}) {
+  const res = await api()
+    .post('/api/shop/auth/addresses')
+    .set('Authorization', `Bearer ${token}`)
+    .send({
+      label: 'Home',
+      address: '12 Canal Road',
+      city: 'Lahore',
+      phone: '0300-1234567',
+      ...overrides,
+    });
+
+  const addresses = res.body.data?.addresses || [];
+  return addresses.length ? String(addresses[addresses.length - 1]._id) : null;
+}
+
 module.exports = {
   api,
   createUser,
@@ -107,4 +132,5 @@ module.exports = {
   createCustomer,
   createProduct,
   createBuyer,
+  addAddress,
 };
