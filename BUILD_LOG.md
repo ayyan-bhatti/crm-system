@@ -3743,3 +3743,391 @@ and a later run degraded to 2/12 purely on `RESOURCE_EXHAUSTED` — confirmed by
 run for outcomes, not assumed. The mechanism behind the fix is proven by direct token
 measurement; the end-to-end re-run needs a quota reset or a paid key, and should be the
 first thing done next.
+
+---
+
+## Round 3, phase 11: real payments, variants, delivery tracking, and a retry bug that had been waiting
+
+The largest round so far, and the first one where money genuinely moves. Four substantial
+pieces of work — Stripe Checkout, product variants, a delivery axis, and a storefront
+build-out — plus one reversal of an earlier decision. Four questions went back to the person
+running the project before any code was written, because each had an expensive wrong answer:
+how to prove Stripe without keys, how delivery status should relate to the existing one,
+whether the hero should be configurable, and whether `size` was wanted at all. All four came
+back with the recommended option, which is recorded here alongside what was actually built.
+
+### Guest checkout is gone, at both ends
+
+Round 1 built it, round 2 disabled it in the UI, and round 3 removed it. The distinction
+matters: after round 2 the *endpoint* still accepted `{ name, email, address }` from an
+anonymous caller and created a `Customer` from it — the form was simply no longer rendered.
+That is a disabled feature, not a removed one, and the difference is a code path nobody
+reviews that is still reachable with curl.
+
+The route now runs `protectBuyer`, so an unauthenticated POST is a 401 before any controller
+code executes. More usefully, `attachBuyerIfPresent` — the "signed in, or not, either is
+fine" middleware that existed for this one caller — has been **deleted** rather than left in
+place unused. A permissive auth helper sitting in the middleware folder is an invitation: the
+next person who wants a route to work for logged-out visitors finds it, uses it, and
+reintroduces an anonymous write path. There is now no such helper to reach for.
+
+The four tests that exercised guest checkout were not deleted quietly either. They were
+replaced with their inverse — an anonymous POST is refused, a POST carrying a *complete*
+guest payload is still refused, and neither leaves an `Order` or a `Customer` behind. The
+complete-payload case is the interesting one: the rejection has to come from the missing
+session rather than from a missing field, or the old path is one well-formed body away from
+working again.
+
+Browsing, searching and filling a cart remain entirely open. Only buying changed.
+
+### Stripe: no order exists until the webhook says so
+
+The whole integration follows from one rule, and everything awkward about it is downstream of
+that rule being correct: **the redirect is not proof of payment; the webhook is.** A buyer
+can close the tab the instant their card is charged, the redirect can fail, the network can
+drop. All of those leave the payment complete on Stripe's side and the buyer never returning.
+If the success URL were what created the order, that customer has been charged and has no
+order.
+
+So the checkout endpoint creates *nothing* durable. It writes a `PendingCheckout` — a
+disposable document with a TTL index, holding the priced lines and a copy of the delivery
+address — opens a Stripe Checkout Session, and hands back a URL. The real order is built
+later, by `checkout.session.completed`, and only when `payment_status` actually reads `paid`.
+An abandoned checkout therefore costs one expiring document and touches no inventory at all,
+which is the entire reason for not creating a provisional order: an order that exists is an
+order staff can see, assign, and post.
+
+Three independent things make a replayed webhook safe, because Stripe genuinely does deliver
+the same event twice — a timeout on our side is enough to earn a retry for work already done.
+The `PendingCheckout` status is re-read *inside* the transaction; a unique partial index on
+`payment.sessionId` means the database itself refuses a second order for one session; and an
+already-resolved checkout returns 200 immediately so the retries stop.
+
+Two smaller decisions worth recording. Prices are **snapshotted at session creation and used
+verbatim by the webhook**, which inverts this codebase's usual rule that everything re-prices
+from the live catalogue at the moment of application. That rule is right for an approval
+queue sitting over a price rise and wrong here: Stripe has already taken a specific amount,
+and rebuilding the lines from today's prices would produce an order whose total disagrees
+with the money in the account. And the mount in `app.js` sits **above `express.json()`**,
+because signatures are computed over the exact bytes Stripe sent — parsing to JSON and
+re-serialising changes key order and whitespace, every event fails verification, and the only
+symptom is that paid orders never appear.
+
+The one case the webhook refunds by itself: if the last unit of a variant sold to somebody
+else while this buyer was typing their card number, `decrementStock` refuses, and the buyer
+has paid for something that no longer exists. Creating the order anyway would oversell — the
+exact thing the atomic decrement exists to prevent — so the money goes back automatically,
+the checkout is marked failed with a reason the buyer reads on the confirmation page, and the
+event is acknowledged so Stripe stops retrying something that can never succeed. A failed
+*automatic* refund is logged at error with every id needed to issue it by hand, and
+deliberately not rethrown: retrying would fail identically, forever.
+
+**Refunds go before stock, always.** `refundService` exists to hold that ordering. The Stripe
+call happens *outside* the database transaction and *before* it opens, for two independent
+and each-sufficient reasons: `session.withTransaction` retries its callback on a transient
+error and would re-issue the refund, and a network call inside a transaction holds locks
+through somebody else's outage. A stable idempotency key (`refund_order_<id>`) closes the
+remaining window — an admin double-clicking approve, or an HTTP-layer retry — by making
+Stripe itself recognise the second attempt and return the original refund. Getting the order
+backwards would mean an order marked cancelled, its inventory credited back and sold to
+somebody else, and a customer still out of pocket.
+
+Both cancellation paths were wired to it: the approval queue, and an admin cancelling
+directly. The direct path repeats its access check *before* the refund, which costs one extra
+read and buys the guarantee that this endpoint cannot issue a real refund against somebody
+else's order and only then discover the caller was not allowed to touch it.
+
+### `stockTakenAt`: the field a card payment forced
+
+The rule used to be "stock moves when an order is completed", with `completedAt` doubling as
+both the timestamp and the once-only guard. Card payment breaks it cleanly: the money is
+taken at checkout, so the inventory is genuinely gone at checkout, but the order is
+emphatically not *completed* — nobody has picked or posted anything. Decrementing while
+leaving `completedAt` null would have meant the eventual completion decrementing a second
+time, quietly, for the same units.
+
+So the two facts are now stored separately. What made this shippable without a data migration
+is that every read of the guard goes through `stockIsTaken()`, which treats a set
+`completedAt` as proof of the same thing — because under the old rules completion was the
+only thing that ever moved stock. Orders written before this field existed are therefore
+correct without being touched. A migration was the other option and would have had to be
+right first time against live data to avoid inventing or destroying inventory.
+
+### Variants, and the wrong implementation that passes most tests
+
+`Product.variants` is a list of real buyable combinations rather than a grid of every colour
+crossed with every size, because a shop genuinely can stock Midnight in S and L but Sand only
+in M. The storefront's picker filters sizes by the chosen colour for the same reason: offering
+a combination that was never stocked means the shopper finds out at a failure message.
+
+The atomic decrement is where the care went, and it is worth writing down the version that
+looks right and is not:
+
+```js
+// WRONG — matches a product where ONE variant has the id and a DIFFERENT one has the stock
+{ _id: productId, 'variants._id': v, 'variants.stockQty': { $gte: qty } }
+```
+
+MongoDB evaluates those two dotted conditions independently across the array. That filter
+passes every test written against a single-variant product and oversells the moment a product
+has two colours. The correct form wraps them in `$elemMatch`, so `variants.$` addresses
+precisely the element that matched both conditions. `productVariants.test.js` has a test built
+specifically to tell the two apart — two colours, one with stock and one without — plus a
+genuinely concurrent race for the last unit of one colour.
+
+Two smaller things that follow. Duplicate order lines merge on **product and variant**, not
+product alone: keying on the product would fold a medium blue and a large red into one line of
+two, check that against one variant's stock, and write an order that has lost half of what was
+ordered. And `restoreStock` is deliberately *asymmetric* with the decrement — no `$gte` guard,
+because putting stock back cannot oversell, but a second unconditional update to the parent
+total, because a variant can be discontinued while an order is live and `variants.$` would
+otherwise match nothing and lose the units silently.
+
+The product's headline `stockQty` stays equal to the sum of its variants, kept honest by a
+pre-save hook and by the decrement adjusting both in one atomic update. Denormalising at all is
+a deliberate trade: a dozen things read `stockQty` and none of them care about colour — the
+low-stock filter, the reorder AI, the dashboard tiles, the storefront's `inStock` boolean — and
+rewriting all of them to sum an array inside a query means `$expr` and no index.
+
+**A product with no variants behaves exactly as it did**, and that is the load-bearing part:
+every product in a real deployment is in that state. It has its own test, and the seed
+deliberately leaves most of the catalogue without variants so both paths stay exercised.
+
+### Delivery as a second axis, not a longer enum
+
+The tempting shape was one status field running
+`processing → confirmed → shipped → out_for_delivery → delivered`. It is wrong for a
+mechanical reason: `completed` is what moves stock, and `delivered` must not — a parcel's
+stock leaves when it is picked, not when it arrives at somebody's door. Folding them together
+puts the decrement on the wrong event, and no amount of care in the UI recovers that.
+
+So `status` keeps its meaning (does this sale count, has stock moved) and `fulfilment` is a new
+field answering where the parcel is. An order is routinely `pending` and `shipped` at the same
+time, which one column cannot express — which is also why the internal order list now has two
+status columns rather than one merged one. The buyer's own pages show only the delivery axis:
+"pending" is an answer to a question they did not ask, since it means staff have not marked the
+order fulfilled, which is internal bookkeeping.
+
+`PATCH /orders/:id/fulfilment` is its own endpoint with **no role middleware**, and that is
+considered rather than omitted. The rule is about the record, not the role —
+`canAccessOrderDocument` already encodes "admin and manager see everything, a rep sees what is
+assigned to them" — and gating it to manager-or-admin would leave the person who physically
+posted the parcel unable to say so, with every shipment update arriving second-hand. The
+delivery estimate becomes required from `shipped` onwards, computed from the position in the
+sequence rather than by comparing against the literal string, so jumping straight to
+`out_for_delivery` cannot slip past the rule. Corrections backwards are allowed: people
+mis-click, an order wrongly marked delivered has to be fixable by the person who did it, and
+the audit trail records both ends of every move in readable words.
+
+### Four bugs found while building, three of them pre-existing
+
+**A stale Mongoose document surviving a transaction retry.** The most serious, and it was
+sitting in the round-1 checkout controller the whole time. `session.withTransaction` retries
+its callback on a transient error — a write conflict between two concurrent checkouts, or the
+implicit collection creation MongoDB performs on the first order a fresh database ever sees.
+The retry re-runs the function; it does **not** rewind Mongoose documents captured outside it.
+`req.buyer` was such a document: attempt 1 set `linkedCustomerId` on it and its matching insert
+was rolled back, so attempt 2 saw a buyer that *believed* it was linked, took the `findById`
+branch, and resolved an id that no longer existed anywhere — failing a perfectly valid checkout
+with "Customer not found".
+
+It went unnoticed because the retry only fires under contention, which a single-threaded test
+never produces. It surfaced in the Stripe webhook, where the first order on an empty database
+triggers the collection-creation retry reliably — and the failure there is catastrophic rather
+than annoying, because the money has already been taken and the handler's catch dutifully
+refunds it and tells the customer their item sold out. Both the webhook and the pre-existing
+cash path now re-read the buyer inside the transaction, so every attempt starts from committed
+state.
+
+**Native form validation swallowing our own.** The new delivery form put a `required` on a
+`type="date"` input, so the browser blocked submission with its own tooltip and `onSubmit`
+never fired — meaning the specific message ("set the date before marking this shipped — the
+customer sees it") was never displayed. Every other form in this app carries `noValidate` for
+exactly this reason; this one did not. Caught by an end-to-end test that clicked save and found
+no error message at all, which is a better outcome than a human deciding the generic browser
+bubble was good enough.
+
+**The storefront's category filter never worked for actual shoppers.** It called
+`/api/products/categories` — the internal, staff-only endpoint — which sits behind `protect`
+and answered 401 for everyone without a CRM session open in the same browser. The failure was
+swallowed by a `.catch(() => {})`, so the filter simply rendered nothing and looked like a
+design decision. A public `/api/shop/products/categories` now exists, along with `/colours`
+for the new swatch filter.
+
+**The font import was in the wrong place.** `@import 'tailwindcss'` is inlined by the build, so
+the Google Fonts import sitting on the line below it ended up around line 1900 of the generated
+stylesheet — long after real rules, where CSS requires every `@import` to precede all other
+statements. PostCSS had been warning on every build, buried in dev-server output nobody reads,
+and browsers are entitled to discard the rule outright, which would silently drop Inter and
+Fraunces to system fallbacks. Swapping two lines was the whole fix.
+
+### A test suite that depended on somebody else's rate limit
+
+`storefront.spec.js` has always documented that "GEMINI_API_KEY is unset in the e2e environment
+(see e2eServer.js)" and asserted on the documented `mode: 'fallback'` path. Nothing in
+`e2eServer.js` actually unset it. What was really happening is that `backend/.env` carries a
+real key for manual testing, so every end-to-end run made live model calls — and the fallback
+assertions passed only because that key's daily free-tier quota happened to be exhausted. The
+day the quota reset, the search test started failing with "Results for" instead of "Showing
+keyword matches for", which is the AI path working correctly.
+
+A suite whose outcome depends on a third party's rate limit is not a suite. `e2eServer.js` now
+sets the key to an empty string — empty rather than deleted, because dotenv only fills in keys
+absent from `process.env` — and does the same for the Stripe secrets, so the card path's "not
+configured" behaviour is deterministic too.
+
+### The storefront build-out, and what the CRM update actually amounted to
+
+The shop gained the structure the brief asked for: an announcement bar, a mega-menu driven by
+real categories, product cards with colour swatches, a badge and a hover image swap, quick view
+in a modal, a filter rail (category, colour, price, in stock) with sorting, a footer with link
+columns and newsletter capture, and a trust strip. Filter state lives in the **URL** rather than
+in `useState`, which buys three things local state cannot: a filtered view is a link somebody
+can send, the back button undoes a filter instead of leaving the page, and the mega-menu drives
+the grid simply by linking to it. The last one is why the mega-menu works at all.
+
+The CRM's visual update was smaller than the brief anticipated, and it is worth being straight
+about why rather than inventing work. Round 1's UI phase had already put both sides on one set
+of design tokens — same palette, same `Field`/button/card components, same spacing — so there
+was no leftover admin panel to re-skin. Round 1 also made an explicit decision, recorded in
+`index.css`, that the display face is storefront-only so the CRM's typography stays as quiet as
+its layout; round 3's own design-system section reaffirms exactly that split. So the change made
+was one deliberate exception — the SimpleCRM wordmark now uses the display face, since a brand
+mark is not body typography and it is the cheapest honest way to say "same product" — and the
+rest of the round-5 requirement was discharged by *verification*: all three staff roles now
+complete a real workflow in a browser test.
+
+### What was proven, and the one thing that was not
+
+Everything above is covered by tests that run without a network: **1049 backend tests across 46
+suites, 269 frontend tests across 27 files, 37 end-to-end tests** in a real browser against a
+real server. Stripe is stubbed at the `stripeService` seam — a named, documented export rather
+than a mocked `require` — so signature rejection, order-only-after-payment, webhook replay,
+expiry, decline, snapshot pricing and the refund-before-stock ordering are all exercised with no
+key and no network. The variant race is a genuinely concurrent test. All three staff roles
+complete a real workflow in the browser.
+
+**What has not been done: a live payment with a real Stripe test card.** This was agreed in
+advance rather than discovered at the end — the integration was built to be run by someone
+holding keys, with the README documenting the exact `stripe listen` command and the test card
+number. The mechanism is proven; the live pass is one person-minute and belongs to whoever has
+the dashboard open. Saying so plainly is more useful than a ticked box.
+
+Two smaller limits, stated for the same reason. The hero and promotional copy are **hardcoded**
+in `frontend/src/shopContent.js` — a deliberate answer to a question that was asked, not an
+oversight; what a real CMS would need is written at the top of that file. And the newsletter
+form **stores an address and sends nothing**, because no provider is connected; if one ever is,
+double opt-in has to arrive with it, since storing an address somebody typed is not consent to
+mail it.
+
+---
+
+## Round 3, phase 12 — the live Stripe pass, and the bug it uncovered
+
+The one item the previous entry left open has now been done: a real payment, with the real test
+card, against real test-mode Stripe, in a real browser. It found something.
+
+### Getting there: no MongoDB on the machine
+
+Worth recording because it is not obvious from the repo. This machine has **no MongoDB installed
+at all** — the Jest suite uses `mongodb-memory-server`, the end-to-end run boots its own, and
+nothing else ever needed one. So there was no database to point a normal `npm run dev` at, and
+the order path needs *transactions*, which need a replica set.
+
+`scripts/e2eServer.js` solves almost this exact problem already, but it cannot be reused here:
+it deliberately blanks `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET`, because an automated run
+must not depend on a payment processor being reachable. That is the right call there and the
+wrong one for this, so the manual pass ran against a throwaway launcher modelled on it that
+keeps the real keys. The Stripe CLI was installed via `winget`, and `stripe listen --api-key`
+avoids the browser-based `stripe login` entirely.
+
+### The first run passed for the wrong reason
+
+The browser flow went green on the first attempt: signed in, chose a colour, paid with
+`4242 4242 4242 4242`, landed on the confirmation page, saw "your payment has been received",
+and the Midnight variant went 6 → 5 while the product total went 9 → 8. Every assertion held,
+including the one that matters — no order and no stock movement while the buyer sat on Stripe's
+page.
+
+The `stripe listen` log said otherwise:
+
+```
+--> checkout.session.completed [evt_1UAClYRfYNtsETLcVFpJwK52]
+<--  [400] POST http://localhost:5000/api/shop/stripe/webhook
+```
+
+**Every webhook was rejected.** The order had been created by the confirmation page's
+`reconcile` call — the safety net for "the redirect beat the webhook back" — quietly covering
+for a webhook path that was not working at all. The test passed; the thing it was meant to prove
+did not happen.
+
+That is the more interesting failure, because it is the one a green test hides.
+
+### Six minutes
+
+A payload signed by hand with the secret from `.env` returned `200`, so the endpoint, the raw-
+body mount and the secret were all fine. What the CLI sent was rejected. Putting a logging proxy
+between `stripe listen` and the app produced the answer in one line:
+
+```
+app responded 400 {"message":"Webhook signature verification failed: Timestamp outside the tolerance zone"}
+```
+
+The machine's clock was **350 seconds fast**. Stripe's tolerance is 300. The Windows Time
+service was not running and could not be started without elevation.
+
+This is not an application bug, and the fix is not in this repository. It is worth writing down
+anyway, for two reasons. The first is that the error message sends you to the wrong place:
+"signature verification failed" reads as *wrong secret*, and you can spend a long time checking
+a secret that was never wrong. The second is that in production this failure is **completely
+silent from the buyer's side** — they pay, they are charged, and whether they ever get an order
+depends on whether they keep the tab open long enough for `reconcile` to fire.
+
+Two changes came out of it, both small and both about the diagnosis rather than the mechanism:
+
+- `stripeWebhookController.js` now **logs a rejected signature at warn level** and names clock
+  skew explicitly when the message mentions the tolerance zone. Previously the rejection went
+  straight through `asyncHandler` to the error handler, which treats a 400 as a routine client
+  error and says nothing — so the single failure that must never be quiet was the quietest thing
+  the server did. It took a proxy in front of the process to see it.
+- The README gained a troubleshooting note telling you to check the clock **before** the secret.
+
+### Proving it properly
+
+With the clock unfixable without admin rights, the run was repeated with both confounders
+removed: the `reconcile` request blocked in the browser so the fallback could not be credited
+with the order, and the real `checkout.session.completed` event fetched from Stripe and re-signed
+with a current timestamp. Only the timestamp changed — the payload was Stripe's own bytes for
+that payment.
+
+```
+after payment, reconcile blocked (1 attempt): Sand 3, orders 1
+confirmed: paid, but NO order yet — nothing trusts the redirect
+webhook POST -> 200
+after webhook: Sand 2, total 7, orders 2
+replayed the same event -> 200; orders 2, Sand 2
+```
+
+Paid and no order; webhook and an order; the identical event replayed and **nothing moved**.
+That is the requirement, demonstrated rather than asserted.
+
+The refund path was then run against real Stripe by cancelling that order through the staff API:
+
+```
+refunds on Stripe before: 0
+cancel -> 200
+refund re_3UACphRfYNtsETLc1DKUE3Ij: succeeded, 80 USD
+stock after: Sand 3 (was 2), total 8 (was 7)
+order now: status cancelled, payment refunded
+```
+
+A real refund object on Stripe, and the stock back on the **Sand** variant specifically — not
+spread across the product — and only after the refund succeeded.
+
+### Where this leaves the round
+
+The Definition of Done item that was previously marked "not done" is now done, on real Stripe:
+payment, webhook, order-only-after-webhook, replay safety, and a real refund restoring stock in
+the right order. The clock skew is a machine-configuration problem for whoever runs this, and it
+is documented; the two code changes it prompted are about making that problem *visible* rather
+than working around it.

@@ -129,6 +129,64 @@ a deployment immune to host-header injection in reset emails. See `src/utils/pub
 | `AI_MAX_PROMPT_CHARS` | no | `8000` | Prompts above this are refused before the call is made |
 | `GEMINI_API_KEY` | no | — | Blank ⇒ AI search falls back to keyword search |
 | `GEMINI_MODEL` | no | `gemini-3.6-flash` | Model used to translate queries |
+| `STRIPE_SECRET_KEY` | no | — | `sk_test_…` Blank ⇒ card checkout is hidden; cash on delivery still works |
+| `STRIPE_WEBHOOK_SECRET` | no | — | `whsec_…` Verifies incoming webhooks. **Required if the secret key is set** — see below |
+| `STRIPE_SUCCESS_PATH` | no | `/order-confirmation` | Where Stripe returns a buyer after paying |
+| `STRIPE_CANCEL_PATH` | no | `/checkout` | Where Stripe returns a buyer who backs out |
+
+#### Setting up Stripe (test mode)
+
+Card payment is optional — with no key configured the storefront hides the card
+option and takes cash-on-delivery orders exactly as before. To turn it on:
+
+1. **Get the keys.** In the [Stripe dashboard](https://dashboard.stripe.com/test/apikeys),
+   with **Test mode** on, copy the *secret key* (`sk_test_…`) into `STRIPE_SECRET_KEY`.
+   The *publishable key* is **not needed** — this integration uses Stripe's hosted
+   Checkout page, so no card data ever reaches the browser code or this server, and
+   nothing here is in PCI scope.
+
+2. **Get the webhook secret.** Locally, use the Stripe CLI, which forwards live test
+   events to your machine:
+
+   ```bash
+   stripe login
+   stripe listen --forward-to localhost:5000/api/shop/stripe/webhook
+   ```
+
+   It prints a signing secret (`whsec_…`) on start — that goes in
+   `STRIPE_WEBHOOK_SECRET`. Leave `stripe listen` running while you test.
+
+   For a deployment, add an endpoint at
+   `https://your-domain/api/shop/stripe/webhook` under **Developers → Webhooks**,
+   subscribe it to `checkout.session.completed`, `checkout.session.expired` and
+   `checkout.session.async_payment_failed`, and copy its signing secret.
+
+3. **Pay with a test card.** `4242 4242 4242 4242`, any future expiry, any CVC.
+   Stripe's [full list of test cards](https://docs.stripe.com/testing) includes ones
+   that decline, if you want to see the failure path.
+
+> **If every webhook comes back `400`, check the clock before the secret.** Stripe
+> signs each event with a timestamp and rejects one more than **five minutes** away
+> from the receiving machine's clock — so a server running six minutes fast discards
+> every event with `Webhook signature verification failed: Timestamp outside the
+> tolerance zone`, which reads like a wrong secret and is not. The buyer still pays;
+> the order is created late by the confirmation page's reconcile call, or not at all
+> if they close the tab. This was hit on a development machine whose Windows Time
+> service was not running. On Windows: Settings → Time & language → **Sync now**, or
+> `w32tm /resync` from an elevated prompt. On Linux: `timedatectl` / an NTP client.
+> The webhook handler names this cause explicitly in the log when it happens.
+
+> **A half-configured Stripe is worse than an unconfigured one.** With a secret key
+> and no webhook secret, the buyer reaches the card form and pays, and **no order is
+> ever created** — because the event that creates it cannot be verified. Nothing in
+> that sequence looks like an error to the person who just spent money. The app warns
+> about exactly this at boot in production, and `GET /api/health` reports it.
+
+**No order exists until the webhook confirms payment.** The checkout endpoint writes a
+short-lived `PendingCheckout` and hands back a Stripe URL; the order, and the stock
+decrement, happen only when `checkout.session.completed` arrives and says `paid`. An
+abandoned checkout therefore costs one expiring document and touches no inventory. See
+`src/controllers/stripeWebhookController.js`.
 
 `JWT_EXPIRES_IN` is **no longer read**. It was the single-token lifetime from before the
 session was split into an access and a refresh token; `ACCESS_TOKEN_TTL` replaced it.
