@@ -1,4 +1,4 @@
-import { FULFILMENT_STEPS, fulfilmentIndex, formatDate } from '../ui';
+import { FULFILMENT_STEPS, fulfilmentIndex, formatDate, deliveryUrgency, URGENCY_STYLES } from '../ui';
 
 /**
  * Where a parcel is, drawn as a sequence rather than written as a word.
@@ -17,6 +17,7 @@ import { FULFILMENT_STEPS, fulfilmentIndex, formatDate } from '../ui';
  */
 export default function DeliveryTimeline({ order, compact = false }) {
   const current = fulfilmentIndex(order.fulfilment);
+  const urgency = deliveryUrgency(order);
 
   /*
    * A cancelled order is NOT rendered as a timeline with nothing lit up. It is
@@ -117,10 +118,43 @@ export default function DeliveryTimeline({ order, compact = false }) {
         stops being a prediction the moment the order actually arrives.
       */}
       {order.estimatedDeliveryAt && !order.deliveredAt && (
-        <p className="mt-4 rounded-lg bg-plane px-3 py-2 text-sm text-ink-2">
-          Estimated delivery{' '}
-          <span className="font-semibold text-ink">{formatDate(order.estimatedDeliveryAt)}</span>
-        </p>
+        <div
+          /*
+           * The estimate CHANGES APPEARANCE as it approaches, rather than
+           * sitting in the same grey box from the day it is set to the day it
+           * expires. A date rendered identically whether it is three weeks or
+           * three hours away is information the reader has to do arithmetic on,
+           * and nobody does that arithmetic on a page they are skimming.
+           *
+           * `role="alert"` only for the states that have actually gone wrong or
+           * are about to. Announcing "arriving in nine days" to a screen reader
+           * every time this mounts is noise, and noise is how a real alert gets
+           * ignored.
+           */
+          role={urgency.level === 'overdue' || urgency.level === 'tomorrow' ? 'alert' : undefined}
+          className={`mt-4 flex items-start gap-2.5 rounded-lg border px-3 py-2.5 text-sm ${
+            URGENCY_STYLES[urgency.level] || 'border-hairline bg-plane text-ink-2'
+          }`}
+        >
+          {(urgency.level === 'overdue' || urgency.level === 'tomorrow') && (
+            <span aria-hidden="true" className="mt-0.5 shrink-0 text-base leading-none">
+              {urgency.level === 'overdue' ? '⚠' : '⏱'}
+            </span>
+          )}
+          <span>
+            {/* The urgency is stated in WORDS first — colour alone is not a
+                message, and it is invisible to a third of the reasons somebody
+                might be looking at this. */}
+            {urgency.label && <span className="font-semibold">{urgency.label} · </span>}
+            Estimated delivery{' '}
+            <span className="font-semibold">{formatDate(order.estimatedDeliveryAt)}</span>
+            {urgency.level === 'overdue' && (
+              <span className="mt-0.5 block text-xs">
+                This has passed its promised date and has not been marked delivered.
+              </span>
+            )}
+          </span>
+        </div>
       )}
     </div>
   );

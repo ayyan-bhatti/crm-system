@@ -14,6 +14,7 @@ import {
 } from '../../components/common';
 import DeliveryTimeline from '../../components/DeliveryTimeline';
 import { btnSecondary, formatDate, input, link, money, orderLabel, td, th } from '../../ui';
+import UrgencyBadge from '../../components/UrgencyBadge';
 
 export default function BuyerOrders() {
   const { isSignedIn, loading: authLoading } = useBuyerAuth();
@@ -80,7 +81,10 @@ export default function BuyerOrders() {
                         the buyer's own list, and "pending" describes internal
                         bookkeeping rather than anything they can act on.
                       */}
-                      <StatusBadge value={order.fulfilment || 'processing'} />
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <StatusBadge value={order.fulfilment || 'processing'} />
+                        <UrgencyBadge order={order} />
+                      </div>
                       {order.estimatedDeliveryAt && order.fulfilment !== 'delivered' && (
                         <span className="mt-1 block text-xs text-muted">
                           Est. {formatDate(order.estimatedDeliveryAt)}

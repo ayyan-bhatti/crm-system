@@ -129,6 +129,85 @@ export function fulfilmentIndex(value) {
 }
 
 /**
+ * How worried anyone should be about an order's promised delivery date.
+ *
+ * A DATE IS NOT A WARNING. The estimate was already on the page — quietly, in
+ * grey, in the same weight as everything around it — which is fine on the day
+ * it is set and useless on the day before it expires. "Estimated delivery 2
+ * September" and "arriving tomorrow, still sitting in Processing" are the same
+ * sentence to a reader and completely different facts to a business, and only
+ * one of them is worth interrupting somebody for.
+ *
+ * The levels, and what each is actually claiming:
+ *
+ *   overdue   the promised date has passed and it is not delivered. A promise
+ *             has already been broken; somebody should be telling the customer
+ *             before the customer tells them.
+ *   tomorrow  one day left. The last point at which a courier hand-off can
+ *             still be arranged in time — this is the alarm, and it is the one
+ *             the whole helper exists for.
+ *   soon      two or three days out. Worth seeing, not worth shouting about.
+ *   ontrack   further out than that; no styling change.
+ *
+ * DELIVERED AND CANCELLED ORDERS ARE ALWAYS `none`, whatever the date says.
+ * An order that arrived last week is not overdue, and rendering it in red
+ * because a stored date has passed is the fastest way to teach staff that the
+ * red ones can be ignored — which is exactly what makes a genuine one invisible.
+ *
+ * Comparison is done on calendar days rather than elapsed milliseconds, because
+ * "tomorrow" is a day, not a 24-hour window: an order due tomorrow at 09:00 is
+ * due tomorrow whether it is now 08:00 or 22:00, and a millisecond diff would
+ * call one of those "today".
+ */
+export function deliveryUrgency(order, now = new Date()) {
+  const settled =
+    order?.fulfilment === 'delivered' ||
+    order?.fulfilment === 'cancelled' ||
+    Boolean(order?.deliveredAt);
+
+  if (settled || !order?.estimatedDeliveryAt) {
+    return { level: 'none', days: null, label: '' };
+  }
+
+  const startOfDay = (value) => {
+    const date = new Date(value);
+    date.setHours(0, 0, 0, 0);
+    return date;
+  };
+
+  const due = startOfDay(order.estimatedDeliveryAt);
+  const today = startOfDay(now);
+  const days = Math.round((due - today) / 86400000);
+
+  if (days < 0) {
+    const late = Math.abs(days);
+    return {
+      level: 'overdue',
+      days,
+      label: late === 1 ? 'Overdue by 1 day' : `Overdue by ${late} days`,
+    };
+  }
+  if (days === 0) return { level: 'tomorrow', days, label: 'Due today' };
+  if (days === 1) return { level: 'tomorrow', days, label: 'Arriving tomorrow' };
+  if (days <= 3) return { level: 'soon', days, label: `Arriving in ${days} days` };
+
+  return { level: 'ontrack', days, label: `Arriving in ${days} days` };
+}
+
+/**
+ * Classes for each urgency level. `none` and `ontrack` return empty so a caller
+ * can render nothing at all rather than a neutral chip that adds noise to every
+ * row in a table.
+ */
+export const URGENCY_STYLES = {
+  overdue: 'border-critical/30 bg-critical-wash text-critical-ink',
+  tomorrow: 'border-warning/40 bg-warning-wash text-warning-ink',
+  soon: 'border-hairline bg-neutral-wash text-ink-2',
+  ontrack: '',
+  none: '',
+};
+
+/**
  * The chart colours, read from CSS custom properties rather than hard-coded, so
  * the palette lives in exactly one file. Recharts needs real values, not
  * `var(...)`, for some props — hence the resolved lookup.
@@ -292,6 +371,65 @@ export function placeholderImage(product) {
   return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }
 
+/**
+ * Words worth searching a photo library for, taken from the product itself.
+ *
+ * Filler is stripped for the same reason the AI search's keyword fallback
+ * strips it: "the", "for" and "5" match everything and therefore nothing. Pack
+ * sizes and units go too — "A4 Paper (5 reams)" should look for *paper*, not
+ * for the number five.
+ */
+const IMAGE_STOP_WORDS = new Set([
+  'the', 'a', 'an', 'and', 'or', 'of', 'for', 'with', 'in', 'on', 'to',
+  'pack', 'set', 'reams', 'ream', 'pcs', 'pieces', 'box', 'kit', 'x',
+]);
+
+function imageKeywords(product) {
+  const words = `${product?.name || ''}`
+    .toLowerCase()
+    .replace(/\([^)]*\)/g, ' ')
+    .replace(/[^a-z\s]/g, ' ')
+    .split(/\s+/)
+    .filter((word) => word.length > 2 && !IMAGE_STOP_WORDS.has(word));
+
+  const category = String(product?.category || '')
+    .toLowerCase()
+    .replace(/[^a-z]/g, '');
+
+  const chosen = words.slice(0, 2);
+  if (chosen.length === 0 && category) chosen.push(category);
+  return chosen.length ? chosen : ['product'];
+}
+
+/**
+ * A real photograph for a product nobody uploaded an image for.
+ *
+ * WHY THIS EXISTS ALONGSIDE `placeholderImage`, WHICH ARGUES AGAINST IT.
+ *
+ * The generated initials tile is honest — it says "no photo yet" rather than
+ * pretending — and that reasoning still holds for a catalogue somebody is
+ * actively curating. It does not hold for the shop as a shopper meets it. A
+ * grid of lettered squares does not read as "these products have no photos
+ * yet"; it reads as a broken shop, and no amount of correctness about what the
+ * tile means changes what it communicates.
+ *
+ * So the order is now: uploaded images, then a keyword-matched live photo, then
+ * the generated tile. The tile has not been deleted or downgraded — it is the
+ * floor that guarantees something always renders, including with no network,
+ * and `ProductImage` falls back to it on any load error. That matters more than
+ * it sounds: a third-party image host being slow or blocked must degrade to a
+ * clean square, never to a broken-image icon.
+ *
+ * `lock` is keyed on the product id so one product keeps one photograph. Without
+ * it the host returns a different image per request and the catalogue reshuffles
+ * itself on every page load, which looks worse than having no photos at all.
+ */
+export function livePhotoFor(product) {
+  const keywords = imageKeywords(product).join(',');
+  const lock = hashString(String(product?._id || product?.name || 'product')) % 100000;
+  return `https://loremflickr.com/600/600/${encodeURIComponent(keywords)}?lock=${lock}`;
+}
+
 // --- Variants and galleries ---------------------------------------------------
 
 /**
@@ -319,8 +457,8 @@ export function variantLabel(variant) {
  */
 export function galleryFor(product) {
   const all = [product?.imageUrl, ...(product?.images || [])].map((url) => (url || '').trim());
-  const real = all.filter(Boolean);
-  return real.length ? real : [placeholderImage(product)];
+  const real = [...new Set(all.filter(Boolean))];
+  return real.length ? real : [livePhotoFor(product)];
 }
 
 /**

@@ -13,6 +13,7 @@ import {
 } from '../../components/common';
 import { ORDER_STATUSES } from '../../constants';
 import { btnPrimary, formatDate, input, link, money, orderLabel, td, th } from '../../ui';
+import UrgencyBadge from '../../components/UrgencyBadge';
 
 /** Order list, filterable by status and date range. */
 export default function OrderList() {
@@ -177,7 +178,13 @@ export default function OrderList() {
                         <StatusBadge value={order.status} />
                       </td>
                       <td className={td}>
-                        <StatusBadge value={order.fulfilment || 'processing'} />
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <StatusBadge value={order.fulfilment || 'processing'} />
+                          {/* Silent unless the promised date is tomorrow or
+                              already gone — see UrgencyBadge for why a chip on
+                              every row would defeat the point. */}
+                          <UrgencyBadge order={order} />
+                        </div>
                         {order.estimatedDeliveryAt && order.fulfilment !== 'delivered' && (
                           <span className="mt-1 block text-xs text-muted">
                             Est. {formatDate(order.estimatedDeliveryAt)}
