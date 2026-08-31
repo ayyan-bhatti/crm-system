@@ -96,7 +96,7 @@ describe('editing a pending order', () => {
 
     await waitFor(() =>
       expect(ordersApi.update).toHaveBeenCalledWith('650000000000000000000001', {
-        items: [{ product: 'p1', quantity: 5 }],
+        items: [{ product: 'p1', quantity: 5, variantId: null }],
       })
     );
   });

@@ -91,8 +91,25 @@ const listProductOptions = asyncHandler(async (req, res) => {
     filter.$or = [{ name: rx }, { sku: rx }];
   }
 
+  /*
+   * `variants` is selected too, and leaving it out was a real bug rather than
+   * a missing nicety.
+   *
+   * The staff order form builds its lines from these options, so without the
+   * variants it could not know a product HAS colours — it offered the product,
+   * sent a line with no variant, and the API correctly refused with "sold in
+   * specific colours — choose one before ordering". The form gave no way to
+   * choose one, so every variant product in the catalogue was simply
+   * unorderable from the CRM, and it looked like the New Order page was broken
+   * rather than like a missing field.
+   *
+   * Unlike the storefront projection, the per-variant `stockQty` is included.
+   * That rule exists to stop an ANONYMOUS shopper reading inventory levels;
+   * this route is staff-only and already returns the product-level count for
+   * the same reason the form needs it — to warn before the server has to.
+   */
   const data = await Product.find(filter)
-    .select('name sku price stockQty')
+    .select('name sku price stockQty variants')
     .sort({ name: 1 })
     .limit(limit)
     .lean();

@@ -60,7 +60,14 @@ export default function OrderForm() {
    * needs a follow-up fetch.
    */
   const [selectedCustomer, setSelectedCustomer] = useState(null);
-  const [lines, setLines] = useState([{ product: '', quantity: 1, selected: null }]);
+  /*
+   * A line is (product, VARIANT, quantity). The variant was missing entirely,
+   * and its absence is what made every variant product unorderable from the
+   * CRM — see the note on `variantOptions` below.
+   */
+  const [lines, setLines] = useState([
+    { product: '', quantity: 1, selected: null, variantId: '' },
+  ]);
 
   /*
    * Who is going to work this order, asked here rather than on the detail page
@@ -124,6 +131,10 @@ export default function OrderForm() {
         product: item.product?._id || '',
         quantity: item.quantity,
         selected: item.product || null,
+        // The order line stores a variant SNAPSHOT (colorName/colorHex/size)
+        // so it survives the variant being renamed, but it keeps the id too —
+        // which is what lets an edit re-select the right one in the picker.
+        variantId: item.variant?.variantId ? String(item.variant.variantId) : '',
       }))
     );
 
@@ -135,53 +146,129 @@ export default function OrderForm() {
   // the top. Locked is the safe default while the record is still loading.
   const itemsLocked = isEdit && existing?.status !== 'pending';
 
-  // Built from what the user has actually picked, so it holds every product on
-  // the form regardless of what the search box currently shows.
-  const productById = Object.fromEntries(
-    lines.filter((line) => line.selected).map((line) => [line.selected._id, line.selected])
-  );
+  /*
+   * The product-by-id lookup that used to live here is gone. It existed to get
+   * from a line's product id back to the record, which was fine while a line's
+   * identity WAS its product — and stopped being true when variants arrived.
+   * Two lines can now carry the same product and different colours, with
+   * different stock and possibly different prices, so everything that matters
+   * is read from the line itself (`line.selected` plus `line.variantId`) rather
+   * than from a map keyed on something no longer unique.
+   */
 
   function updateLine(index, patch) {
     setLines((prev) => prev.map((line, i) => (i === index ? { ...line, ...patch } : line)));
   }
 
   function addLine() {
-    setLines((prev) => [...prev, { product: '', quantity: 1, selected: null }]);
+    setLines((prev) => [...prev, { product: '', quantity: 1, selected: null, variantId: '' }]);
+  }
+
+  /**
+   * The variants a line's chosen product is sold in, or [] for a plain product.
+   *
+   * A product with variants CANNOT be ordered without one — the API refuses it,
+   * because stock is held per colour and a line with no colour has no stock to
+   * come out of. The form previously had no idea variants existed (the option
+   * projection did not return them), so it offered such a product, sent a line
+   * without a variant, and surfaced the server's refusal as if the page were
+   * broken. Every variant product in the catalogue was unorderable from the CRM.
+   */
+  function variantsFor(line) {
+    return line.selected?.variants || [];
+  }
+
+  /** The specific variant chosen on a line, if any. */
+  function chosenVariant(line) {
+    return variantsFor(line).find((v) => String(v._id) === String(line.variantId)) || null;
+  }
+
+  /** What a line costs each — the variant's override where it has one. */
+  function unitPrice(line) {
+    const variant = chosenVariant(line);
+    return variant?.priceOverride ?? line.selected?.price ?? 0;
+  }
+
+  /** Stock available to a line: the variant's, or the product's. */
+  function availableStock(line) {
+    const variant = chosenVariant(line);
+    return variant ? variant.stockQty : (line.selected?.stockQty ?? 0);
+  }
+
+  /** "Midnight / M", for the picker and the stock messages. */
+  function variantName(variant) {
+    return [variant?.color?.name, variant?.size].filter(Boolean).join(' / ');
   }
 
   function removeLine(index) {
     setLines((prev) => prev.filter((_, i) => i !== index));
   }
 
-  const total = lines.reduce((sum, line) => {
-    const product = productById[line.product];
-    return sum + (product ? product.price * (Number(line.quantity) || 0) : 0);
-  }, 0);
+  const total = lines.reduce(
+    (sum, line) => sum + (line.selected ? unitPrice(line) * (Number(line.quantity) || 0) : 0),
+    0
+  );
 
   /**
    * Client-side stock check, mirroring the server's rule of merging duplicate
-   * lines for the same product before comparing against stock.
+   * lines before comparing against stock.
+   *
+   * MERGED ON (PRODUCT, VARIANT), NOT ON PRODUCT — the same key the server
+   * uses. Two lines of the same jacket in different colours draw on different
+   * stock and must not be added together; two lines of the SAME colour must.
+   * Keying on the product alone would reject a perfectly fillable order (six
+   * Midnight plus six Sand, against six of each) and let an unfillable one
+   * through unnoticed on a product with a small variant and a large total.
    */
   function stockProblem() {
     const wanted = new Map();
     for (const line of lines) {
       if (!line.product) continue;
-      wanted.set(line.product, (wanted.get(line.product) || 0) + (Number(line.quantity) || 0));
+      const key = `${line.product}::${line.variantId || ''}`;
+      const entry = wanted.get(key) || { line, quantity: 0 };
+      entry.quantity += Number(line.quantity) || 0;
+      wanted.set(key, entry);
     }
 
-    for (const [productId, quantity] of wanted) {
-      const product = productById[productId];
-      if (product && quantity > product.stockQty) {
-        return `Not enough stock for ${product.name}: asking for ${quantity}, ${product.stockQty} available.`;
+    for (const { line, quantity } of wanted.values()) {
+      if (!line.selected) continue;
+      // A variant product with nothing chosen has no stock to check yet; the
+      // "choose a colour" rule below is what blocks it.
+      if (variantsFor(line).length && !line.variantId) continue;
+
+      const stock = availableStock(line);
+      if (quantity > stock) {
+        const variant = chosenVariant(line);
+        const what = variant ? `${line.selected.name} (${variantName(variant)})` : line.selected.name;
+        return `Not enough stock for ${what}: asking for ${quantity}, ${stock} available.`;
       }
     }
     return '';
   }
 
+  /**
+   * A product sold in colours needs one picked. Stated as its own check so the
+   * message names the product rather than leaving a disabled button unexplained.
+   */
+  function variantProblem() {
+    const missing = lines.find(
+      (line) => line.selected && variantsFor(line).length > 0 && !line.variantId
+    );
+    return missing
+      ? `Choose a colour for ${missing.selected.name} — it is sold in specific colours.`
+      : '';
+  }
+
   const stockError = stockProblem();
+  const variantError = variantProblem();
   const filledLines = lines.filter((line) => line.product && Number(line.quantity) > 0);
   const canSubmit =
-    customerId && filledLines.length > 0 && !stockError && !submitting && !itemsLocked;
+    customerId &&
+    filledLines.length > 0 &&
+    !stockError &&
+    !variantError &&
+    !submitting &&
+    !itemsLocked;
 
   async function handleSubmit(event) {
     event.preventDefault();
@@ -191,6 +278,10 @@ export default function OrderForm() {
     const items = filledLines.map((line) => ({
       product: line.product,
       quantity: Number(line.quantity),
+      // null rather than omitted for a plain product: the API distinguishes
+      // "no variant, because this product has none" from "variant missing",
+      // and refuses a variant on a product that has none.
+      variantId: line.variantId || null,
     }));
 
     try {
@@ -342,50 +433,133 @@ export default function OrderForm() {
           {/* --- Line items --------------------------------------------- */}
           <div>
             <p className="mb-2 text-sm font-medium text-ink-2">Items</p>
+
+            {/* Column headings, so the three narrow inputs are not three
+                unlabelled boxes. Hidden on mobile, where the row stacks and
+                each control is beside its own label instead. */}
+            <div className="mb-1.5 hidden grid-cols-[minmax(0,1fr)_5rem_6rem_auto] gap-2 px-0.5 text-xs font-medium uppercase tracking-wide text-muted sm:grid">
+              <span>Product</span>
+              <span>Qty</span>
+              <span className="text-right">Amount</span>
+              <span className="w-[4.5rem]" />
+            </div>
+
             <div className="space-y-2">
               {lines.map((line, index) => {
-                const product = productById[line.product];
+                const variants = variantsFor(line);
+                const variant = chosenVariant(line);
 
                 return (
-                  <div key={index} className="flex flex-wrap items-start gap-2">
-                    <div className="min-w-[12rem] flex-1">
+                  /*
+                    A GRID, not `flex flex-wrap`.
+                    Wrapping collapsed the row into a vertical stack the moment
+                    the product name was long or the sidebar was open — product,
+                    colour, quantity and amount each on their own full-width
+                    line, with no column headings to say what any of them were.
+                    A grid keeps the columns aligned down the list, which is the
+                    whole reason a line-items table is a table.
+                  */
+                  <div
+                    key={index}
+                    className="grid grid-cols-1 items-start gap-2 rounded-lg border border-hairline p-2.5 sm:grid-cols-[minmax(0,1fr)_5rem_6rem_auto] sm:border-0 sm:p-0"
+                  >
+                    <div className="min-w-0">
                       {itemsLocked ? (
                         <p className="pt-2 text-sm text-ink">
                           {line.selected?.name || 'Unknown product'}
+                          {variant && (
+                            <span className="block text-xs text-muted">{variantName(variant)}</span>
+                          )}
                         </p>
                       ) : (
-                      <SearchSelect
-                        value={line.product}
-                        selected={line.selected}
-                        onChange={(picked) =>
-                          updateLine(index, { product: picked._id, selected: picked })
-                        }
-                        fetchOptions={(search) => productsApi.options(search)}
-                        getOptionLabel={(p) => p.name}
-                        getOptionMeta={(p) => `${p.sku} · ${money(p.price)} · ${p.stockQty} in stock`}
-                        placeholder="Search products…"
-                        emptyMessage="No products match that search"
-                      />
+                        <>
+                          <SearchSelect
+                            value={line.product}
+                            selected={line.selected}
+                            /*
+                              Choosing a different product CLEARS the variant.
+                              A variant id belongs to one product; carried over,
+                              it matches nothing on the new one, and the line
+                              looks complete while the server rejects it for a
+                              colour nobody picked.
+                            */
+                            onChange={(picked) =>
+                              updateLine(index, {
+                                product: picked._id,
+                                selected: picked,
+                                variantId:
+                                  picked.variants?.length === 1
+                                    ? String(picked.variants[0]._id)
+                                    : '',
+                              })
+                            }
+                            fetchOptions={(search) => productsApi.options(search)}
+                            getOptionLabel={(p) => p.name}
+                            getOptionMeta={(p) =>
+                              `${p.sku} · ${money(p.price)} · ${
+                                p.variants?.length
+                                  ? `${p.variants.length} colours`
+                                  : `${p.stockQty} in stock`
+                              }`
+                            }
+                            placeholder="Search products…"
+                            emptyMessage="No products match that search"
+                          />
+
+                          {/* Only where the product genuinely has colours. */}
+                          {variants.length > 0 && (
+                            <div className="mt-1.5">
+                              <label className="sr-only" htmlFor={`variant-${index}`}>
+                                Colour and size for item {index + 1}
+                              </label>
+                              <select
+                                id={`variant-${index}`}
+                                className={`${input} w-full`}
+                                value={line.variantId}
+                                onChange={(e) => updateLine(index, { variantId: e.target.value })}
+                              >
+                                <option value="">Choose a colour…</option>
+                                {variants.map((v) => (
+                                  <option
+                                    key={v._id}
+                                    value={v._id}
+                                    /* Shown and disabled rather than hidden:
+                                       "out of stock" and "not made" are
+                                       different facts. */
+                                    disabled={v.stockQty === 0}
+                                  >
+                                    {variantName(v)}
+                                    {v.stockQty === 0
+                                      ? ' — out of stock'
+                                      : ` — ${v.stockQty} in stock`}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          )}
+                        </>
                       )}
                     </div>
 
                     <input
                       type="number"
                       min="1"
-                      className={`${input} w-24`}
+                      className={`${input} w-full`}
                       value={line.quantity}
                       disabled={itemsLocked}
                       aria-label={`Quantity for item ${index + 1}`}
                       onChange={(e) => updateLine(index, { quantity: e.target.value })}
                     />
 
-                    <div className="w-24 pt-2 text-right text-sm text-ink-2">
-                      {product ? money(product.price * (Number(line.quantity) || 0)) : '—'}
+                    <div className="pt-2 text-right text-sm tabular text-ink-2">
+                      {line.selected
+                        ? money(unitPrice(line) * (Number(line.quantity) || 0))
+                        : '—'}
                     </div>
 
                     <button
                       type="button"
-                      className="pt-2 text-sm text-muted hover:text-critical-ink disabled:opacity-40"
+                      className="justify-self-start pt-2 text-sm text-muted transition-colors hover:text-critical-ink disabled:opacity-40 sm:justify-self-auto"
                       onClick={() => removeLine(index)}
                       disabled={lines.length === 1 || itemsLocked}
                       aria-label="Remove item"
@@ -403,6 +577,18 @@ export default function OrderForm() {
               </button>
             )}
           </div>
+
+          {/*
+            Said out loud rather than left as a disabled button. This is the
+            exact message the server would have returned — the difference is
+            that it arrives before the submit rather than after it, and names
+            the product so it is actionable.
+          */}
+          {variantError && (
+            <div className="rounded-md border border-warning/25 bg-warning-wash px-4 py-3 text-sm text-warning-ink">
+              {variantError}
+            </div>
+          )}
 
           {stockError && (
             <div className="rounded-md border border-warning/25 bg-warning-wash px-4 py-3 text-sm text-warning-ink">

@@ -115,7 +115,10 @@ describe('OrderForm', () => {
     expect(ordersApi.create).toHaveBeenCalledWith(
       expect.objectContaining({
         customer: CUSTOMER._id,
-        items: [{ product: WIDGET._id, quantity: 1 }],
+        // `variantId: null` is explicit rather than omitted: the API
+        // distinguishes "this product has no variants" from "a variant was
+        // required and not sent", and refuses the second.
+        items: [{ product: WIDGET._id, quantity: 1, variantId: null }],
       })
     );
   });
@@ -238,8 +241,8 @@ describe('OrderForm', () => {
       expect(ordersApi.create).toHaveBeenCalledWith(
         expect.objectContaining({
           items: [
-            { product: WIDGET._id, quantity: 1 },
-            { product: gadget._id, quantity: 1 },
+            { product: WIDGET._id, quantity: 1, variantId: null },
+            { product: gadget._id, quantity: 1, variantId: null },
           ],
         })
       );
@@ -383,5 +386,119 @@ describe('assigning the order while creating it', () => {
 
     expect(await screen.findByRole('heading', { name: /edit ORD-000009/i })).toBeInTheDocument();
     expect(screen.queryByLabelText(/assign to/i)).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * Ordering a product that is sold in colours.
+ *
+ * THE BUG THIS COVERS was reported as "admin can't make a new order", and the
+ * admin's permissions were never involved. Stock is held per variant, so the
+ * API refuses a line for a variant product with no variant on it — correctly.
+ * This form had no variant control at all, and the product options endpoint did
+ * not even return `variants`, so it could not have drawn one. The result: every
+ * variant product in the catalogue could be selected and never ordered, and the
+ * refusal arrived as a red banner after submit, which reads as a broken page
+ * rather than a missing field.
+ */
+describe('OrderForm with a variant product', () => {
+  const JACKET = {
+    _id: '650000000000000000000033',
+    name: 'Trail Jacket',
+    sku: 'TJ-1',
+    price: 80,
+    stockQty: 9,
+    variants: [
+      { _id: 'v-midnight', color: { name: 'Midnight', hex: '#111827' }, size: 'M', stockQty: 6 },
+      { _id: 'v-sand', color: { name: 'Sand', hex: '#d6c7a1' }, size: 'M', stockQty: 0 },
+    ],
+  };
+
+  beforeEach(() => {
+    authApi.me.mockResolvedValue(fakeUser());
+    customersApi.options.mockResolvedValue([CUSTOMER]);
+    productsApi.options.mockResolvedValue([JACKET]);
+    usersApi.assignable.mockResolvedValue([]);
+    ordersApi.create.mockResolvedValue({ _id: 'order-9' });
+  });
+
+  const renderForm = () =>
+    renderWithProviders(<OrderForm />, { route: '/orders/new', guarded: true });
+
+  /** Choosing the product must offer the colours, not silently accept none. */
+  it('offers the colours once a variant product is chosen', async () => {
+    const user = userEvent.setup();
+    renderForm();
+
+    await pickFrom(user, await screen.findByLabelText(/customer/i), 'karachi', 'Karachi Traders');
+    await pickFrom(user, productBoxes()[0], 'trail', 'Trail Jacket');
+
+    const picker = await screen.findByLabelText(/colour and size for item 1/i);
+    expect(picker).toBeInTheDocument();
+
+    // Sold-out colours are shown and disabled rather than hidden: "out of
+    // stock" and "we don't make that" are different facts.
+    const sand = within(picker).getByRole('option', { name: /Sand/i });
+    expect(sand).toBeDisabled();
+    expect(within(picker).getByRole('option', { name: /Midnight/i })).toBeEnabled();
+  });
+
+  /** And submitting is blocked, in words, until one is picked. */
+  it('will not submit until a colour is chosen, and says why', async () => {
+    const user = userEvent.setup();
+    renderForm();
+
+    await pickFrom(user, await screen.findByLabelText(/customer/i), 'karachi', 'Karachi Traders');
+    await pickFrom(user, productBoxes()[0], 'trail', 'Trail Jacket');
+
+    expect(await screen.findByText(/choose a colour for trail jacket/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /create order/i })).toBeDisabled();
+    expect(ordersApi.create).not.toHaveBeenCalled();
+  });
+
+  it('sends the chosen variant with the line', async () => {
+    const user = userEvent.setup();
+    renderForm();
+
+    await pickFrom(user, await screen.findByLabelText(/customer/i), 'karachi', 'Karachi Traders');
+    await pickFrom(user, productBoxes()[0], 'trail', 'Trail Jacket');
+
+    await user.selectOptions(
+      await screen.findByLabelText(/colour and size for item 1/i),
+      'v-midnight'
+    );
+
+    await user.click(screen.getByRole('button', { name: /create order/i }));
+
+    await waitFor(() => expect(ordersApi.create).toHaveBeenCalled());
+    expect(ordersApi.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        items: [{ product: JACKET._id, quantity: 1, variantId: 'v-midnight' }],
+      })
+    );
+  });
+
+  /**
+   * Stock is checked against the CHOSEN VARIANT, not the product total. Six
+   * Midnight under a product total of nine: asking for eight is unfillable even
+   * though the product-level number would allow it.
+   */
+  it('checks stock against the variant rather than the product total', async () => {
+    const user = userEvent.setup();
+    renderForm();
+
+    await pickFrom(user, await screen.findByLabelText(/customer/i), 'karachi', 'Karachi Traders');
+    await pickFrom(user, productBoxes()[0], 'trail', 'Trail Jacket');
+    await user.selectOptions(
+      await screen.findByLabelText(/colour and size for item 1/i),
+      'v-midnight'
+    );
+
+    const qty = screen.getByLabelText(/quantity for item 1/i);
+    await user.clear(qty);
+    await user.type(qty, '8');
+
+    expect(await screen.findByText(/not enough stock for trail jacket \(midnight/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /create order/i })).toBeDisabled();
   });
 });
