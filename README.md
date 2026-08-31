@@ -1919,6 +1919,18 @@ npx npm@10 install --package-lock-only
 Committing a lock written by a different npm major will break CI and stop deployments, and it
 will look like a dependency problem rather than a toolchain one.
 
+> **`packageManager` does not enforce this — it only records it.** Plain `npm` ignores the
+> field entirely; only Corepack acts on it, and Corepack does not manage npm itself. So on a
+> machine running Node 24 (npm 11), a routine `npm install` to add one dependency silently
+> rewrites the lock in the npm 11 dialect, with nothing on screen to say so. That is exactly
+> how this broke a second time, after adding `stripe`: the failure surfaced hours later, in
+> CI, on an unrelated commit, naming `@emnapi/core` rather than the npm that wrote it.
+>
+> Check with `npm --version` before regenerating, and treat an unexpectedly large
+> `package-lock.json` diff — optional `fsevents`, `@unrs`, or `@emnapi` binding entries
+> appearing or vanishing — as the signature of a wrong-npm lock rather than as a real
+> dependency change.
+
 ### Node version
 
 Both `package.json` files declare `engines.node >= 20.19.0`, which Vercel reads to pick the
