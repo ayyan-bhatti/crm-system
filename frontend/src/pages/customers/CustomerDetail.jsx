@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { customersApi, ordersApi } from '../../api/resources';
 import { errorMessage } from '../../api/client';
 import useFetch from '../../hooks/useFetch';
+import usePermissions from '../../hooks/usePermissions';
 import { useToast } from '../../components/Toast';
 import {
   Card,
@@ -28,6 +29,7 @@ import {
 
 /** A single customer, their details, and every order placed for them. */
 export default function CustomerDetail() {
+  const { can } = usePermissions();
   const { id } = useParams();
   const navigate = useNavigate();
   // Deleting navigates back to the list, so the confirmation has to outlive
@@ -69,9 +71,12 @@ export default function CustomerDetail() {
         subtitle={[customer.company, customer.city].filter(Boolean).join(' · ') || undefined}
         action={
           <div className="flex gap-2">
-            <Link to={`/crm/orders/new?customer=${customer._id}`} className={btnSecondary}>
-              New order
-            </Link>
+            {/* Same gate as the order list's button — see the note there. */}
+            {can.writeOrders && (
+              <Link to={`/crm/orders/new?customer=${customer._id}`} className={btnSecondary}>
+                New order
+              </Link>
+            )}
             <Link to={`/crm/customers/${customer._id}/edit`} className={btnPrimary}>
               Edit
             </Link>
@@ -134,10 +139,15 @@ export default function CustomerDetail() {
           {!orders?.data.length ? (
             <EmptyState
               title="No orders yet"
+              /* The third copy of this link, and it needed the same gate: an
+                 empty state whose only call to action is forbidden is worse
+                 than one with no action at all. */
               action={
-                <Link to={`/crm/orders/new?customer=${customer._id}`} className={btnPrimary}>
-                  Create the first order
-                </Link>
+                can.writeOrders ? (
+                  <Link to={`/crm/orders/new?customer=${customer._id}`} className={btnPrimary}>
+                    Create the first order
+                  </Link>
+                ) : null
               }
             />
           ) : (

@@ -40,6 +40,11 @@ test.describe('The internal CRM still works for every staff role', () => {
     await page.getByRole('link', { name: /Karachi Traders/i }).click();
     await expect(page.getByRole('heading', { name: /Karachi Traders/i })).toBeVisible();
 
+    // The other half of the gate the rep test checks: an admin, who CAN create
+    // orders, still sees the button. A gate that hides it from everybody would
+    // satisfy that test and break the product.
+    await expect(page.getByRole('link', { name: /^new order$/i })).toBeVisible();
+
     // --- place an order ----------------------------------------------------
     await page.goto('/crm/orders/new');
 
@@ -121,6 +126,20 @@ test.describe('The internal CRM still works for every staff role', () => {
     await expect(page.getByRole('link', { name: /^customers$/i })).toHaveCount(0);
 
     await page.goto('/crm/orders');
+
+    /*
+     * ...and no "New order" button either, which it used to show.
+     *
+     * A rep cannot create an order — that is a commercial commitment, and their
+     * job is to fulfil orders rather than agree them — but the button was
+     * rendered for every role regardless of `writeOrders`. So the single
+     * primary action on a rep's main screen was one the API would refuse, after
+     * they had filled the whole form in. Same reasoning as the missing
+     * Customers nav item above: absence reads as "not my job", a dead button
+     * reads as a broken app.
+     */
+    await expect(page.getByRole('link', { name: /^new order$/i })).toHaveCount(0);
+
     const orderLink = page.getByRole('link').filter({ hasText: /^ORD-|^#/ }).first();
     await expect(orderLink).toBeVisible();
     await orderLink.click();

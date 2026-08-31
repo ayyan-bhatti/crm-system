@@ -14,9 +14,11 @@ import {
 import { ORDER_STATUSES } from '../../constants';
 import { btnPrimary, formatDate, input, link, money, orderLabel, td, th } from '../../ui';
 import UrgencyBadge from '../../components/UrgencyBadge';
+import usePermissions from '../../hooks/usePermissions';
 
 /** Order list, filterable by status and date range. */
 export default function OrderList() {
+  const { can } = usePermissions();
   const [searchParams, setSearchParams] = useSearchParams();
 
   const page = Number(searchParams.get('page')) || 1;
@@ -64,10 +66,21 @@ export default function OrderList() {
       <PageHeader
         title="Orders"
         subtitle="Sales across your accounts."
+        /*
+          Gated on `writeOrders`, which it never was.
+          A sales rep cannot create an order — an order is a commercial
+          commitment and a rep fulfils orders rather than agreeing them — but
+          this button was shown to every role regardless. So a rep saw the one
+          primary action on their main screen, pressed it, filled in a form, and
+          was refused by the API at the end. A control you are not allowed to
+          use should not be the most prominent thing on the page.
+        */
         action={
-          <Link to="/crm/orders/new" className={btnPrimary}>
-            New order
-          </Link>
+          can.writeOrders ? (
+            <Link to="/crm/orders/new" className={btnPrimary}>
+              New order
+            </Link>
+          ) : null
         }
       />
 
