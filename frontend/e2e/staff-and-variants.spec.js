@@ -78,7 +78,7 @@ test.describe('The internal CRM still works for every staff role', () => {
    * interesting part: the server refuses `shipped` without a date, and the form
    * has to say so before the request rather than after it.
    */
-  test('an admin can move an order through delivery, but not ship it without a date', async ({
+  test('an admin can move an order through delivery, with the promised date already set', async ({
     page,
   }) => {
     await signIn(page, ADMIN);
@@ -86,14 +86,27 @@ test.describe('The internal CRM still works for every staff role', () => {
     await page.getByRole('link').filter({ hasText: /^ORD-|^#/ }).first().click();
 
     await page.getByRole('button', { name: /update delivery/i }).click();
+
+    /*
+     * THE DATE IS ALREADY THERE, and this assertion replaces one that expected
+     * the opposite.
+     *
+     * This test used to ship without a date, assert the refusal, then click
+     * "use the usual 5 days". That refusal is now unreachable through the
+     * normal flow: an order gets its promised date at CREATION, computed from
+     * the delivery speed the buyer chose, because a shopper picking next-day is
+     * picking a date and picks it before they pay. Leaving the field blank
+     * until a staff member typed one meant the confirmation page could only say
+     * "we will let you know".
+     *
+     * The guard itself is still enforced and still tested — at the API level in
+     * tests/fulfilment.test.js, where the estimate is cleared first to simulate
+     * an order written before this change. What is checked here is the
+     * behaviour a staff member actually meets.
+     */
+    await expect(page.getByLabel(/estimated delivery/i)).not.toHaveValue('');
+
     await page.getByLabel(/delivery status/i).selectOption('shipped');
-    await page.getByRole('button', { name: /save delivery status/i }).click();
-
-    // Refused, in words, with the reason — and nothing changed.
-    await expect(page.getByText(/set the date before marking this shipped/i)).toBeVisible();
-
-    // The form offers the usual window rather than making anyone count days.
-    await page.getByRole('button', { name: /use the usual 5 days/i }).click();
     await page.getByRole('button', { name: /save delivery status/i }).click();
 
     await expect(page.getByText(/delivery status updated/i)).toBeVisible();

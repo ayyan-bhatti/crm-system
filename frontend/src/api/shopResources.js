@@ -97,11 +97,11 @@ export const shopCheckoutApi = {
    * from the shape of what it got, which is precisely the kind of inference
    * that breaks the first time a field is added.
    */
-  checkout: (items, addressId, paymentMethod) =>
+  checkout: (items, addressId, paymentMethod, deliverySpeed) =>
     shopClient
       .post(
         '/shop/checkout',
-        { items, addressId, paymentMethod },
+        { items, addressId, paymentMethod, deliverySpeed },
         { headers: { 'Idempotency-Key': idempotencyKey() } }
       )
       .then((r) => r.data),

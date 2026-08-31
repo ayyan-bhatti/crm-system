@@ -207,7 +207,10 @@ describe('Checkout', () => {
         expect(shopCheckoutApi.checkout).toHaveBeenCalledWith(
           [{ product: 'p1', quantity: 1, variantId: null }],
           'addr-1',
-          'cod'
+          'cod',
+          // The delivery speed the buyer chose. Standard is the default, and
+          // the option list only renders once the server's config arrives.
+          'standard'
         )
       );
       expect(await screen.findByText('CONFIRMATION PAGE')).toBeInTheDocument();
@@ -246,7 +249,8 @@ describe('Checkout', () => {
         expect(shopCheckoutApi.checkout).toHaveBeenCalledWith(
           [{ product: 'p1', quantity: 1, variantId: null }],
           'addr-1',
-          'card'
+          'card',
+          'standard'
         )
       );
 
@@ -292,7 +296,10 @@ describe('Checkout', () => {
         expect(shopCheckoutApi.checkout).toHaveBeenCalledWith(
           [{ product: 'p1', quantity: 2, variantId: 'v1' }],
           'addr-1',
-          'cod'
+          'cod',
+          // The delivery speed the buyer chose. Standard is the default, and
+          // the option list only renders once the server's config arrives.
+          'standard'
         )
       );
     });

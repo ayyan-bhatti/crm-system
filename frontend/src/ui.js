@@ -88,6 +88,7 @@ export const STATUS_STYLES = {
   // the same thing here, so they are deliberately not repeated — a second
   // definition of the same key would silently be the one that wins.
   confirmed: 'bg-brand-wash text-brand-ink',
+  at_warehouse: 'bg-brand-wash text-brand-ink',
   shipped: 'bg-brand-wash text-brand-ink',
   out_for_delivery: 'bg-warning-wash text-warning-ink',
   delivered: 'bg-good-wash text-good-ink',
@@ -113,6 +114,11 @@ export const STATUS_STYLES = {
 export const FULFILMENT_STEPS = [
   { value: 'processing', label: 'Processing', hint: 'We have your order.' },
   { value: 'confirmed', label: 'Confirmed', hint: 'Your order is being prepared.' },
+  {
+    value: 'at_warehouse',
+    label: 'At the warehouse',
+    hint: 'Picked and packed, waiting for the courier.',
+  },
   { value: 'shipped', label: 'Shipped', hint: 'It has left our warehouse.' },
   { value: 'out_for_delivery', label: 'Out for delivery', hint: 'It is with the courier today.' },
   { value: 'delivered', label: 'Delivered', hint: 'It arrived.' },

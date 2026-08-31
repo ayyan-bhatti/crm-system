@@ -5,7 +5,7 @@ import { useCart, lineKey } from '../../context/CartContext';
 import { shopCheckoutApi, shopAuthApi } from '../../api/shopResources';
 import { errorMessage } from '../../api/client';
 import { Card, ErrorBanner, Field, Spinner } from '../../components/common';
-import { btnPrimary, btnSecondary, galleryFor, money, variantLabel } from '../../ui';
+import { btnPrimary, btnSecondary, formatDate, galleryFor, money, variantLabel } from '../../ui';
 import ProductImage from '../../components/shop/ProductImage';
 
 /**
@@ -77,6 +77,8 @@ export default function Checkout() {
   const [paymentMethods, setPaymentMethods] = useState(FALLBACK_PAYMENT_METHODS);
   const [paymentMethod, setPaymentMethod] = useState('');
   const [configResolved, setConfigResolved] = useState(false);
+  const [deliveryOptions, setDeliveryOptions] = useState([]);
+  const [deliverySpeed, setDeliverySpeed] = useState('standard');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [addingAddress, setAddingAddress] = useState(false);
@@ -104,6 +106,7 @@ export default function Checkout() {
       .then((config) => {
         if (cancelled) return;
         if (config?.paymentMethods?.length) setPaymentMethods(config.paymentMethods);
+        if (config?.deliveryOptions?.length) setDeliveryOptions(config.deliveryOptions);
       })
       .catch(() => {})
       /*
@@ -193,7 +196,7 @@ export default function Checkout() {
         variantId: line.variant?.variantId || null,
       }));
 
-      const result = await shopCheckoutApi.checkout(payload, addressId, paymentMethod);
+      const result = await shopCheckoutApi.checkout(payload, addressId, paymentMethod, deliverySpeed);
 
       if (result.mode === 'stripe') {
         /*
@@ -252,6 +255,65 @@ export default function Checkout() {
                     setAddingAddress(false);
                   }}
                 />
+              )}
+
+              {/*
+                How fast, asked BEFORE how they are paying.
+                The order matters: the delivery date is part of what a shopper
+                is deciding to buy, and burying it after the payment method
+                makes it read as an afterthought to a decision already made.
+              */}
+              {deliveryOptions.length > 1 && (
+                <fieldset>
+                  <legend className="mb-2 text-sm font-medium text-ink">
+                    Delivery speed
+                    <span className="ml-1 text-critical-ink" aria-hidden="true">
+                      *
+                    </span>
+                    <span className="sr-only"> (Required)</span>
+                  </legend>
+
+                  <div className="space-y-2">
+                    {deliveryOptions.map((option) => {
+                      const selected = deliverySpeed === option.value;
+                      return (
+                        <label
+                          key={option.value}
+                          className={`flex cursor-pointer items-start gap-3 rounded-xl border p-3.5 text-sm transition-all ${
+                            selected
+                              ? 'border-brand bg-brand-wash/40 ring-1 ring-brand/20'
+                              : 'border-hairline hover:border-rule hover:bg-plane/60'
+                          }`}
+                        >
+                          <input
+                            type="radio"
+                            name="deliverySpeed"
+                            className="mt-1 accent-[var(--color-brand)]"
+                            checked={selected}
+                            onChange={() => setDeliverySpeed(option.value)}
+                          />
+                          <span className="min-w-0 flex-1">
+                            <span className="flex flex-wrap items-baseline justify-between gap-2">
+                              <span className="font-medium text-ink">{option.label}</span>
+                              {/*
+                                The DATE, not the day count. "Arrives in 3–5
+                                working days" asks the shopper to do arithmetic
+                                against a calendar they cannot see; a date is
+                                the thing they are actually choosing between.
+                              */}
+                              {option.estimatedDate && (
+                                <span className="text-xs font-medium text-ink-2">
+                                  {formatDate(option.estimatedDate)}
+                                </span>
+                              )}
+                            </span>
+                            <span className="mt-0.5 block text-xs text-muted">{option.hint}</span>
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </fieldset>
               )}
 
               <fieldset>

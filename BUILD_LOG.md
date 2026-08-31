@@ -4372,3 +4372,88 @@ is the same trust already extended to anyone who can edit the catalogue.
 `script-src 'self'`, `connect-src 'self'` and `object-src 'none'` are untouched
 — the directives that stop code execution and exfiltration are the ones worth
 being strict about.
+
+---
+
+## Round 3, phase 15 — express delivery, a warehouse stage, and a board to work from
+
+Asked for as one thing — "tracking, fast delivery, a page in the CRM, and the
+customer sees it" — and it decomposed into four.
+
+### The promise is now made at checkout
+
+`estimatedDeliveryAt` used to stay **null** until a staff member marked the
+parcel shipped and typed a date. That is too late to be useful in the obvious
+way: a buyer choosing between next-day and standard is choosing a DATE, and
+they are choosing it before they pay. Until now the confirmation page could
+only say "we will let you know".
+
+So an order gets its promised date at creation, computed from the chosen speed.
+Staff can still revise it when the parcel actually ships — this is the promise,
+not an unchangeable prediction. Two existing tests asserted the old null and
+were updated; two more that exercise the "no shipping without an estimate"
+guard now clear the date first, because the guard is unreachable through the
+normal flow and is kept as defence for orders written before this change.
+
+**Express carries no surcharge, and that is a stated limit rather than an
+oversight.** Charging for it would put a delivery fee into the order total, the
+Stripe line items, the refund amount and the stock-restoring cancellation path
+— five places where a wrong number becomes a wrong amount of money. The promise
+is modelled; the pricing is not.
+
+### "At the warehouse"
+
+A sixth stage, inserted between `confirmed` and `shipped` rather than appended.
+The sequence is compared **by index** to decide whether a transition moves
+forward and when an estimate becomes mandatory, so appending it would have made
+"at the warehouse" a step *after* the parcel had left — nonsense that the
+ordering would then have enforced.
+
+It earns its place by covering the longest unexplained gap in the process: the
+parcel exists, it is on a shelf, and nobody has collected it. A customer
+watching "Confirmed" for two days assumes nothing is happening.
+
+### The delivery board
+
+A separate page from the order list, because they answer different questions.
+The list is a **ledger** — what did we sell, sorted by date, paginated. This is
+a **queue** — what should I deal with first. Bolting a priority sort onto the
+list would have made one screen do both jobs badly.
+
+The ranking cannot be a sort on a stored field: it compares the promised date
+against *today*, crossed with where the parcel is. A stored `priority` column
+would be wrong the moment the clock passes midnight and nothing writes to the
+order. So the server ranks the active set in memory — bounded, because
+delivered and cancelled orders are excluded at the database.
+
+    0  overdue           a promise is already broken
+    1  out for delivery  with a courier today; intervention still changes today
+    2  due today/tomorrow, express first
+    3  everything else, soonest first
+
+`out_for_delivery` outranking "due tomorrow" is deliberate: tomorrow's problem
+can be handled this afternoon.
+
+Three smaller decisions worth keeping:
+
+- **The client does not re-sort.** Two implementations of "urgent" is how a
+  row's badge and a row's position start disagreeing. The counts come from the
+  server's own ranking for the same reason.
+- **The board is scoped, not gated.** A rep sees the parcels on their own
+  orders — gating it to manager-or-admin would hide the queue from the person
+  physically holding the parcel. It would also have been the one endpoint that
+  hands a rep the whole book, so there is a test for exactly that.
+- **A zero tile is not coloured.** A red panel reading "0 overdue" is an alarm
+  for something that is not happening.
+
+Staff advance a parcel from the board without opening it, and the button names
+the next stage rather than saying "Advance" — somebody scanning a queue should
+not have to remember what follows "At the warehouse".
+
+### Proven end to end
+
+Not just unit-tested: a browser run places an express and a standard order,
+confirms express is promised sooner, makes one overdue, loads the board, clicks
+the advance button, and then checks the BUYER's tracking page shows "At the
+warehouse". That last hop is the whole feature — a staff change the customer
+can see — and it is the one a unit test cannot make a claim about.
