@@ -16,6 +16,8 @@ const {
   PAYMENT_METHOD_VALUES,
   STRIPE_PAYMENT_METHODS,
   MAX_ORDER_QTY,
+  DELIVERY_SPEED,
+  DELIVERY_SPEED_VALUES,
 } = require('../config/constants');
 
 /**
@@ -86,6 +88,23 @@ const checkout = asyncHandler(async (req, res) => {
   }
 
   /*
+   * How fast they asked for it.
+   *
+   * Absent means standard rather than an error, because this field arrived
+   * after the endpoint did: an older client, and every existing test, posts a
+   * checkout with no delivery speed at all, and refusing those would break
+   * working callers to enforce a field they have no way to know about. An
+   * explicitly WRONG value is still rejected — that is a client bug, not an
+   * older client.
+   */
+  const deliverySpeed = req.body.deliverySpeed ?? DELIVERY_SPEED.STANDARD;
+  if (!DELIVERY_SPEED_VALUES.includes(deliverySpeed)) {
+    throw ApiError.badRequest(
+      `deliverySpeed must be one of: ${DELIVERY_SPEED_VALUES.join(', ')}`
+    );
+  }
+
+  /*
    * A DELIVERY ADDRESS IS NOW REQUIRED, not defaulted to `addresses[0]`.
    *
    * The old fallback was written when a guest could type one inline and a buyer
@@ -112,10 +131,10 @@ const checkout = asyncHandler(async (req, res) => {
   };
 
   if (STRIPE_PAYMENT_METHODS.includes(paymentMethod)) {
-    return startStripeCheckout(req, res, { buyer, rawItems, shipping });
+    return startStripeCheckout(req, res, { buyer, rawItems, shipping, deliverySpeed });
   }
 
-  return placeUnpaidOrder(req, res, { buyer, rawItems, shipping, paymentMethod });
+  return placeUnpaidOrder(req, res, { buyer, rawItems, shipping, paymentMethod, deliverySpeed });
 });
 
 /**
@@ -125,7 +144,7 @@ const checkout = asyncHandler(async (req, res) => {
  * movement, no Customer created. The only write is the PendingCheckout, which
  * is disposable by design (it carries a TTL) and reserves nothing.
  */
-async function startStripeCheckout(req, res, { buyer, rawItems, shipping }) {
+async function startStripeCheckout(req, res, { buyer, rawItems, shipping, deliverySpeed }) {
   if (!stripeService.isEnabled()) {
     throw ApiError.badRequest(
       'Card payment is not available at the moment. Choose cash on delivery instead.'
@@ -203,6 +222,7 @@ async function startStripeCheckout(req, res, { buyer, rawItems, shipping }) {
     })),
     total,
     shipping,
+    deliverySpeed,
   });
 
   /*
@@ -225,7 +245,7 @@ async function startStripeCheckout(req, res, { buyer, rawItems, shipping }) {
  * start pending" rules. `payment.status` is left at its `unpaid` default, which
  * is the literal truth about an order nobody has paid for yet.
  */
-async function placeUnpaidOrder(req, res, { buyer, rawItems, shipping, paymentMethod }) {
+async function placeUnpaidOrder(req, res, { buyer, rawItems, shipping, paymentMethod, deliverySpeed }) {
   const order = await withTransaction(async (session) => {
     /*
      * RE-READ THE BUYER INSIDE THE TRANSACTION RATHER THAN USING `req.buyer`.
@@ -279,6 +299,7 @@ async function placeUnpaidOrder(req, res, { buyer, rawItems, shipping, paymentMe
         source: 'storefront',
         buyerId: buyer._id,
         paymentMethod,
+        deliverySpeed,
       },
       session
     );

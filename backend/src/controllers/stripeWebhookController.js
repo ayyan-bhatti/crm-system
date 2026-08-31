@@ -295,6 +295,14 @@ async function onCheckoutCompleted(session) {
           paymentMethod: PAYMENT_METHOD.CARD,
           payment,
           /*
+           * From the SNAPSHOT, not from anything current. The buyer chose
+           * next-day before they paid; by the time this event arrives their
+           * cart is gone and their session may be too, so the pending document
+           * is the only remaining record of what was promised — the same
+           * reasoning that makes it the authority on price and address.
+           */
+          deliverySpeed: fresh.deliverySpeed,
+          /*
            * The money is gone, so the inventory genuinely is too — even though
            * nobody has picked or posted anything and the order is correctly
            * still `pending`. This is exactly why `stockTakenAt` exists as a

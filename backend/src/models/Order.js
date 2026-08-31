@@ -7,6 +7,8 @@ const {
   FULFILMENT_STATUS_VALUES,
   PAYMENT_STATUS,
   PAYMENT_STATUS_VALUES,
+  DELIVERY_SPEED,
+  DELIVERY_SPEED_VALUES,
 } = require('../config/constants');
 
 /**
@@ -300,6 +302,30 @@ const orderSchema = new mongoose.Schema({
   estimatedDeliveryAt: {
     type: Date,
     default: null,
+  },
+
+  /**
+   * Standard or express, chosen by the buyer at checkout.
+   *
+   * WHY IT IS STORED RATHER THAN INFERRED FROM THE DATE. The estimate moves —
+   * a staff member can revise it when the parcel actually ships — and the
+   * moment it does, the promise the buyer paid for becomes unrecoverable from
+   * the record. Keeping the choice means "they paid for next day and it is now
+   * three days out" stays a question anyone can answer, which is exactly the
+   * order the delivery board needs to surface first.
+   *
+   * Defaults to standard so every order that predates this field, and every
+   * staff-placed order that does not mention it, reads correctly rather than
+   * as a missing value.
+   */
+  deliverySpeed: {
+    type: String,
+    enum: {
+      values: DELIVERY_SPEED_VALUES,
+      message: '{VALUE} is not a delivery speed',
+    },
+    default: DELIVERY_SPEED.STANDARD,
+    index: true,
   },
 
   /** When it actually arrived, if anyone said so. */

@@ -1,5 +1,10 @@
 const mongoose = require('mongoose');
-const { PENDING_CHECKOUT_STATUS, PENDING_CHECKOUT_STATUS_VALUES } = require('../config/constants');
+const {
+  PENDING_CHECKOUT_STATUS,
+  PENDING_CHECKOUT_STATUS_VALUES,
+  DELIVERY_SPEED,
+  DELIVERY_SPEED_VALUES,
+} = require('../config/constants');
 
 /**
  * A checkout that has been STARTED but not yet paid for.
@@ -113,6 +118,18 @@ const pendingCheckoutSchema = new mongoose.Schema({
     address: { type: String, default: '' },
     city: { type: String, default: '' },
     phone: { type: String, default: '' },
+  },
+
+  /**
+   * Snapshotted for the same reason the address is: the order is created later,
+   * by the webhook, from this document — not from whatever the buyer's cart or
+   * session says by then. They chose next-day and paid for next-day, so
+   * next-day is what has to survive the round trip through Stripe.
+   */
+  deliverySpeed: {
+    type: String,
+    enum: DELIVERY_SPEED_VALUES,
+    default: DELIVERY_SPEED.STANDARD,
   },
 
   status: {

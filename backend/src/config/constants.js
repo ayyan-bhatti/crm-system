@@ -113,6 +113,21 @@ const ORDER_STATUS = {
 const FULFILMENT_STATUS = {
   PROCESSING: 'processing',
   CONFIRMED: 'confirmed',
+  /**
+   * Picked and packed, waiting for a courier.
+   *
+   * Added because "Confirmed" and "Shipped" leave the longest real gap in the
+   * process unexplained — the parcel exists, it is on a shelf, and nobody has
+   * collected it. A customer watching "Confirmed" for two days assumes nothing
+   * is happening; "At the warehouse" says something did.
+   *
+   * Placed BEFORE `shipped` deliberately: the sequence is compared by index to
+   * decide whether a status change moves forward, and to decide when a delivery
+   * estimate becomes mandatory. Appending it would have made "at the warehouse"
+   * a step after the parcel had already left, which is nonsense the ordering
+   * would then have enforced.
+   */
+  AT_WAREHOUSE: 'at_warehouse',
   SHIPPED: 'shipped',
   OUT_FOR_DELIVERY: 'out_for_delivery',
   DELIVERED: 'delivered',
@@ -127,6 +142,7 @@ const FULFILMENT_STATUS = {
 const FULFILMENT_SEQUENCE = [
   FULFILMENT_STATUS.PROCESSING,
   FULFILMENT_STATUS.CONFIRMED,
+  FULFILMENT_STATUS.AT_WAREHOUSE,
   FULFILMENT_STATUS.SHIPPED,
   FULFILMENT_STATUS.OUT_FOR_DELIVERY,
   FULFILMENT_STATUS.DELIVERED,
@@ -136,11 +152,61 @@ const FULFILMENT_SEQUENCE = [
 const FULFILMENT_LABELS = {
   processing: 'Processing',
   confirmed: 'Confirmed',
+  at_warehouse: 'At the warehouse',
   shipped: 'Shipped',
   out_for_delivery: 'Out for delivery',
   delivered: 'Delivered',
   cancelled: 'Cancelled',
 };
+
+/**
+ * How fast the shop promises to get it there.
+ *
+ * A SERVICE LEVEL, NOT A LINE ITEM — express carries no surcharge here, and
+ * that is a deliberate limit rather than an oversight. Charging for it would
+ * mean the delivery fee joining the order total, the Stripe line items, the
+ * refund amount and the stock-restoring cancellation path, and every one of
+ * those is somewhere a wrong number becomes a wrong amount of money. The
+ * promise is modelled; the pricing is not. Adding a fee later means touching
+ * exactly those five places, knowingly.
+ *
+ * `days` is what turns a choice into a date: an order's estimated delivery is
+ * set from it AT CREATION rather than being left blank until somebody marks the
+ * parcel shipped. A buyer deciding between next-day and standard needs the date
+ * before they pay, not after a staff member gets round to it.
+ */
+const DELIVERY_SPEED = {
+  STANDARD: 'standard',
+  EXPRESS: 'express',
+};
+
+const DELIVERY_OPTIONS = [
+  {
+    value: DELIVERY_SPEED.STANDARD,
+    label: 'Standard delivery',
+    hint: 'Arrives in 3–5 working days.',
+    days: 4,
+  },
+  {
+    value: DELIVERY_SPEED.EXPRESS,
+    label: 'Express — next day',
+    hint: 'Ordered today, with you tomorrow. Free while we are getting started.',
+    days: 1,
+  },
+];
+
+/** Days to add to "now" for a given speed, falling back to standard. */
+function deliveryDaysFor(speed) {
+  const option = DELIVERY_OPTIONS.find((o) => o.value === speed);
+  return (option || DELIVERY_OPTIONS[0]).days;
+}
+
+/** The promised date for an order placed now at this speed. */
+function estimatedDeliveryFor(speed, from = new Date()) {
+  const due = new Date(from);
+  due.setDate(due.getDate() + deliveryDaysFor(speed));
+  return due;
+}
 
 /** Default stock level at or below which a product counts as "low stock". */
 const DEFAULT_LOW_STOCK_THRESHOLD = 10;
@@ -233,6 +299,11 @@ module.exports = {
   FULFILMENT_STATUS_VALUES: Object.values(FULFILMENT_STATUS),
   FULFILMENT_SEQUENCE,
   FULFILMENT_LABELS,
+  DELIVERY_SPEED,
+  DELIVERY_SPEED_VALUES: Object.values(DELIVERY_SPEED),
+  DELIVERY_OPTIONS,
+  deliveryDaysFor,
+  estimatedDeliveryFor,
   DEFAULT_LOW_STOCK_THRESHOLD,
   PAYMENT_METHOD,
   PAYMENT_METHOD_VALUES: Object.values(PAYMENT_METHOD),

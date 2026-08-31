@@ -11,6 +11,8 @@ const {
   FULFILMENT_STATUS,
   FULFILMENT_SEQUENCE,
   FULFILMENT_LABELS,
+  DELIVERY_SPEED,
+  estimatedDeliveryFor,
 } = require('../config/constants');
 const {
   hasFullRecordAccess,
@@ -1028,6 +1030,8 @@ async function placeOrder(
     takeStock = false,
     /** Pre-priced lines from a pending checkout — see the note below. */
     prebuiltItems = null,
+    /** Standard unless the buyer paid for next-day. */
+    deliverySpeed = DELIVERY_SPEED.STANDARD,
   },
   session
 ) {
@@ -1100,6 +1104,21 @@ async function placeOrder(
         source,
         buyerId,
         paymentMethod,
+        deliverySpeed,
+        /*
+         * THE PROMISE IS MADE AT CHECKOUT, NOT WHEN SOMEBODY GETS ROUND TO IT.
+         *
+         * The estimate used to stay null until a staff member marked the order
+         * shipped and typed a date. That is too late to be useful: a buyer
+         * choosing between next-day and standard is choosing a DATE, and they
+         * are choosing it before they pay. Leaving it blank meant the one
+         * screen where the answer matters — the confirmation page — could only
+         * say "we will let you know".
+         *
+         * Staff can still revise it when the parcel actually ships; this is the
+         * promise, not a prediction nobody may correct.
+         */
+        estimatedDeliveryAt: estimatedDeliveryFor(deliverySpeed),
       },
     ],
     { session }
@@ -1381,8 +1400,112 @@ const updateFulfilment = asyncHandler(async (req, res) => {
   res.json({ success: true, data: order });
 });
 
+/**
+ * GET /api/orders/deliveries
+ *
+ * Every order still on its way, ordered by how much trouble it is in.
+ *
+ * WHY THIS IS NOT `GET /api/orders?sort=urgent`.
+ *
+ * The priority that matters here cannot be expressed as a sort on a stored
+ * field. It is a comparison between two things — the promised date and today —
+ * crossed with where the parcel actually is, and Mongo has no index for
+ * "overdue". Bolting it onto the general list would mean either a `$expr` sort
+ * that cannot use an index, or a stored `priority` column that is wrong the
+ * moment the clock passes midnight and nothing writes to the order.
+ *
+ * So this endpoint answers one question — *what should someone deal with
+ * next?* — over the ACTIVE set only, which is small enough to rank in memory.
+ * Delivered and cancelled orders are excluded at the database, so the set is
+ * bounded by what is genuinely in flight rather than by the size of the order
+ * book.
+ *
+ * SCOPED, like every other order read. A sales rep sees the deliveries on
+ * their own orders and nobody else's — `orderScopeFilter` is the same gate the
+ * list uses, so this cannot become the one endpoint that leaks the book.
+ */
+const listDeliveries = asyncHandler(async (req, res) => {
+  const filter = {
+    ...(await orderScopeFilter(req.user)),
+    fulfilment: { $nin: [FULFILMENT_STATUS.DELIVERED, FULFILMENT_STATUS.CANCELLED] },
+    status: { $ne: ORDER_STATUS.CANCELLED },
+  };
+
+  /*
+   * A hard ceiling rather than paging. A delivery board that runs to page four
+   * has stopped being a board — if a shop ever has more than 200 parcels in
+   * flight, this needs to become a filtered queue per rep, not a longer list,
+   * and pretending otherwise with a paginator would hide that.
+   */
+  const orders = await Order.find(filter)
+    .populate(ORDER_POPULATE)
+    .sort({ createdAt: -1 })
+    .limit(200)
+    .lean();
+
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+
+  /**
+   * Lower sorts first. The ranking is deliberate and worth stating, because
+   * "urgent" is not one thing:
+   *
+   *   0  overdue          a promise is already broken
+   *   1  out for delivery with a courier today; any problem is happening NOW
+   *   2  due today or tomorrow, express first
+   *   3  everything else, soonest promise first
+   *
+   * `out_for_delivery` outranks "due tomorrow" on purpose. A parcel already
+   * with a courier is the one where an intervention still changes the outcome
+   * today; an order due tomorrow can be dealt with this afternoon.
+   */
+  const ranked = orders.map((order) => {
+    const due = order.estimatedDeliveryAt ? new Date(order.estimatedDeliveryAt) : null;
+    if (due) due.setHours(0, 0, 0, 0);
+
+    const daysLeft = due ? Math.round((due - startOfToday) / 86400000) : null;
+    const express = order.deliverySpeed === DELIVERY_SPEED.EXPRESS;
+
+    let band = 3;
+    if (daysLeft !== null && daysLeft < 0) band = 0;
+    else if (order.fulfilment === FULFILMENT_STATUS.OUT_FOR_DELIVERY) band = 1;
+    else if (daysLeft !== null && daysLeft <= 1) band = 2;
+
+    return { order, band, daysLeft, express };
+  });
+
+  ranked.sort((a, b) => {
+    if (a.band !== b.band) return a.band - b.band;
+    // Express before standard within a band: it is the tighter promise.
+    if (a.express !== b.express) return a.express ? -1 : 1;
+    // Then soonest promised date; orders with no date sort last.
+    if (a.daysLeft === null) return 1;
+    if (b.daysLeft === null) return -1;
+    return a.daysLeft - b.daysLeft;
+  });
+
+  res.json({
+    success: true,
+    count: ranked.length,
+    data: ranked.map((entry) => entry.order),
+    /*
+     * A count per band, so the page can lead with "3 overdue" without the
+     * client re-deriving a ranking the server just computed. Recomputing it
+     * there is how the two quietly disagree.
+     */
+    summary: {
+      overdue: ranked.filter((e) => e.band === 0).length,
+      outForDelivery: ranked.filter((e) => e.band === 1).length,
+      dueSoon: ranked.filter((e) => e.band === 2).length,
+      express: ranked.filter((e) => e.express).length,
+      total: ranked.length,
+    },
+  });
+});
+
 module.exports = {
   listOrders,
+  listDeliveries,
   requestOrderTransfer,
   placeOrder,
   buildOrderItems,

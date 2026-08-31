@@ -1,5 +1,9 @@
 const asyncHandler = require('../utils/asyncHandler');
-const { PAYMENT_METHOD } = require('../config/constants');
+const {
+  PAYMENT_METHOD,
+  DELIVERY_OPTIONS,
+  estimatedDeliveryFor,
+} = require('../config/constants');
 const stripeService = require('../services/stripeService');
 
 /**
@@ -63,6 +67,20 @@ const getStorefrontConfig = asyncHandler(async (req, res) => {
           unavailableReason: null,
         },
       ],
+
+      /*
+       * How fast the shop can get it there, published for the same reason the
+       * payment methods are: the checkout has to draw a real choice with a real
+       * date on it, and both the wording and the day count are the server's to
+       * decide. A hard-coded "3–5 days" in the frontend is a promise the
+       * backend has no idea it is making.
+       */
+      deliveryOptions: DELIVERY_OPTIONS.map((option) => ({
+        ...option,
+        // The actual date each choice would produce, resolved now, so the
+        // shopper compares dates rather than doing arithmetic on "days".
+        estimatedDate: estimatedDeliveryFor(option.value),
+      })),
     },
   });
 });

@@ -43,14 +43,24 @@ async function placedOrder(actor, overrides = {}) {
 const TOMORROW = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
 
 describe('The delivery status of a new order', () => {
-  it('starts at processing, with no dates set', async () => {
+  it('starts at processing, with a promised date and nothing else stamped', async () => {
     const admin = await createAdmin();
     const { order } = await placedOrder(admin);
 
     expect(order.fulfilment).toBe('processing');
     expect(order.shippedAt).toBeNull();
-    expect(order.estimatedDeliveryAt).toBeNull();
     expect(order.deliveredAt).toBeNull();
+
+    /*
+     * The estimate IS set at creation now. It used to stay null until a staff
+     * member marked the parcel shipped and typed a date, which is too late to
+     * be useful: a buyer choosing a delivery speed is choosing a DATE, and they
+     * choose it before they pay. Until this, the confirmation page could only
+     * say "we will let you know". Staff may still revise it when the parcel
+     * actually ships — this is the promise, not an unchangeable prediction.
+     */
+    expect(order.estimatedDeliveryAt).not.toBeNull();
+    expect(order.deliverySpeed).toBe('standard');
   });
 });
 
@@ -163,6 +173,17 @@ describe('The delivery estimate requirement', () => {
     const admin = await createAdmin();
     const { order } = await placedOrder(admin);
 
+    /*
+     * The estimate is cleared FIRST, because an order no longer arrives without
+     * one — it is set from the delivery speed at creation. The guard is
+     * therefore unreachable through the normal flow, and is kept as defence for
+     * the orders that predate that change: every order written before the field
+     * was auto-populated still has a null estimate, and none of them should be
+     * shippable without somebody supplying a date. That is exactly the state
+     * simulated here.
+     */
+    await Order.updateOne({ _id: order._id }, { estimatedDeliveryAt: null });
+
     const res = await api()
       .patch(`/api/orders/${order._id}/fulfilment`)
       .set(admin.headers)
@@ -180,6 +201,8 @@ describe('The delivery estimate requirement', () => {
   it('applies the same requirement to any stage past shipped', async () => {
     const admin = await createAdmin();
     const { order } = await placedOrder(admin);
+
+    await Order.updateOne({ _id: order._id }, { estimatedDeliveryAt: null });
 
     const res = await api()
       .patch(`/api/orders/${order._id}/fulfilment`)
