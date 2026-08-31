@@ -4345,3 +4345,30 @@ and inferring backwards.
 
 Second false documentation claim found in two phases. Both were sentences that
 described an intention as though it were a mechanism.
+
+### Postscript — the deployed site blocked every product image
+
+Chasing "what do I put in Vercel" turned up the reason the pictures were
+missing *there* even after the two client-side bugs above were fixed. The CSP
+in `vercel.json` said:
+
+```
+img-src 'self' data:
+```
+
+Correct for an internal tool, wrong for a shop. A product photo is a URL an
+operator types into the CRM, living on somebody else's host — so that directive
+forbade every one of them. The catalogue rendered generated initial tiles, which
+is the fallback doing exactly its job and, in doing so, hiding the cause.
+
+The nastiest part is that it **only happens when deployed**. `vite dev` serves
+no CSP header at all, so local development looked perfect while the deployed
+site showed lettered squares, and nothing in either environment pointed at the
+difference.
+
+Now `img-src 'self' data: https:`. An image URL cannot execute; the residual
+risk is a broken picture or a tracking pixel from a host an admin pasted, which
+is the same trust already extended to anyone who can edit the catalogue.
+`script-src 'self'`, `connect-src 'self'` and `object-src 'none'` are untouched
+— the directives that stop code execution and exfiltration are the ones worth
+being strict about.

@@ -45,7 +45,7 @@ default-src 'self';
 script-src 'self';
 style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
 font-src 'self' https://fonts.gstatic.com;
-img-src 'self' data:;
+img-src 'self' data: https:;
 connect-src 'self';
 frame-ancestors 'none';
 base-uri 'self';
@@ -59,7 +59,7 @@ object-src 'none'
 | `script-src 'self'` | **The directive that actually stops XSS.** No inline scripts, no CDNs — an injected `<script>` has no valid source, so the browser refuses to run it. |
 | `style-src … 'unsafe-inline'` | A real, deliberate weakening — see below. |
 | `font-src` / `style-src` Google | The app loads IBM Plex Sans from Google Fonts; these two hosts are exactly what that needs. |
-| `img-src 'self' data:` | `data:` covers the inline SVG icons used throughout the UI. |
+| `img-src 'self' data: https:` | `data:` covers the inline SVG icons and the generated "no photo yet" product tiles. `https:` is needed because a product photo is a URL an operator types into the CRM and lives on somebody else's host — the previous `'self' data:` blocked every product image on the deployed site while working locally, where no CSP is served. An image URL cannot execute; the residual risk is a broken picture or a tracking pixel from a host an admin pasted. |
 | `connect-src 'self'` | XHR and `fetch` may only reach our own API. Even a script that somehow ran could not exfiltrate data to an attacker's server. |
 | `frame-ancestors 'none'` | Nobody may put the app in a frame — clickjacking. |
 | `base-uri 'self'` | Stops an injected `<base>` tag repointing every relative URL on the page. |

@@ -1059,10 +1059,21 @@ response - it never reaches the HTML the browser executes scripts in.
   cannot carry comments: JSON has no comment syntax, and Vercel's schema rejects the
   `"//"` key sometimes used as a workaround — it fails the deploy outright.
 
-One deliberate weakening: `style-src` allows `'unsafe-inline'`, because Recharts sets style
-attributes at runtime and offers no nonce hook. Inline *style* risks defacement; inline
-*script* risks code execution, and `script-src 'self'` stays strict. `connect-src 'self'`
-means even a script that somehow ran could not exfiltrate anywhere.
+Two deliberate weakenings, and both are narrower than they look.
+
+`style-src` allows `'unsafe-inline'`, because Recharts sets style attributes at runtime and
+offers no nonce hook. Inline *style* risks defacement; inline *script* risks code execution,
+and `script-src 'self'` stays strict. `connect-src 'self'` means even a script that somehow
+ran could not exfiltrate anywhere.
+
+`img-src` allows `https:`. It was `'self' data:`, which is correct for an internal tool and
+**wrong for a shop**: a product photo is a URL an operator types into the CRM and it lives on
+somebody else's host, so that policy blocked every product image on the deployed site while
+working perfectly in local development, where no CSP header is served at all. The symptom was
+a catalogue of generated initial tiles — the fallback doing its job, hiding the cause. An
+image URL cannot execute; the residual risk is a broken picture or a tracking pixel from a
+host an admin pasted, which is the same trust already extended to anyone who can edit the
+catalogue. `script-src`, `connect-src` and `object-src` are untouched.
 
 ### Audit trail
 
