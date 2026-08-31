@@ -4131,3 +4131,124 @@ payment, webhook, order-only-after-webhook, replay safety, and a real refund res
 the right order. The clock skew is a machine-configuration problem for whoever runs this, and it
 is documented; the two code changes it prompted are about making that problem *visible* rather
 than working around it.
+
+---
+
+## Round 3, phase 13 — the storefront as a shopper actually meets it
+
+Four complaints, all from looking at the running shop rather than at the tests.
+Three were real bugs; the fourth was a dependency that had quietly died.
+
+### "Card payment is not available at the moment"
+
+The checkout page offered **Pay by card as the pre-selected default** and only
+discovered it was dead when the buyer pressed the button. The comment in
+`config/env.js` had claimed this could not happen — "a shop that OFFERS a card
+button leading nowhere is worse than both, so the button is gated on this rather
+than shown optimistically". That was true of the API and false of the UI: the
+method list was a hard-coded constant in `Checkout.jsx`, and nothing ever asked
+the server whether Stripe was configured.
+
+A capability the server owns has to be published by the server, so there is now
+`GET /api/shop/config`. Card is shown **disabled with its reason** rather than
+hidden — "we don't take cards" and "we take cards, not right now" are different
+facts, and an absence silently asserts the first.
+
+Two smaller things fell out of it. The submit button is disabled until a method
+is settled, because the label otherwise flipped from "Place order" to "Pay $20"
+a tick after mount — under the cursor, on the button that takes the money. And
+selecting a default had to wait for the real list: picking from the fallback on
+mount landed on cash on delivery, and the "keep the current choice if it is
+still valid" rule then *kept* it when the real config arrived saying card was
+fine. A store with Stripe configured silently stopped defaulting to card.
+
+The end-to-end test for this used to **assert the bug** — it checked that card
+was pre-selected and that pressing Pay produced a readable error, and it passed.
+It now asserts the corrected behaviour and that the order completes.
+
+### "I can only buy 10 items"
+
+The quantity control was a `<select>` hard-coded to 1–10, which was wrong in
+both directions simultaneously: it offered ten of a product we had three of, so
+the shopper chose a number and got a stock error they had no way to anticipate;
+and it refused to sell twelve reams of paper we had two hundred of.
+
+The catalogue now publishes `maxOrderQty`, per product and per variant, and the
+control is a stepper with a typable field. Two judgment calls worth recording:
+
+- **This discloses a count**, reversing the projection's careful rule about
+  never publishing `stockQty`. Withholding it did not keep it secret — it just
+  moved where the shopper found out, which was an error message. Above the cap
+  it says "at least 20", which is the same non-answer as before.
+- **There is now a real ceiling**, `MAX_ORDER_QTY`. There was none anywhere:
+  `existing.quantity += qty` on a repeated add climbed as far as anyone cared to
+  push it. That is a denial-of-stock hole. It is enforced on the cart AND at
+  checkout — a guest cart lives in the browser and is posted straight to
+  checkout, so enforcing it only on the cart would leave the lock on the door
+  nobody uses. The merge path *clamps* instead of refusing, because it runs
+  during login and a guest cart of 12 meeting a server cart of 15 is one shopper
+  twice, not a request for 27. Staff orders are exempt: a rep entering 500 units
+  is doing their job.
+
+### "There is no detail, no description"
+
+A product with an empty `description` rendered nothing at all — so every product
+created through the CRM started life as its emptiest page: a name, a price, and
+whitespace. The page now says the true thing (the details are not written yet)
+and fills the space with facts the shop genuinely knows: delivery, returns,
+support. It does not invent claims about the product.
+
+### "Make sure pictures are also available"
+
+Two separate problems, and only the second was visible.
+
+The demo catalogue pointed at **picsum.photos, which is unreachable** from the
+network this was run on. It did not 404 — it hung, so `onError` never fired and
+every product rendered as a blank grey square with nothing in the console. The
+shop looked abandoned and nothing said why.
+
+That is also the more general lesson: **a dead image host is silent, not loud**,
+so `onError` alone is not a fallback strategy. `ProductImage` now has a six
+second timeout as well, and is used everywhere a product photo appears —
+including the CRM's own preview, which previously *hid* a broken image and left
+its "shown as it will look on the storefront" caption beside empty space.
+
+The seed also moved to keyword-matched photos. picsum served a random image per
+seed, so "Standing Desk" reliably illustrated itself with something that was not
+a desk — a catalogue where every picture is confidently wrong is less
+trustworthy than one with none. The generated initials tile remains the
+guaranteed floor for when the network is gone entirely.
+
+### Delivery urgency
+
+Asked for directly, and the reasoning is worth keeping. The estimate was already
+on the page — in grey, in the same weight as everything around it — which is
+fine on the day it is set and useless on the day before it expires. "Estimated
+delivery 2 September" and "arriving tomorrow, still in Processing" read the same
+and are completely different facts.
+
+`deliveryUrgency` grades an order **overdue / tomorrow / soon / on track**, and
+two decisions keep the alarm meaningful:
+
+- **Delivered and cancelled orders are always silent**, whatever the stored date
+  says. An order that arrived last week is not overdue, and painting settled
+  rows red is the fastest way to teach staff that the red ones can be ignored —
+  which is exactly what makes a genuine one invisible.
+- **The badge renders nothing on a calm order.** A chip on every row is a
+  column, not a signal.
+
+Comparison is on calendar days, not elapsed milliseconds: an order due tomorrow
+at 09:00 is due tomorrow whether it is now 08:00 or 23:00. Proven in the running
+app, not only in unit tests — three orders shipped with dates nine days out,
+tomorrow, and three days past showed exactly one amber chip, one red one, and
+nothing on the third.
+
+### A latent flake this exposed
+
+`storefront.spec.js` asserted `getByRole('link', { name: /^sign in$/i })`
+unscoped, while both the header and the footer have that link. It had been
+ambiguous since the footer's account column was added and passed only by winning
+a race — running before the header re-rendered after sign-out, when the footer's
+link was the only match. So it went green while proving nothing about the header,
+which is the thing the test is named after. Now scoped to the banner.
+

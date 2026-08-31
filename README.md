@@ -182,6 +182,15 @@ option and takes cash-on-delivery orders exactly as before. To turn it on:
 > that sequence looks like an error to the person who just spent money. The app warns
 > about exactly this at boot in production, and `GET /api/health` reports it.
 
+**The storefront asks whether card payment works — it does not assume.** `GET
+/api/shop/config` reports which payment methods this deployment can actually take, and the
+checkout page draws itself from that. With no Stripe key the card option renders **disabled
+with its reason**, and the selection defaults to a method that works. It is shown rather
+than hidden on purpose: "we don't take cards" and "we take cards, not right now" are
+different facts, and an absence asserts the first. Before this, the page hard-coded its
+method list and offered card as the pre-selected default on stores with no key — the buyer
+found out at the button.
+
 **No order exists until the webhook confirms payment.** The checkout endpoint writes a
 short-lived `PendingCheckout` and hands back a Stripe URL; the order, and the stock
 decrement, happen only when `checkout.session.completed` arrives and says `paid`. An
