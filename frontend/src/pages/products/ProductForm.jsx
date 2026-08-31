@@ -6,6 +6,7 @@ import useFetch from '../../hooks/useFetch';
 import { Card, ErrorBanner, Field, PageHeader, Spinner } from '../../components/common';
 import { useToast } from '../../components/Toast';
 import { btnPrimary, btnSecondary, input, money } from '../../ui';
+import ProductImage from '../../components/shop/ProductImage';
 
 /** A blank variant row. Black is a neutral starting colour, not a suggestion. */
 function emptyVariant() {
@@ -243,29 +244,39 @@ export default function ProductForm() {
             />
           </Field>
 
-          <Field label="Description" hint="A short paragraph shown on the product page.">
+          <Field
+            label="Description"
+            hint="Shown to shoppers on the product page. Leave it blank and that page has a name, a price and nothing else — this is most of what sells the item."
+          >
             <textarea
-              rows={3}
+              rows={4}
               className={input}
               value={form.description}
               onChange={(e) => update('description', e.target.value)}
             />
           </Field>
 
+          {/*
+            An honest preview, which the previous one was not.
+            It hid the image on error and left a caption reading "shown as it
+            will look on the storefront" beside empty space — so a dead URL
+            looked like a rendering quirk in this form rather than like the
+            broken picture every shopper was about to get. `ProductImage` is the
+            same component the storefront uses, so what appears here IS what
+            appears there, including the fallback.
+          */}
           {form.imageUrl && (
             <div className="flex items-center gap-3 rounded-lg border border-hairline bg-plane p-3">
-              <img
+              <ProductImage
+                product={{ ...form, _id: id }}
                 src={form.imageUrl}
                 alt=""
-                onError={(e) => {
-                  e.currentTarget.style.display = 'none';
-                }}
-                onLoad={(e) => {
-                  e.currentTarget.style.display = '';
-                }}
-                className="h-16 w-16 rounded-md border border-hairline bg-neutral-wash object-cover"
+                className="h-16 w-16 shrink-0 rounded-md border border-hairline bg-neutral-wash object-cover"
               />
-              <p className="text-xs text-muted">Preview — shown as it will look on the storefront.</p>
+              <p className="text-xs text-muted">
+                Preview — exactly what the storefront will render. If this shows initials rather
+                than a photo, the link did not load and shoppers will see the same thing.
+              </p>
             </div>
           )}
 

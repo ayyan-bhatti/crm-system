@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import ColourSwatches from './ColourSwatches';
 import { money, galleryFor, priceRange } from '../../ui';
+import ProductImage from './ProductImage';
 
 /**
  * One tile in the catalogue grid.
@@ -35,21 +36,21 @@ export default function ProductCard({ product, onQuickView }) {
         className="hover-lift block overflow-hidden rounded-xl border border-hairline bg-surface"
       >
         <div className="relative aspect-square overflow-hidden bg-neutral-wash">
-          <img
+          <ProductImage
+            product={product}
             src={images[0]}
             alt=""
-            loading="lazy"
-            className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-300 ${
+            className={`absolute inset-0 h-full w-full object-cover transition-[opacity,transform] duration-500 ${
               hovered && secondary ? 'opacity-0' : 'opacity-100'
-            }`}
+            } ${hovered && !secondary ? 'scale-[1.04]' : 'scale-100'}`}
           />
           {secondary && (
-            <img
+            <ProductImage
+              product={product}
               src={secondary}
               alt=""
-              loading="lazy"
               aria-hidden="true"
-              className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-300 ${
+              className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-500 ${
                 hovered ? 'opacity-100' : 'opacity-0'
               }`}
             />

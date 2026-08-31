@@ -4,6 +4,7 @@ import { useCart, lineKey } from '../context/CartContext';
 import { useToast } from './Toast';
 import { errorMessage } from '../api/client';
 import { money, variantLabel, galleryFor } from '../ui';
+import ProductImage from './shop/ProductImage';
 
 /**
  * The cart drawer — a slide-in panel rather than a full-page cart for the
@@ -98,7 +99,8 @@ export default function CartDrawer({ open, onClose }) {
                 return (
                   <li key={key} className="flex gap-3">
                     <div className="h-16 w-16 flex-shrink-0 overflow-hidden rounded-lg bg-neutral-wash">
-                      <img
+                      <ProductImage
+                        product={line.product}
                         src={galleryFor(line.product)[0]}
                         alt=""
                         className="h-full w-full object-cover"

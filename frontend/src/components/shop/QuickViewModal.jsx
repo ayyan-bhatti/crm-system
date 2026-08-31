@@ -6,6 +6,7 @@ import { useToast } from '../Toast';
 import { errorMessage } from '../../api/client';
 import { Spinner } from '../common';
 import { btnPrimary, btnSecondary, galleryFor, money } from '../../ui';
+import ProductImage from './ProductImage';
 
 /**
  * Product details in a dialog, without leaving the grid.
@@ -97,7 +98,8 @@ export default function QuickViewModal({ product, onClose }) {
 
         <div className="grid gap-6 p-5 sm:grid-cols-2 sm:p-6">
           <div className="aspect-square overflow-hidden rounded-xl bg-neutral-wash">
-            <img
+            <ProductImage
+              product={product}
               src={galleryFor(product)[0]}
               alt=""
               className="h-full w-full object-cover"

@@ -28,14 +28,41 @@ const USERS = [
   { name: 'Omar Farooq', email: 'omar@simplecrm.test', role: ROLES.SALES_REP },
 ];
 
-// `imageUrl` uses picsum.photos, seeded per SKU so the same product always
-// gets the same photo across re-seeds. This is a stand-in, not real product
-// photography, but it means the storefront looks fully populated out of the
-// box rather than showing the generated "no photo yet" placeholder on every
-// single card — that placeholder exists for products created without
-// bothering to add one, not for the demo catalogue itself.
-function demoImage(sku, index = 0) {
-  return `https://picsum.photos/seed/${sku.toLowerCase()}${index ? `-${index}` : ''}/640/640`;
+/**
+ * A stand-in photograph for a seeded product.
+ *
+ * WHY THIS IS KEYWORD-BASED AND NO LONGER picsum.photos.
+ *
+ * Two separate problems, and only the second one was obvious.
+ *
+ * The first is relevance. picsum serves a random photograph per seed — a
+ * landscape, a face, a building — so "Standing Desk" reliably illustrated
+ * itself with something that was not a desk. A demo catalogue where every
+ * picture is confidently wrong is not more populated than one with none; it is
+ * less trustworthy, because the mismatch is the first thing a viewer notices.
+ *
+ * The second is that picsum.photos was simply UNREACHABLE from the network this
+ * was last run on. It did not 404 — it hung until the browser gave up, so no
+ * `onError` ever fired and every product rendered as a blank grey square with
+ * nothing in the console to explain it. The storefront looked abandoned. That
+ * is also why `ProductImage` now has a timeout rather than relying on `onError`
+ * alone: a dead host is silent, not loud.
+ *
+ * LoremFlickr takes keywords, so the photo is at least in the right category,
+ * and `lock` keyed on the SKU keeps one product on one photograph across
+ * re-seeds — without it the catalogue reshuffles its own images on every page
+ * load, which looks worse than having none.
+ *
+ * Still a stand-in, not real product photography. The generated tile in
+ * `ui.js` remains the guaranteed floor for when this host is unreachable too.
+ */
+function demoImage(sku, index = 0, keywords = 'product') {
+  const lock = `${sku.toLowerCase()}${index ? `-${index}` : ''}`
+    .split('')
+    .reduce((hash, char) => (hash * 31 + char.charCodeAt(0)) >>> 0, 7)
+    % 100000;
+
+  return `https://loremflickr.com/640/640/${encodeURIComponent(keywords)}?lock=${lock}`;
 }
 
 /**
@@ -165,16 +192,32 @@ const PRODUCTS = [
 ].map((product) => {
   const variants = VARIANTS[product.sku];
 
+  /*
+   * Keywords for the stand-in photo, taken from the product's own name and
+   * category — so "Standing Desk" in Furniture asks for a picture of a desk
+   * rather than for whatever the random-photo endpoint felt like returning.
+   * Bracketed pack sizes are dropped ("A4 Paper (5 reams)" wants *paper*).
+   */
+  const keywords = [
+    ...product.name
+      .replace(/\([^)]*\)/g, ' ')
+      .toLowerCase()
+      .split(/\s+/)
+      .filter((word) => word.length > 2)
+      .slice(0, 2),
+    product.category.toLowerCase(),
+  ].join(',');
+
   return {
     ...product,
-    imageUrl: demoImage(product.sku),
+    imageUrl: demoImage(product.sku, 0, keywords),
     /*
      * A second image on every product, so the storefront card's hover-swap has
      * something to swap TO. A card whose hover state does nothing looks broken
      * rather than restrained, and with one seeded image that is what every card
      * would do.
      */
-    images: [demoImage(product.sku, 2), demoImage(product.sku, 3)],
+    images: [demoImage(product.sku, 2, keywords), demoImage(product.sku, 3, keywords)],
     ...(variants ? { variants } : {}),
     /*
      * Where a product has variants, its own `stockQty` is the SUM of them. The

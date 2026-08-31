@@ -148,7 +148,7 @@ const SEED = {
     // Seeded so the storefront grid renders a real image rather than the
     // generated "no photo yet" placeholder — the specs assert on product
     // cards, and a placeholder is a correct but less representative render.
-    imageUrl: 'https://picsum.photos/seed/e2e-bw-1/480/480',
+    imageUrl: 'https://loremflickr.com/480/480/widget,tools?lock=4211',
     description: 'A dependable blue widget, used by the end-to-end specs.',
   },
   /*
@@ -165,7 +165,7 @@ const SEED = {
     sku: 'E2E-TJ-1',
     price: 80,
     category: 'Outerwear',
-    imageUrl: 'https://picsum.photos/seed/e2e-tj-1/480/480',
+    imageUrl: 'https://loremflickr.com/480/480/jacket,outerwear?lock=8823',
     description: 'A weatherproof jacket, sold in two colours.',
     variants: [
       { color: { name: 'Midnight', hex: '#111827' }, size: 'M', stockQty: 6 },
