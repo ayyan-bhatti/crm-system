@@ -38,8 +38,41 @@ vi.mock('../../api/shopResources', () => ({
     removeItem: vi.fn(),
     merge: vi.fn(),
   },
-  shopCheckoutApi: { checkout: vi.fn(), session: vi.fn(), reconcile: vi.fn() },
+  shopCheckoutApi: {
+    checkout: vi.fn(),
+    session: vi.fn(),
+    reconcile: vi.fn(),
+    config: vi.fn(),
+  },
 }));
+
+/**
+ * What `GET /api/shop/config` says on a store with Stripe configured.
+ *
+ * The page no longer hard-codes its payment methods — it asks the server, for
+ * the reason spelled out in Checkout.jsx: whether a card can be taken depends
+ * on a secret only the server holds, and this page used to assert it and offer
+ * a dead pre-selected option on stores without one.
+ */
+const CONFIG_WITH_CARD = {
+  paymentMethods: [
+    { value: 'card', label: 'Pay by card', hint: 'Stripe.', available: true },
+    { value: 'cod', label: 'Cash on delivery', hint: 'Pay the courier.', available: true },
+  ],
+};
+
+const CONFIG_WITHOUT_CARD = {
+  paymentMethods: [
+    {
+      value: 'card',
+      label: 'Pay by card',
+      hint: 'Stripe.',
+      available: false,
+      unavailableReason: 'Card payment is not set up on this store yet.',
+    },
+    { value: 'cod', label: 'Cash on delivery', hint: 'Pay the courier.', available: true },
+  ],
+};
 
 /**
  * `window.location.assign` is what hands the browser over to Stripe, and jsdom
@@ -93,6 +126,9 @@ describe('Checkout', () => {
   beforeEach(() => {
     localStorage.clear();
     vi.clearAllMocks();
+    // Card available unless a test says otherwise, which is the configuration
+    // the existing card-path coverage below assumes.
+    shopCheckoutApi.config.mockResolvedValue(CONFIG_WITH_CARD);
   });
 
   /**
@@ -165,7 +201,7 @@ describe('Checkout', () => {
       await screen.findByText('Home');
       // Card is the default, so cash on delivery has to be chosen explicitly.
       await user.click(screen.getByRole('radio', { name: /cash on delivery/i }));
-      await user.click(screen.getByRole('button', { name: /place order/i }));
+      await user.click(await screen.findByRole('button', { name: /place order/i }));
 
       await waitFor(() =>
         expect(shopCheckoutApi.checkout).toHaveBeenCalledWith(
@@ -204,7 +240,7 @@ describe('Checkout', () => {
       renderCheckout();
 
       await screen.findByText('Home');
-      await user.click(screen.getByRole('button', { name: /^pay/i }));
+      await user.click(await screen.findByRole('button', { name: /^pay/i }));
 
       await waitFor(() =>
         expect(shopCheckoutApi.checkout).toHaveBeenCalledWith(
@@ -250,7 +286,7 @@ describe('Checkout', () => {
       expect(screen.getByText('Midnight / M')).toBeInTheDocument();
 
       await user.click(screen.getByRole('radio', { name: /cash on delivery/i }));
-      await user.click(screen.getByRole('button', { name: /place order/i }));
+      await user.click(await screen.findByRole('button', { name: /place order/i }));
 
       await waitFor(() =>
         expect(shopCheckoutApi.checkout).toHaveBeenCalledWith(
@@ -258,6 +294,66 @@ describe('Checkout', () => {
           'addr-1',
           'cod'
         )
+      );
+    });
+
+    /**
+     * THE BUG THIS COVERAGE EXISTS FOR.
+     *
+     * On a deployment with no Stripe key, this page used to render "Pay by
+     * card" as the pre-selected default, because the method list was a constant
+     * in the frontend and nothing ever asked the server whether a card could
+     * actually be taken. The buyer picked an address, pressed Pay, and got a
+     * red banner telling them to choose something else — on the one screen
+     * where a shop must not look broken.
+     *
+     * Three things have to hold, and each is a separate way of getting it
+     * wrong: the option must be disabled (not merely unselected), the reason
+     * must be visible without pressing anything, and the selection must land on
+     * a method that works.
+     */
+    it('disables card payment, and does not preselect it, when the server cannot take one', async () => {
+      shopCheckoutApi.config.mockResolvedValue(CONFIG_WITHOUT_CARD);
+      shopAuthApi.me.mockResolvedValue({
+        _id: 'b1',
+        name: 'Amina Raza',
+        addresses: [{ _id: 'addr-1', label: 'Home', address: '12 Mall Road', city: 'Lahore' }],
+      });
+      shopCartApi.get.mockResolvedValue({ items: [guestLine] });
+
+      renderCheckout();
+      await screen.findByText('Home');
+
+      const card = await screen.findByRole('radio', { name: /pay by card/i });
+      await waitFor(() => expect(card).toBeDisabled());
+      expect(card).not.toBeChecked();
+
+      // The reason is on the page, not behind a failed submit.
+      expect(screen.getByText(/not set up on this store yet/i)).toBeInTheDocument();
+
+      // And the selection fell through to something that actually works.
+      expect(screen.getByRole('radio', { name: /cash on delivery/i })).toBeChecked();
+    });
+
+    /**
+     * The config request failing must not block a sale this page can still
+     * take: the fallback list offers the two methods that need no
+     * configuration, so cash on delivery stays selectable.
+     */
+    it('still takes a cash order when the config request fails', async () => {
+      shopCheckoutApi.config.mockRejectedValue(apiError(500, 'boom'));
+      shopAuthApi.me.mockResolvedValue({
+        _id: 'b1',
+        name: 'Amina Raza',
+        addresses: [{ _id: 'addr-1', label: 'Home', address: '12 Mall Road', city: 'Lahore' }],
+      });
+      shopCartApi.get.mockResolvedValue({ items: [guestLine] });
+
+      renderCheckout();
+      await screen.findByText('Home');
+
+      await waitFor(() =>
+        expect(screen.getByRole('radio', { name: /cash on delivery/i })).toBeChecked()
       );
     });
   });

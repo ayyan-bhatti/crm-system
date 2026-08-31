@@ -76,6 +76,16 @@ export const shopCartApi = {
 
 export const shopCheckoutApi = {
   /**
+   * Which payment methods this deployment can actually take.
+   *
+   * Public and unauthenticated, because the checkout page needs it to draw
+   * itself correctly and a signed-out visitor reaches that page too. Asking the
+   * server is the point: whether card payment works depends on a secret only
+   * the server holds, so any client-side guess is a guess.
+   */
+  config: () => shopClient.get('/shop/config').then((r) => r.data.data),
+
+  /**
    * Start a checkout. Returns the whole response body, not `data`, because the
    * two payment paths return genuinely different things and the caller has to
    * tell them apart:

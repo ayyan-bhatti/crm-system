@@ -114,7 +114,9 @@ test.describe('Product detail and guest cart', () => {
     await expect(page).toHaveURL(/\/products\/[a-f0-9]{24}/);
     await expect(page.getByRole('heading', { name: 'Blue Widget' })).toBeVisible();
     await expect(page.getByText('$25.00')).toBeVisible();
-    await expect(main(page).getByText('In stock', { exact: true })).toBeVisible();
+    // "In stock, ready to ship" rather than a bare "In stock" — the detail page
+    // now says what the state means for the shopper, not just what it is.
+    await expect(main(page).getByText(/in stock, ready to ship/i)).toBeVisible();
 
     await page.getByRole('button', { name: /add to cart/i }).click();
 
@@ -171,7 +173,14 @@ test.describe('Checkout requires a buyer account', () => {
     await page.goto('/products');
     await page.getByRole('link', { name: /Blue Widget/i }).click();
 
-    await page.getByLabel(/quantity/i).selectOption('2');
+    /*
+     * The quantity control is a stepper now, not a 1–10 `<select>`. The old
+     * dropdown was wrong in both directions at once — it offered ten of a
+     * product we had three of, and refused to sell twelve of one we had two
+     * hundred of — so the ceiling comes from the server per product and per
+     * variant. Pressing "+" is also what a real shopper does.
+     */
+    await page.getByRole('button', { name: 'Increase quantity' }).click();
     await page.getByRole('button', { name: /add to cart/i }).click();
     await expect(page.getByLabel('Cart, 2 items')).toBeVisible();
 
@@ -226,7 +235,18 @@ test.describe('Buyer registration and session', () => {
     await expect(page.getByText(new RegExp(`hi, ${BUYER.name.split(' ')[0]}`, 'i'))).toBeVisible();
 
     await page.getByRole('button', { name: /sign out/i }).click();
-    await expect(page.getByRole('link', { name: /^sign in$/i })).toBeVisible();
+    /*
+     * Scoped to the HEADER, because the footer has a "Sign in" link too.
+     *
+     * Unscoped, this assertion was ambiguous from the day the footer's account
+     * column was added, and it passed only by winning a race: run it before the
+     * header had re-rendered after sign-out and just one match existed — the
+     * footer's — so it went green while proving nothing about the header, which
+     * is the thing the test is named after. It failed the moment unrelated
+     * timing shifted. Naming the region is both the fix and the assertion the
+     * test meant to make.
+     */
+    await expect(page.getByRole('banner').getByRole('link', { name: /^sign in$/i })).toBeVisible();
   });
 
   /**
@@ -354,30 +374,49 @@ test.describe('Cart merge and buyer checkout', () => {
   });
 
   /**
-   * The card path, as far as it can be taken without leaving localhost.
+   * A store that cannot take cards must not offer to take one.
    *
-   * STRIPE IS NOT CONFIGURED in the e2e environment, so the server refuses the
-   * card path with a readable message rather than half-completing it. That is
-   * worth asserting on its own: the failure a shopper meets when payments are
-   * unconfigured should be a sentence telling them to use another method, not
-   * a blank page or a 500.
+   * THIS TEST USED TO ASSERT THE BUG. Stripe is deliberately unconfigured in
+   * the e2e environment, and the old version checked that "Pay by card" was
+   * PRE-SELECTED and then that pressing Pay produced a readable error. It
+   * passed, and it was describing a genuinely bad experience as if it were the
+   * design: the shopper picked an address, pressed the button that takes their
+   * money, and only then learned the shop could not take it.
+   *
+   * The method list comes from `GET /api/shop/config` now, so the page knows
+   * before it draws itself. What is asserted here is the corrected behaviour:
+   * the option is visible but disabled, the reason is on the page without
+   * pressing anything, the selection lands on a method that works, and the
+   * order goes through.
+   *
+   * Card is still SHOWN rather than hidden, for the same reason a sold-out size
+   * is: "we don't take cards" and "we take cards, not right now" are different
+   * facts, and an absence silently asserts the first.
    */
-  test('offers card payment and fails clearly when Stripe is not configured', async ({ page }) => {
+  test('disables card payment, with a reason, when Stripe is not configured', async ({ page }) => {
     await signInBuyer(page);
     await page.goto('/products');
     await page.getByRole('link', { name: /Blue Widget/i }).click();
     await page.getByRole('button', { name: /add to cart/i }).click();
 
     await page.goto('/checkout');
-    await expect(page.getByRole('radio', { name: /pay by card/i })).toBeChecked();
-    await expect(page.getByText(/never reach this site/i)).toBeVisible();
 
-    await page.getByRole('button', { name: /^pay/i }).click();
+    const card = page.getByRole('radio', { name: /pay by card/i });
+    await expect(card).toBeDisabled();
+    await expect(card).not.toBeChecked();
+    await expect(page.getByText(/not set up on this store yet/i)).toBeVisible();
 
-    await expect(page.getByText(/card payment is not available/i)).toBeVisible();
-    // Still on checkout, cart intact — nothing half-happened.
-    await expect(page).toHaveURL(/\/checkout/);
-    await expect(page.getByLabel(/cart, 1 item/i)).toBeVisible();
+    // The selection fell through to something that actually works, and the
+    // button describes THAT rather than a payment it cannot take.
+    await expect(page.getByRole('radio', { name: /cash on delivery/i })).toBeChecked();
+
+    const submit = page.getByRole('button', { name: /place order/i });
+    await expect(submit).toBeEnabled();
+    await submit.click();
+
+    // And the order genuinely completes — no dead end anywhere in the flow.
+    await expect(page).toHaveURL(/\/order-confirmation/);
+    await expect(page.getByRole('heading', { name: /thank you for your order/i })).toBeVisible();
   });
 });
 

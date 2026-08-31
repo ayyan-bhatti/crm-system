@@ -5,31 +5,44 @@ import { useCart, lineKey } from '../../context/CartContext';
 import { shopCheckoutApi, shopAuthApi } from '../../api/shopResources';
 import { errorMessage } from '../../api/client';
 import { Card, ErrorBanner, Field, Spinner } from '../../components/common';
-import { btnPrimary, btnSecondary, money, variantLabel } from '../../ui';
+import { btnPrimary, btnSecondary, galleryFor, money, variantLabel } from '../../ui';
+import ProductImage from '../../components/shop/ProductImage';
 
 /**
- * How the shop can be paid.
+ * What to show before `GET /api/shop/config` answers.
  *
- * `card` is the only one that involves a processor. The other two are a note to
- * whoever fulfils the order about how they will collect, and the copy says so
- * rather than implying a payment is being taken — an order placed this way is
- * genuinely `unpaid` until somebody collects the money.
+ * THE LIST USED TO BE HARD-CODED HERE, and that was a real bug rather than an
+ * untidiness. Whether this deployment can take a card is a fact only the server
+ * knows — it depends on `STRIPE_SECRET_KEY` — and this page asserted it instead,
+ * offering "Pay by card" as the PRE-SELECTED default on a store with no Stripe
+ * key at all. The buyer picked an address, pressed Pay, and got a red banner
+ * telling them to choose something else. On the one screen where a shop must
+ * not look broken.
+ *
+ * So the real list comes from the server now, and this is only the shape used
+ * while that request is in flight. `available: false` on card is the safe way
+ * round: if the config call never returns, the page offers the methods that
+ * always work rather than the one that might not.
  */
-const PAYMENT_METHODS = [
+const FALLBACK_PAYMENT_METHODS = [
   {
     value: 'card',
     label: 'Pay by card',
     hint: 'You will be taken to Stripe to pay securely. Your card details never reach this site.',
+    available: false,
+    unavailableReason: 'Checking availability…',
   },
   {
     value: 'cod',
     label: 'Cash on delivery',
     hint: 'Pay the courier when your order arrives.',
+    available: true,
   },
   {
     value: 'bank_transfer',
     label: 'Bank transfer',
     hint: 'We will send you account details once the order is confirmed.',
+    available: true,
   },
 ];
 
@@ -61,7 +74,9 @@ export default function Checkout() {
   const [params] = useSearchParams();
 
   const [addressId, setAddressId] = useState('');
-  const [paymentMethod, setPaymentMethod] = useState('card');
+  const [paymentMethods, setPaymentMethods] = useState(FALLBACK_PAYMENT_METHODS);
+  const [paymentMethod, setPaymentMethod] = useState('');
+  const [configResolved, setConfigResolved] = useState(false);
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [addingAddress, setAddingAddress] = useState(false);
@@ -72,6 +87,62 @@ export default function Checkout() {
     if (isSignedIn && addresses.length && !addressId) setAddressId(addresses[0]._id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isSignedIn, buyer]);
+
+  /*
+   * Ask the server what it can actually take.
+   *
+   * A failure here is deliberately swallowed rather than shown: the fallback
+   * list already offers the two methods that need no configuration, so a
+   * shopper can still complete an order. Turning a config hiccup into a red
+   * banner on the checkout page would block a sale this page is perfectly
+   * capable of taking.
+   */
+  useEffect(() => {
+    let cancelled = false;
+    shopCheckoutApi
+      .config()
+      .then((config) => {
+        if (cancelled) return;
+        if (config?.paymentMethods?.length) setPaymentMethods(config.paymentMethods);
+      })
+      .catch(() => {})
+      /*
+       * Resolved either way. A failed config call must still let the page pick
+       * a default from the fallback list — otherwise a config hiccup leaves the
+       * submit button stuck on "Loading payment options…" forever and blocks a
+       * sale this page is perfectly capable of taking.
+       */
+      .finally(() => {
+        if (!cancelled) setConfigResolved(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  /*
+   * The default is the first method that WORKS — and it is chosen only once the
+   * REAL list has arrived, which is what `configResolved` gates.
+   *
+   * Selecting from the fallback list on mount looked equivalent and was not:
+   * card is marked unavailable there (deliberately, so a config failure cannot
+   * offer a dead option), so the selection landed on cash on delivery, and when
+   * the real config then arrived saying card was fine, the "keep the current
+   * choice if it is still valid" rule below kept cash — because cash was still
+   * valid. A store with Stripe configured quietly stopped defaulting to card,
+   * and nothing about that looked like a bug from the outside.
+   *
+   * The keep-if-valid rule itself stays: once the shopper has picked something,
+   * a late-arriving config must not move it under them.
+   */
+  useEffect(() => {
+    if (!configResolved) return;
+    const usable = paymentMethods.filter((method) => method.available);
+    if (!usable.length) return;
+    setPaymentMethod((current) =>
+      usable.some((method) => method.value === current) ? current : usable[0].value
+    );
+  }, [paymentMethods, configResolved]);
 
   /*
    * Stripe sends a buyer who abandons the card form back here with `?cancelled=1`.
@@ -193,38 +264,73 @@ export default function Checkout() {
                 </legend>
 
                 <div className="space-y-2">
-                  {PAYMENT_METHODS.map((method) => (
-                    <label
-                      key={method.value}
-                      className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 text-sm transition-colors ${
-                        paymentMethod === method.value
-                          ? 'border-brand bg-brand-wash/40'
-                          : 'border-hairline hover:border-rule'
-                      }`}
-                    >
-                      <input
-                        type="radio"
-                        name="paymentMethod"
-                        className="mt-1"
-                        checked={paymentMethod === method.value}
-                        onChange={() => setPaymentMethod(method.value)}
-                      />
-                      <span>
-                        <span className="block font-medium text-ink">{method.label}</span>
-                        <span className="block text-xs text-muted">{method.hint}</span>
-                      </span>
-                    </label>
-                  ))}
+                  {paymentMethods.map((method) => {
+                    const disabled = !method.available;
+                    const selected = paymentMethod === method.value;
+
+                    /*
+                     * An unavailable method is shown and disabled rather than
+                     * hidden, for the same reason a sold-out size is: "we don't
+                     * take cards" and "we take cards, not right now" are
+                     * different facts, and removing the row silently asserts
+                     * the first. The reason is spelled out in place, so nobody
+                     * has to press the button to find out.
+                     */
+                    return (
+                      <label
+                        key={method.value}
+                        className={`flex items-start gap-3 rounded-xl border p-3.5 text-sm transition-all ${
+                          disabled
+                            ? 'cursor-not-allowed border-hairline bg-neutral-wash/60 opacity-70'
+                            : selected
+                              ? 'cursor-pointer border-brand bg-brand-wash/40 ring-1 ring-brand/20'
+                              : 'cursor-pointer border-hairline hover:border-rule hover:bg-plane/60'
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          name="paymentMethod"
+                          className="mt-1 accent-[var(--color-brand)]"
+                          checked={selected}
+                          disabled={disabled}
+                          onChange={() => setPaymentMethod(method.value)}
+                        />
+                        <span className="min-w-0">
+                          <span className="flex flex-wrap items-center gap-2">
+                            <span className="font-medium text-ink">{method.label}</span>
+                            {disabled && (
+                              <span className="rounded-full border border-hairline bg-raised px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted">
+                                Unavailable
+                              </span>
+                            )}
+                          </span>
+                          <span className="mt-0.5 block text-xs text-muted">
+                            {disabled ? method.unavailableReason || method.hint : method.hint}
+                          </span>
+                        </span>
+                      </label>
+                    );
+                  })}
                 </div>
               </fieldset>
 
+              {/*
+                Disabled until a payment method is actually settled, which is a
+                real state now rather than a theoretical one: the method list
+                arrives from the server, so for the first tick there is no
+                selection. Without this the button rendered "Place order" and
+                then flipped to "Pay $20" a moment later — a label changing
+                under somebody's cursor on the button that takes their money.
+              */}
               <button
                 type="submit"
-                className={`${btnPrimary} w-full`}
-                disabled={submitting || !addressId}
+                className={`${btnPrimary} w-full py-2.5`}
+                disabled={submitting || !addressId || !paymentMethod}
               >
                 {submitting ? (
                   <Spinner />
+                ) : !paymentMethod ? (
+                  'Loading payment options…'
                 ) : paymentMethod === 'card' ? (
                   `Pay ${money(total)}`
                 ) : (
@@ -423,15 +529,43 @@ function OrderSummary({ items, total }) {
         {items.map((line) => {
           const label = variantLabel(line.variant);
           return (
+            /*
+              The picture belongs here as much as anywhere. This is the last
+              screen before somebody pays, and a wall of product NAMES asks them
+              to verify their order by reading rather than by recognising —
+              which is how the wrong colour gets bought. The cart drawer already
+              showed thumbnails; the page that takes the money did not.
+            */
             <li
               key={lineKey(line.product._id, line.variant?.variantId)}
-              className="flex justify-between gap-3 text-sm"
+              className="flex items-start gap-3 text-sm"
             >
-              <span className="text-ink-2">
-                {line.product.name}
-                {label && <span className="block text-xs text-muted">{label}</span>}
-                <span className="text-muted"> × {line.quantity}</span>
-              </span>
+              <div className="h-12 w-12 shrink-0 overflow-hidden rounded-lg border border-hairline bg-neutral-wash">
+                <ProductImage
+                  product={line.product}
+                  src={galleryFor(line.product)[0]}
+                  alt=""
+                  className="h-full w-full object-cover"
+                />
+              </div>
+
+              <div className="min-w-0 flex-1">
+                <p className="font-medium leading-snug text-ink">{line.product.name}</p>
+                {label && (
+                  <p className="mt-0.5 flex items-center gap-1.5 text-xs text-muted">
+                    {line.variant?.colorHex && (
+                      <span
+                        aria-hidden="true"
+                        className="inline-block h-2.5 w-2.5 rounded-full ring-1 ring-inset ring-ink/15"
+                        style={{ backgroundColor: line.variant.colorHex }}
+                      />
+                    )}
+                    {label}
+                  </p>
+                )}
+                <p className="mt-0.5 text-xs text-muted">Qty {line.quantity}</p>
+              </div>
+
               <span className="shrink-0 font-medium text-ink tabular">
                 {money(line.product.price * line.quantity)}
               </span>
