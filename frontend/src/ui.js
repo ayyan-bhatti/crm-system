@@ -384,7 +384,22 @@ const IMAGE_STOP_WORDS = new Set([
   'pack', 'set', 'reams', 'ream', 'pcs', 'pieces', 'box', 'kit', 'x',
 ]);
 
-function imageKeywords(product) {
+/**
+ * ONE keyword, not several — and this is a hard constraint of the photo host
+ * rather than a stylistic choice.
+ *
+ * LoremFlickr answers `/600/600/laptop` with a photo and `/600/600/gaming,laptop`
+ * with a **500**. Comma-separated keywords, which its own documentation shows,
+ * simply fail. Sending two was why every product in the catalogue fell through
+ * to the generated tile: the request did not 404 into an obvious "no match", it
+ * errored, so the chain gave up and the shop looked photo-less again.
+ *
+ * The LAST meaningful word is the one taken, because English puts the head noun
+ * there: "Standing Desk" is a desk, "Gaming Laptop" is a laptop, "A4 Paper (5
+ * reams)" is paper. Taking the first word would have searched for *standing*
+ * and *gaming*, which is how you get a photo of an athlete on a desk listing.
+ */
+function imageKeyword(product) {
   const words = `${product?.name || ''}`
     .toLowerCase()
     .replace(/\([^)]*\)/g, ' ')
@@ -396,9 +411,7 @@ function imageKeywords(product) {
     .toLowerCase()
     .replace(/[^a-z]/g, '');
 
-  const chosen = words.slice(0, 2);
-  if (chosen.length === 0 && category) chosen.push(category);
-  return chosen.length ? chosen : ['product'];
+  return words[words.length - 1] || category || 'product';
 }
 
 /**
@@ -425,9 +438,9 @@ function imageKeywords(product) {
  * itself on every page load, which looks worse than having no photos at all.
  */
 export function livePhotoFor(product) {
-  const keywords = imageKeywords(product).join(',');
+  const keyword = imageKeyword(product);
   const lock = hashString(String(product?._id || product?.name || 'product')) % 100000;
-  return `https://loremflickr.com/600/600/${encodeURIComponent(keywords)}?lock=${lock}`;
+  return `https://loremflickr.com/600/600/${encodeURIComponent(keyword)}?lock=${lock}`;
 }
 
 // --- Variants and galleries ---------------------------------------------------

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { placeholderImage } from '../../ui';
+import { placeholderImage, livePhotoFor } from '../../ui';
 
 /**
  * A product photograph that cannot fail to render.
@@ -17,11 +17,8 @@ import { placeholderImage } from '../../ui';
  * piece of UI that says "nobody runs this shop" more loudly than an empty
  * state, and it is the default browser behaviour for a URL that 404s — so the
  * fallback has to be explicit or it does not exist.
- *
- * `key` on the img resets `failed` when the src changes, which matters in the
- * gallery: clicking a thumbnail swaps the source, and without the reset a
- * single broken image would pin every subsequent one to the placeholder.
  */
+
 /**
  * How long to wait before treating a silent image as a failed one.
  *
@@ -42,29 +39,66 @@ import { placeholderImage } from '../../ui';
 const IMAGE_TIMEOUT_MS = 6000;
 
 export default function ProductImage({ product, src, alt, className = '', ...rest }) {
-  const [failed, setFailed] = useState(false);
+  /*
+   * THREE SOURCES, TRIED IN ORDER, not two.
+   *
+   * The earlier version fell from a broken URL straight to the generated tile,
+   * which was wrong in the most common real case: a product whose `imageUrl`
+   * points at something dead. That is not "this product has no photo" — it is
+   * "this link is broken" — and answering it with an initials tile means a
+   * catalogue of lettered squares, which is exactly what a shop is not supposed
+   * to look like.
+   *
+   *   0. the URL somebody actually set (a typo, a dead host, a hotlink block)
+   *   1. a keyword-matched live photograph, derived from the product's own name
+   *   2. the generated tile, which cannot fail — no network, never 404s
+   *
+   * Step 2 stays the floor rather than the default. Offline, or with the photo
+   * host blocked, the page still renders something clean and on-brand.
+   */
+  const [stage, setStage] = useState(0);
   const [loaded, setLoaded] = useState(false);
-  const resolved = src || '';
+
+  /*
+   * Built conditionally rather than filtered.
+   *
+   * The first version wrote `[src || '', live, tile].filter(Boolean)` with a
+   * separate `start` index to skip the empty slot — and the two disagreed. With
+   * no `src` the filter collapsed the array to two entries, `start` was 1, and
+   * index 1 was now the TILE: a product with no image URL skipped the live
+   * photo entirely and went straight to initials. Exactly the case the live
+   * photo exists for. Two ways of expressing "where do we begin" is one too
+   * many, so the array is just correct by construction now.
+   */
+  const chain = [...(src ? [src] : []), livePhotoFor(product), placeholderImage(product)];
+  const current = chain[Math.min(stage, chain.length - 1)];
+  const isLast = stage >= chain.length - 1;
 
   // A new source deserves its own chance to load.
   useEffect(() => {
-    setFailed(false);
+    setStage(0);
     setLoaded(false);
-  }, [resolved]);
+  }, [src]);
+
+  const advance = () => {
+    setLoaded(false);
+    setStage((s) => Math.min(s + 1, chain.length - 1));
+  };
 
   useEffect(() => {
-    if (!resolved || loaded || failed) return undefined;
-    const timer = setTimeout(() => setFailed(true), IMAGE_TIMEOUT_MS);
+    // The tile is a data URI and cannot hang, so no timer once we reach it.
+    if (loaded || isLast) return undefined;
+    const timer = setTimeout(advance, IMAGE_TIMEOUT_MS);
     return () => clearTimeout(timer);
-  }, [resolved, loaded, failed]);
-
-  const fallback = placeholderImage(product);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [current, loaded, isLast]);
 
   return (
     <img
-      src={failed || !resolved ? fallback : resolved}
+      key={current}
+      src={current}
       alt={alt ?? product?.name ?? ''}
-      onError={() => setFailed(true)}
+      onError={() => !isLast && advance()}
       onLoad={() => setLoaded(true)}
       /*
        * Lazy by default because a catalogue page mounts a dozen of these at

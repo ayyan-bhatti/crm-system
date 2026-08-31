@@ -193,20 +193,21 @@ const PRODUCTS = [
   const variants = VARIANTS[product.sku];
 
   /*
-   * Keywords for the stand-in photo, taken from the product's own name and
-   * category — so "Standing Desk" in Furniture asks for a picture of a desk
-   * rather than for whatever the random-photo endpoint felt like returning.
-   * Bracketed pack sizes are dropped ("A4 Paper (5 reams)" wants *paper*).
+   * ONE keyword for the stand-in photo, taken from the product's own name, so
+   * "Standing Desk" asks for a picture of a desk rather than for whatever a
+   * random-photo endpoint felt like returning. Bracketed pack sizes are dropped
+   * ("A4 Paper (5 reams)" wants *paper*).
+   *
+   * SINGLE, not several, because the host 500s on comma-separated keywords —
+   * `/laptop` returns a photo, `/gaming,laptop` returns an error. The LAST word
+   * is the head noun in English, so it is the one that describes the thing.
    */
-  const keywords = [
-    ...product.name
-      .replace(/\([^)]*\)/g, ' ')
-      .toLowerCase()
-      .split(/\s+/)
-      .filter((word) => word.length > 2)
-      .slice(0, 2),
-    product.category.toLowerCase(),
-  ].join(',');
+  const words = product.name
+    .replace(/\([^)]*\)/g, ' ')
+    .toLowerCase()
+    .split(/\s+/)
+    .filter((word) => word.length > 2);
+  const keywords = words[words.length - 1] || product.category.toLowerCase();
 
   return {
     ...product,
