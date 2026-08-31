@@ -197,7 +197,27 @@ const PENDING_CHECKOUT_STATUS = {
   EXPIRED: 'expired',
 };
 
+/**
+ * The most of one product a single storefront order may contain.
+ *
+ * A ceiling rather than a preference. Without one, a cart line's quantity is
+ * unbounded — `existing.quantity += qty` on a repeated add climbs as far as
+ * anyone cares to push it — and one request can lay claim to an entire line's
+ * inventory. That is a denial-of-stock hole, not a UI detail.
+ *
+ * It lives here because three places have to agree on it and drift between them
+ * is exactly the bug: the storefront publishes it so the quantity control can
+ * offer the right range, the cart enforces it on write, and the checkout is the
+ * last gate before stock actually moves.
+ *
+ * Staff-placed orders are NOT subject to it. A sales rep entering a wholesale
+ * order for 500 units is doing their job, and the limit exists to bound what an
+ * anonymous internet visitor can do.
+ */
+const MAX_ORDER_QTY = 20;
+
 module.exports = {
+  MAX_ORDER_QTY,
   ROLES,
   REQUESTABLE_ROLES,
   ROLE_VALUES: Object.values(ROLES),

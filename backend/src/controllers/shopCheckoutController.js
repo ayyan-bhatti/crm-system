@@ -12,7 +12,11 @@ const { matchOrCreateCustomer } = require('../services/storefrontCustomerService
 const { recordAudit } = require('../services/auditService');
 const stripeService = require('../services/stripeService');
 const { publicOrigin } = require('../utils/publicUrl');
-const { PAYMENT_METHOD_VALUES, STRIPE_PAYMENT_METHODS } = require('../config/constants');
+const {
+  PAYMENT_METHOD_VALUES,
+  STRIPE_PAYMENT_METHODS,
+  MAX_ORDER_QTY,
+} = require('../config/constants');
 
 /**
  * POST /api/shop/checkout
@@ -53,6 +57,25 @@ const checkout = asyncHandler(async (req, res) => {
 
   if (!Array.isArray(rawItems) || rawItems.length === 0) {
     throw ApiError.badRequest('A checkout needs at least one item');
+  }
+
+  /*
+   * The per-line ceiling again, because THIS is the endpoint that matters.
+   *
+   * A guest cart lives entirely in the browser and is posted here directly, so
+   * a checkout can carry quantities that never passed through the cart API and
+   * never met its limit. Enforcing it only there would leave the gate closed on
+   * the path that has a lock and open on the one that does not.
+   *
+   * Deliberately NOT applied to staff-placed orders in orderController: a rep
+   * entering a wholesale order for 500 units is doing their job. This bounds
+   * what an anonymous visitor can claim, not what the business can sell.
+   */
+  const overLimit = rawItems.find((item) => Number(item?.quantity) > MAX_ORDER_QTY);
+  if (overLimit) {
+    throw ApiError.badRequest(
+      `You can order up to ${MAX_ORDER_QTY} of one item. For a larger order, please contact us.`
+    );
   }
 
   const { paymentMethod } = req.body;

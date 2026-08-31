@@ -6,6 +6,7 @@ const shopCartRoutes = require('./shopCartRoutes');
 const shopCheckoutRoutes = require('./shopCheckoutRoutes');
 const shopOrderRoutes = require('./shopOrderRoutes');
 const shopNewsletterRoutes = require('./shopNewsletterRoutes');
+const { getStorefrontConfig } = require('../controllers/shopConfigController');
 
 /**
  * The storefront's route tree, mounted once at `/api/shop` in app.js.
@@ -23,6 +24,13 @@ const router = express.Router();
 
 router.use(issueShopCsrfToken);
 router.use(verifyShopCsrf);
+
+/*
+ * Public and unauthenticated: the storefront reads this before it can draw a
+ * correct checkout, so gating it behind a buyer session would mean the page
+ * that most needs to be right is the one drawn blind.
+ */
+router.get('/config', getStorefrontConfig);
 
 router.use('/auth', shopAuthRoutes);
 router.use('/products', shopProductRoutes);

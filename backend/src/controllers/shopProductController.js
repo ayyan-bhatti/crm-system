@@ -45,6 +45,41 @@ const PUBLIC_PRODUCT_FIELDS =
  * not returning it is intentional here, not an oversight — the previous version
  * did exactly the same with `stockQty`.
  */
+/**
+ * The most of one thing a single order may contain.
+ *
+ * It is a real business rule rather than a UI convenience: without a ceiling,
+ * one request can empty an entire line's inventory, and a storefront that lets
+ * an anonymous visitor do that has a denial-of-stock problem, not a shopping
+ * cart. Twenty is generous for a retail order and small enough that a mistake
+ * is recoverable.
+ */
+const MAX_ORDER_QTY = 20;
+
+/**
+ * How many of this the shopper may actually put in the cart.
+ *
+ * THIS DOES DISCLOSE A COUNT, and that is a deliberate reversal of the rule
+ * above it, so it is worth being explicit about why rather than letting the two
+ * comments quietly contradict each other.
+ *
+ * Withholding it did not keep the number secret; it just moved where the
+ * shopper found it out. The quantity control was hard-coded to 1–10, which was
+ * wrong in both directions at once — it offered 10 of something we had 3 of, so
+ * the buyer chose a number, pressed the button and got an error; and it refused
+ * to sell 12 reams of paper we had 200 of, silently capping an order at a limit
+ * nobody had decided on. Neither of those protects inventory data. They just
+ * make the shop feel broken.
+ *
+ * So the number is published, bounded by MAX_ORDER_QTY. Above the cap it tells
+ * an observer only "at least 20", which is the same non-answer as before. Below
+ * it, the exact count is already inferable by anyone willing to add items to a
+ * cart, and pretending otherwise costs real sales.
+ */
+function purchasableQty(stockQty) {
+  return Math.max(0, Math.min(stockQty || 0, MAX_ORDER_QTY));
+}
+
 function toPublicShape(product) {
   const variants = (product.variants || []).map((variant) => ({
     _id: variant._id,
@@ -53,6 +88,7 @@ function toPublicShape(product) {
     // The variant's own price when it overrides, else the product's.
     price: variant.priceOverride ?? product.price,
     inStock: variant.stockQty > 0,
+    maxOrderQty: purchasableQty(variant.stockQty),
   }));
 
   const threshold = product.lowStockThreshold ?? 10;
@@ -67,6 +103,13 @@ function toPublicShape(product) {
     category: product.category,
     inStock: product.stockQty > 0,
     lowStock: product.stockQty > 0 && product.stockQty <= threshold,
+    /*
+     * For a product WITH variants this is the ceiling across all of them; the
+     * per-variant number is what the quantity control should actually obey once
+     * a colour is chosen. Both are sent so the page is correct before and after
+     * that choice, rather than offering a number it has to retract.
+     */
+    maxOrderQty: purchasableQty(product.stockQty),
     /*
      * The cheapest variant price, so a card can show "from $19" for a product
      * whose colours are priced differently. Null when nothing overrides, which

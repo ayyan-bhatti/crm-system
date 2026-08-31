@@ -3,6 +3,7 @@ const Cart = require('../models/Cart');
 const Product = require('../models/Product');
 const ApiError = require('../utils/ApiError');
 const asyncHandler = require('../utils/asyncHandler');
+const { MAX_ORDER_QTY } = require('../config/constants');
 
 /**
  * The server-side cart: `/api/shop/cart*`, buyer-only.
@@ -163,6 +164,25 @@ const addItem = asyncHandler(async (req, res) => {
   const cart = await loadCart(req.buyer._id);
   const existing = cart.items.find((item) => sameLine(item, productId, variantId));
 
+  /*
+   * The ceiling is applied to the RESULTING line, not to this request.
+   *
+   * Checking `qty` alone would be trivially defeated by adding one at a time,
+   * which is also the way a real shopper reaches a large number — the "+" button
+   * — so the check has to be on where the line ends up.
+   *
+   * It refuses rather than silently clamping. Quietly turning "add 15" into
+   * "add 4" leaves somebody staring at a number they did not choose with no
+   * explanation, and they will assume the shop is broken rather than that a
+   * limit exists.
+   */
+  const resulting = (existing?.quantity || 0) + qty;
+  if (resulting > MAX_ORDER_QTY) {
+    throw ApiError.badRequest(
+      `You can order up to ${MAX_ORDER_QTY} of one item. For a larger order, please contact us.`
+    );
+  }
+
   if (existing) {
     existing.quantity += qty;
   } else {
@@ -178,6 +198,11 @@ const updateItem = asyncHandler(async (req, res) => {
   const qty = Number(req.body.quantity);
   if (!Number.isInteger(qty) || qty < 1) {
     throw ApiError.badRequest('Quantity must be an integer of at least 1');
+  }
+  if (qty > MAX_ORDER_QTY) {
+    throw ApiError.badRequest(
+      `You can order up to ${MAX_ORDER_QTY} of one item. For a larger order, please contact us.`
+    );
   }
 
   const cart = await loadCart(req.buyer._id);
@@ -228,10 +253,23 @@ const mergeCart = asyncHandler(async (req, res) => {
     if (!productId || !Number.isInteger(qty) || qty < 1) continue;
 
     const existing = cart.items.find((item) => sameLine(item, productId, variantId));
+
+    /*
+     * CLAMPED HERE, unlike `addItem`, which refuses. The difference is that
+     * this runs during login and nobody pressed a button expecting a number:
+     * a guest cart holding 12 and a server cart holding 15 is not a request for
+     * 27, it is the same shopper twice. Failing the merge, or the whole login,
+     * over an arithmetic collision they never made would be the worse answer —
+     * and the same reasoning as the "invalid lines are skipped" rule above.
+     */
     if (existing) {
-      existing.quantity += qty;
+      existing.quantity = Math.min(existing.quantity + qty, MAX_ORDER_QTY);
     } else {
-      cart.items.push({ product: productId, quantity: qty, variantId: variantId || null });
+      cart.items.push({
+        product: productId,
+        quantity: Math.min(qty, MAX_ORDER_QTY),
+        variantId: variantId || null,
+      });
     }
   }
 
