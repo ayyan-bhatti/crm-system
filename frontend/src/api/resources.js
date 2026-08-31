@@ -106,6 +106,15 @@ export const ordersApi = {
   get: (id) => client.get(`/orders/${id}`).then((r) => r.data.data),
 
   /**
+   * The delivery board: everything still in flight, ranked by urgency.
+   *
+   * Returns the whole envelope rather than `data`, because the server also
+   * sends the per-band counts it just computed. Re-deriving those on the client
+   * is how the headline number and the list quietly start disagreeing.
+   */
+  deliveries: () => client.get('/orders/deliveries').then((r) => r.data),
+
+  /**
    * Create an order.
    *
    * The key is generated HERE rather than inside the axios interceptor on

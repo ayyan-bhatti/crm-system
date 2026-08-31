@@ -20,6 +20,8 @@ const icons = {
   products: 'M12 2l9 5v10l-9 5-9-5V7l9-5zm0 2.3L5.5 8 12 11.7 18.5 8 12 4.3zM5 9.6v6.2l6 3.3v-6.2L5 9.6zm14 0l-6 3.3v6.2l6-3.3V9.6z',
   orders:
     'M4 4h3l.9 4M7.9 8H20l-1.6 8H9.5L7.9 8zm2.1 12a1.5 1.5 0 100 3 1.5 1.5 0 000-3zm8 0a1.5 1.5 0 100 3 1.5 1.5 0 000-3z',
+  deliveries:
+    'M3 7h10v8H3V7zm10 3h4l3 3v2h-7v-5zM6.5 16.5a1.75 1.75 0 100 3.5 1.75 1.75 0 000-3.5zm10 0a1.75 1.75 0 100 3.5 1.75 1.75 0 000-3.5z',
   users:
     'M9 11a3.5 3.5 0 100-7 3.5 3.5 0 000 7zm7.5 0a3 3 0 100-6 3 3 0 000 6zM9 13c-3.9 0-7 1.9-7 4.3V19h14v-1.7C16 14.9 12.9 13 9 13zm7.8.2c1.9.6 3.2 1.9 3.2 3.4V19h2v-2.4c0-1.7-2.2-3-5.2-3.4z',
   audit:
@@ -34,6 +36,13 @@ const NAV_ITEMS = [
   { to: '/crm/customers', label: 'Customers', icon: 'customers', requires: 'viewCustomers' },
   { to: '/crm/products', label: 'Products', icon: 'products' },
   { to: '/crm/orders', label: 'Orders', icon: 'orders' },
+  /*
+   * No `requires`: every staff role reaches this, and the ENDPOINT scopes it.
+   * A rep sees the parcels on their own orders, which is exactly the list they
+   * work from — gating it to manager-or-admin would hide the queue from the
+   * person actually holding the parcel.
+   */
+  { to: '/crm/deliveries', label: 'Deliveries', icon: 'deliveries' },
   // `requires` names an ACTION, not a role. See hooks/usePermissions for why:
   // the role list is an implementation detail of the permission, and repeating
   // it here is how the app ended up with the same policy spelled three ways.

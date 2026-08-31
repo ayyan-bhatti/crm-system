@@ -1,6 +1,7 @@
 const express = require('express');
 const {
   listOrders,
+  listDeliveries,
   getOrder,
   createOrder,
   updateOrder,
@@ -42,6 +43,17 @@ router.use(protect);
  * allowed it.
  */
 router.route('/').get(listOrders).post(requireManagerOrAdmin, idempotency, createOrder);
+
+/*
+ * The delivery board. Declared BEFORE `/:id`, or Express matches "deliveries"
+ * as an order id and the route becomes a 404 for a malformed ObjectId — the
+ * classic ordering bug in an Express router, and silent because the 404 looks
+ * like a missing record rather than a shadowed route.
+ *
+ * Scoped like every other order read rather than gated: a rep sees the parcels
+ * on their own orders, which is precisely the list they need to work from.
+ */
+router.get('/deliveries', listDeliveries);
 /*
  * PATCH is open to the assigned rep on purpose, and narrowed inside the
  * handler: they may move the order to completed or cancelled, and are refused

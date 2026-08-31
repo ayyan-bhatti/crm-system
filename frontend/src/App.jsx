@@ -64,6 +64,7 @@ const ProductDetail = lazy(() => import('./pages/products/ProductDetail'));
 const ProductForm = lazy(() => import('./pages/products/ProductForm'));
 
 const OrderList = lazy(() => import('./pages/orders/OrderList'));
+const DeliveryBoard = lazy(() => import('./pages/orders/DeliveryBoard'));
 const OrderDetail = lazy(() => import('./pages/orders/OrderDetail'));
 const OrderForm = lazy(() => import('./pages/orders/OrderForm'));
 
@@ -231,6 +232,7 @@ export default function App() {
                       />
                     </Route>
 
+                    <Route path="deliveries" element={<DeliveryBoard />} />
                     <Route path="orders">
                       <Route index element={<OrderList />} />
                       {/*
