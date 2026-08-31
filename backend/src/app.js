@@ -337,6 +337,26 @@ app.get('/api/health', async (req, res) => {
     // Names of missing variables only — never their values. Env var names are
     // not secrets, and having them here turns a blind 500 into a fix.
     configErrors: env.configErrors,
+    /*
+     * WHETHER THIS DEPLOYMENT CAN TAKE A CARD, and whether it can confirm one.
+     *
+     * The README has claimed for two rounds that "`GET /api/health` reports it".
+     * It did not. That mattered more than a stale sentence usually does,
+     * because the symptom it diagnoses — the storefront showing "Pay by card
+     * (unavailable)" — has exactly one cause, an unset key, and no way to
+     * confirm it from the outside. The alternative was reading the shop's
+     * checkout page and inferring backwards.
+     *
+     * Booleans, never the keys themselves. `cardPayment` is the secret key,
+     * which is what gates the button. `webhookVerification` is the webhook
+     * secret, and the two being different is the dangerous state the boot
+     * warning already covers: the buyer pays, the event cannot be verified, and
+     * no order is ever created.
+     */
+    payments: {
+      cardPayment: env.stripeEnabled,
+      webhookVerification: Boolean(env.stripeWebhookSecret),
+    },
     ...(databaseError ? { databaseError } : {}),
     timestamp: new Date(),
   });

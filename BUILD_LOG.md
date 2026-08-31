@@ -4252,3 +4252,96 @@ a race — running before the header re-rendered after sign-out, when the footer
 link was the only match. So it went green while proving nothing about the header,
 which is the thing the test is named after. Now scoped to the banner.
 
+
+---
+
+## Round 3, phase 14 — "admin can't make a new order", and three other reports
+
+Four complaints from using the running app. Two of them turned out to be
+different bugs from the ones described, which is the interesting part.
+
+### "Admin cannot make a new order — remove the option"
+
+The requested fix was to remove the New Order button for admins. That would
+have been wrong twice over, so it is worth writing down what was actually
+happening before the reasoning is lost.
+
+**Admins can create orders, and always could.** A cash order for a plain
+product returned `201` on the first attempt at reproducing it. What failed —
+every time, for every role that can create orders — was an order containing a
+product sold in **colours**:
+
+```
+ADMIN create order -> 400 "Trail Jacket" is sold in specific colours
+                          — choose one before ordering.
+```
+
+Stock is held per variant, so a line with no variant has no stock to come out
+of, and the API is right to refuse it. The staff order form had **no variant
+control at all** — and could not have had one, because `GET /api/products/options`
+projected `name sku price stockQty` and not `variants`. So the form could not
+know a product had colours. Every variant product in the catalogue was
+selectable and unorderable, and the refusal arrived as a red banner after
+submit, which reads as a broken page rather than a missing field.
+
+Removing the button would have deleted the working half (plain products) to
+hide the broken half, and left the CRM unable to place any order at all.
+
+The fix is the field that was missing: `variants` in the projection, a colour
+picker per line, and three rules that follow from stock being per variant —
+the price comes from the variant's override, the stock check reads the
+variant's count, and duplicate lines merge on **(product, variant)** rather
+than on product. That last one matters in both directions: keyed on product
+alone, six Midnight plus six Sand against six of each is rejected though it is
+perfectly fillable, and a large product total hides an unfillable variant line.
+
+### The button was ungated — for the role that genuinely cannot use it
+
+There WAS a real permissions bug, just not the one reported. `New order`
+appeared in three places and none of them checked `writeOrders`, so a **sales
+rep** — who cannot create orders — saw it as the primary action on their main
+screen, filled in the form, and was refused by the API at the end. Now gated,
+with the admin's copy asserted as visible in the same suite so a gate that
+hides it from everybody cannot pass.
+
+**And I broke it while fixing it.** `usePermissions()` returns `can` as an
+OBJECT of booleans, not a function; I wrote `can('writeOrders')` from
+assumption rather than reading it, and shipped a page that threw *"can is not a
+function"* into the error boundary. The unit suite passed — neither page has
+one — and the end-to-end run caught it. A reminder that a component rendering
+at all is a thing worth testing, and that checking an API takes ten seconds.
+
+### "I can't see any pictures"
+
+Two more bugs on top of the picsum one fixed last phase.
+
+**Comma-separated keywords 500.** `loremflickr.com/600/600/laptop` returns a
+photo; `/600/600/gaming,laptop` returns a **500**. I had been sending two
+keywords, so every live-photo request errored and the whole catalogue fell
+through to generated tiles — which looked exactly like the fallback working
+correctly. One keyword now, and the LAST word rather than the first, because
+English puts the head noun there: a "Gaming Laptop" is a laptop, and searching
+for *gaming* gets you a photo of an athlete.
+
+**A dead URL fell straight to the tile, skipping the photo.** `[src || '',
+live, tile].filter(Boolean)` with a separate `start` index disagreed with
+itself: with no `src`, the filter collapsed the array and `start` then pointed
+at the tile. So a product with no image URL — precisely the case the live photo
+exists for — went straight to initials. The chain is built by construction now;
+two ways of expressing "where do we begin" was one too many.
+
+### "Pay by card — unavailable"
+
+Working as designed, and the design was right: the store had no
+`STRIPE_SECRET_KEY`, so the storefront correctly declined to offer a button it
+could not honour.
+
+What was missing was any way to confirm that from outside. The README has
+claimed for two rounds that "`GET /api/health` reports it" — it did not. It
+does now, as two booleans (never the keys): `cardPayment` for the secret key,
+`webhookVerification` for the webhook secret, whose divergence is the dangerous
+half-configured state. That is one request instead of reading the checkout page
+and inferring backwards.
+
+Second false documentation claim found in two phases. Both were sentences that
+described an intention as though it were a mechanism.

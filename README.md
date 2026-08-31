@@ -182,6 +182,24 @@ option and takes cash-on-delivery orders exactly as before. To turn it on:
 > that sequence looks like an error to the person who just spent money. The app warns
 > about exactly this at boot in production, and `GET /api/health` reports it.
 
+**Checking whether a running deployment can take a card.** If the storefront shows
+"Pay by card — unavailable", the cause is always an unset key on the server, and one
+request says which:
+
+```bash
+curl -s https://your-deployment/api/health | jq .payments
+{
+  "cardPayment": true,          # STRIPE_SECRET_KEY is set — the button is offered
+  "webhookVerification": true   # STRIPE_WEBHOOK_SECRET is set — orders can be created
+}
+```
+
+Booleans only, never the keys. `cardPayment: false` means the storefront is correctly
+hiding a button it cannot honour — set `STRIPE_SECRET_KEY` and restart. **On Vercel that
+means the project's Environment Variables, not your local `.env`**, and a redeploy: env
+changes do not reach a running deployment, so a local `.env` that works on `localhost:5000`
+has no effect whatsoever on the deployed site.
+
 **The storefront asks whether card payment works — it does not assume.** `GET
 /api/shop/config` reports which payment methods this deployment can actually take, and the
 checkout page draws itself from that. With no Stripe key the card option renders **disabled
