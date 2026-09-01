@@ -97,4 +97,33 @@ describe('BuyerOrderDetail', () => {
 
     expect(await screen.findByText('LOGIN PAGE')).toBeInTheDocument();
   });
+
+  /**
+   * The buyer's own version of courier tracking: a real link to the courier,
+   * no login or account needed to click it, and no live-status button — that
+   * one is a staff feature, see OrderDetail.test.jsx.
+   */
+  it('shows the courier and a tracking link once the order has shipped with one', async () => {
+    shopOrdersApi.get.mockResolvedValue(
+      order({ status: 'pending', fulfilment: 'shipped', courier: 'dhl', trackingNumber: 'JD0141' })
+    );
+
+    renderDetail();
+
+    expect(await screen.findByText(/Shipped with DHL/i)).toBeInTheDocument();
+    expect(screen.getByText(/JD0141/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /track package/i })).toHaveAttribute(
+      'href',
+      'https://www.dhl.com/pk-en/home/tracking.html?tracking-id=JD0141'
+    );
+  });
+
+  it('says nothing about a courier when none is recorded', async () => {
+    shopOrdersApi.get.mockResolvedValue(order({ status: 'pending' }));
+
+    renderDetail();
+
+    await screen.findByRole('heading', { name: /1001/ });
+    expect(screen.queryByText(/Shipped with/i)).not.toBeInTheDocument();
+  });
 });

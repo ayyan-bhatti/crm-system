@@ -22,6 +22,9 @@ import {
   btnDanger,
   btnPrimary,
   btnSecondary,
+  buildTrackingUrl,
+  COURIER_LABELS,
+  COURIER_OPTIONS,
   formatDate,
   FULFILMENT_STEPS,
   humanize,
@@ -569,7 +572,11 @@ function FulfilmentSection({ order, onChanged }) {
   const [estimate, setEstimate] = useState(
     order.estimatedDeliveryAt ? order.estimatedDeliveryAt.slice(0, 10) : ''
   );
+  const [courier, setCourier] = useState(order.courier || '');
+  const [trackingNumber, setTrackingNumber] = useState(order.trackingNumber || '');
   const [fieldError, setFieldError] = useState('');
+  const [liveStatus, setLiveStatus] = useState(null);
+  const [checkingLive, setCheckingLive] = useState(false);
 
   const cancelled = order.status === 'cancelled';
 
@@ -609,9 +616,16 @@ function FulfilmentSection({ order, onChanged }) {
 
     setSaving(true);
     try {
-      await ordersApi.updateFulfilment(order._id, fulfilment, estimate || undefined);
+      await ordersApi.updateFulfilment(
+        order._id,
+        fulfilment,
+        estimate || undefined,
+        courier || undefined,
+        trackingNumber || undefined
+      );
       toast.success('Delivery status updated.');
       setOpen(false);
+      setLiveStatus(null);
       onChanged();
     } catch (err) {
       toast.error(errorMessage(err, 'Could not update the delivery status'));
@@ -619,6 +633,26 @@ function FulfilmentSection({ order, onChanged }) {
       setSaving(false);
     }
   }
+
+  /**
+   * Only ever meaningful for a DHL shipment — see the note on
+   * `ordersApi.trackingStatus`. A `live: false` result is shown as plain
+   * information, not an error: it is the normal answer for every other
+   * courier and for DHL with no key configured server-side.
+   */
+  async function checkLiveStatus() {
+    setCheckingLive(true);
+    try {
+      const result = await ordersApi.trackingStatus(order._id);
+      setLiveStatus(result);
+    } catch (err) {
+      toast.error(errorMessage(err, 'Could not check live status'));
+    } finally {
+      setCheckingLive(false);
+    }
+  }
+
+  const trackingUrl = buildTrackingUrl(order.courier, order.trackingNumber);
 
   return (
     <div className="mt-5 border-t border-hairline pt-5">
@@ -632,6 +666,40 @@ function FulfilmentSection({ order, onChanged }) {
             <p className="mt-1 text-xs text-muted">
               Customer is told: {formatDate(order.estimatedDeliveryAt)}
             </p>
+          )}
+          {order.courier && (
+            <p className="mt-1.5 text-xs text-ink-2">
+              {COURIER_LABELS[order.courier] || order.courier}
+              {order.trackingNumber && <> — {order.trackingNumber}</>}
+              {trackingUrl && (
+                <>
+                  {' '}
+                  ·{' '}
+                  <a href={trackingUrl} target="_blank" rel="noreferrer" className={link}>
+                    Track package
+                  </a>
+                </>
+              )}
+            </p>
+          )}
+          {order.courier === 'dhl' && (
+            <div className="mt-1.5">
+              <button
+                type="button"
+                onClick={checkLiveStatus}
+                disabled={checkingLive}
+                className="text-xs font-medium text-brand hover:underline"
+              >
+                {checkingLive ? 'Checking…' : 'Check live status'}
+              </button>
+              {liveStatus && (
+                <p className="mt-1 text-xs text-muted">
+                  {liveStatus.live
+                    ? `DHL says: ${liveStatus.description || liveStatus.status}`
+                    : `Live status unavailable — ${liveStatus.reason}`}
+                </p>
+              )}
+            </div>
           )}
         </div>
 
@@ -716,6 +784,37 @@ function FulfilmentSection({ order, onChanged }) {
               Use the usual 5 days
             </button>
           </div>
+
+          <Field label="Courier" hint="Who this parcel is going out with, if anyone.">
+            <select
+              className={input}
+              value={courier}
+              onChange={(e) => setCourier(e.target.value)}
+            >
+              {COURIER_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </Field>
+
+          <Field
+            label="Tracking number"
+            hint={
+              courier
+                ? 'Exactly as the courier printed it — this is what the customer sees.'
+                : 'Set a courier first — a tracking number on its own has no format to check it against.'
+            }
+          >
+            <input
+              type="text"
+              className={input}
+              value={trackingNumber}
+              disabled={!courier}
+              onChange={(e) => setTrackingNumber(e.target.value)}
+            />
+          </Field>
 
           <button type="submit" className={btnPrimary} disabled={saving}>
             {saving ? <Spinner /> : 'Save delivery status'}

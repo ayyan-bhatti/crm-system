@@ -30,6 +30,8 @@ vi.mock('../../api/resources', () => ({
     update: vi.fn(),
     remove: vi.fn(),
     requestTransfer: vi.fn(),
+    updateFulfilment: vi.fn(),
+    trackingStatus: vi.fn(),
   },
   usersApi: { assignable: vi.fn() },
 }));
@@ -69,6 +71,8 @@ beforeEach(() => {
     success: true,
     message: 'Asked for this order to be transferred to Bilal Ahmed.',
   });
+  ordersApi.updateFulfilment.mockResolvedValue(order());
+  ordersApi.trackingStatus.mockResolvedValue({ trackingUrl: null, live: false });
 });
 
 describe('the order number', () => {
@@ -312,5 +316,72 @@ describe('the assignment bar', () => {
 
     await screen.findByRole('heading', { name: 'ORD-000142' });
     expect(screen.getByText('Not yet assigned')).toBeInTheDocument();
+  });
+});
+
+/**
+ * Recording a courier and tracking number, and the real-vs-link-only split
+ * between DHL and everything else — see the note in services/courierService.js
+ * for why only DHL gets a "Check live status" button at all.
+ */
+describe('courier tracking', () => {
+  it('shows the tracking number and a link to the courier once one is recorded', async () => {
+    renderAs(
+      'manager',
+      order({ fulfilment: 'shipped', courier: 'tcs', trackingNumber: 'CN12345' })
+    );
+
+    expect(await screen.findByText(/CN12345/)).toBeInTheDocument();
+    expect(
+      await screen.findByRole('link', { name: /track package/i })
+    ).toHaveAttribute('href', 'https://www.tcsexpress.com/track/');
+  });
+
+  it('offers a live-status check only for DHL, not for TCS or Leopards', async () => {
+    renderAs('manager', order({ fulfilment: 'shipped', courier: 'tcs', trackingNumber: 'CN1' }));
+
+    await screen.findByText(/CN1/);
+    expect(screen.queryByRole('button', { name: /check live status/i })).not.toBeInTheDocument();
+  });
+
+  it('sends the courier and tracking number when the delivery form is saved', async () => {
+    const user = userEvent.setup();
+    renderAs('manager', order({ fulfilment: 'processing' }));
+
+    await user.click(await screen.findByRole('button', { name: /update delivery/i }));
+    await user.selectOptions(screen.getByLabelText(/delivery status/i), 'shipped');
+    await user.type(screen.getByLabelText(/estimated delivery date/i), '2026-09-10');
+    await user.selectOptions(screen.getByLabelText(/^courier$/i), 'dhl');
+    await user.type(screen.getByLabelText(/tracking number/i), 'JD0141');
+    await user.click(screen.getByRole('button', { name: /save delivery status/i }));
+
+    await waitFor(() => {
+      expect(ordersApi.updateFulfilment).toHaveBeenCalledWith(
+        order()._id,
+        'shipped',
+        '2026-09-10',
+        'dhl',
+        'JD0141'
+      );
+    });
+  });
+
+  it('checks live status through the API and shows what DHL says', async () => {
+    const user = userEvent.setup();
+    ordersApi.trackingStatus.mockResolvedValue({
+      trackingUrl: 'https://www.dhl.com/pk-en/home/tracking.html?tracking-id=JD0141',
+      live: true,
+      status: 'delivered',
+      description: 'Delivered',
+    });
+
+    renderAs(
+      'manager',
+      order({ fulfilment: 'shipped', courier: 'dhl', trackingNumber: 'JD0141' })
+    );
+
+    await user.click(await screen.findByRole('button', { name: /check live status/i }));
+
+    expect(await screen.findByText(/DHL says: Delivered/i)).toBeInTheDocument();
   });
 });

@@ -13,7 +13,10 @@ const {
   FULFILMENT_LABELS,
   DELIVERY_SPEED,
   estimatedDeliveryFor,
+  COURIER_VALUES,
+  COURIER_LABELS,
 } = require('../config/constants');
+const courierService = require('../services/courierService');
 const {
   hasFullRecordAccess,
   canAccessCustomer,
@@ -1293,12 +1296,22 @@ const requestOrderTransfer = asyncHandler(async (req, res) => {
  * them", so it is reused rather than restated.
  */
 const updateFulfilment = asyncHandler(async (req, res) => {
-  const { fulfilment, estimatedDeliveryAt } = req.body;
+  const { fulfilment, estimatedDeliveryAt, courier, trackingNumber } = req.body;
 
   if (!FULFILMENT_SEQUENCE.includes(fulfilment)) {
     throw ApiError.badRequest(
       `Fulfilment status must be one of: ${FULFILMENT_SEQUENCE.join(', ')}`
     );
+  }
+
+  /*
+   * `courier` is validated even though it is optional, for the same reason the
+   * fulfilment value itself is: a typo in a hand-written request body should
+   * fail loudly here rather than being stored and silently producing no
+   * tracking link later.
+   */
+  if (courier !== undefined && courier !== null && courier !== '' && !COURIER_VALUES.includes(courier)) {
+    throw ApiError.badRequest(`Courier must be one of: ${COURIER_VALUES.join(', ')}`);
   }
 
   const order = await Order.findById(req.params.id).populate('customer');
@@ -1372,6 +1385,24 @@ const updateFulfilment = asyncHandler(async (req, res) => {
     order.deliveredAt = new Date();
   }
 
+  /*
+   * A TRACKING NUMBER MEANS NOTHING WITHOUT KNOWING WHOSE FORMAT IT IS IN —
+   * `buildTrackingUrl` and the live DHL lookup both branch on the courier, so a
+   * number recorded with no courier at all (neither here nor already on the
+   * order) is a number nobody can act on. Refused rather than silently stored.
+   */
+  if (trackingNumber !== undefined && trackingNumber !== null && trackingNumber !== '') {
+    const resolvedCourier = courier || order.courier;
+    if (!resolvedCourier) {
+      throw ApiError.badRequest(
+        'Set which courier this is with before recording a tracking number.'
+      );
+    }
+  }
+
+  if (courier !== undefined) order.courier = courier || null;
+  if (trackingNumber !== undefined) order.trackingNumber = trackingNumber || null;
+
   order.fulfilment = fulfilment;
   await order.save();
   await order.populate(ORDER_POPULATE);
@@ -1387,6 +1418,14 @@ const updateFulfilment = asyncHandler(async (req, res) => {
    * edit. Every correction is recorded with both ends, so a suspicious pattern
    * is visible.
    */
+  const courierChanged = courier !== undefined && courier !== before.courier;
+  const trackingChanged = trackingNumber !== undefined && trackingNumber !== before.trackingNumber;
+  const courierNote = courierChanged || trackingChanged
+    ? ` (courier: ${order.courier ? COURIER_LABELS[order.courier] : 'none'}${
+        order.trackingNumber ? `, tracking ${order.trackingNumber}` : ''
+      })`
+    : '';
+
   await recordAudit(req, {
     action: 'update',
     entity: 'order',
@@ -1394,10 +1433,47 @@ const updateFulfilment = asyncHandler(async (req, res) => {
     label: order.orderNumber || String(order._id),
     before,
     after: order.toObject({ depopulate: true }),
-    note: `delivery: ${FULFILMENT_LABELS[from]} → ${FULFILMENT_LABELS[fulfilment]}`,
+    note: `delivery: ${FULFILMENT_LABELS[from]} → ${FULFILMENT_LABELS[fulfilment]}${courierNote}`,
   });
 
   res.json({ success: true, data: order });
+});
+
+/**
+ * GET /api/orders/:id/tracking — same access as updateFulfilment.
+ *
+ * Two facts, always both returned: the public tracking-page link (works for
+ * every courier, needs no configuration) and, only for a `dhl` shipment with
+ * DHL_TRACKING_API_KEY set, a live status pulled from DHL's own API. See the
+ * long note at the top of services/courierService.js for why TCS and Leopards
+ * stop at the link — neither has a self-serve API this app can call.
+ */
+const getOrderTracking = asyncHandler(async (req, res) => {
+  const order = await Order.findById(req.params.id);
+  if (!order) throw ApiError.notFound('Order not found');
+
+  if (!canAccessOrderDocument(req.user, order)) {
+    throw ApiError.forbidden('You do not have access to this order');
+  }
+
+  if (!order.courier || !order.trackingNumber) {
+    return res.json({
+      success: true,
+      data: { trackingUrl: null, live: false, reason: 'No courier or tracking number recorded yet' },
+    });
+  }
+
+  const trackingUrl = courierService.buildTrackingUrl(order.courier, order.trackingNumber);
+
+  const live =
+    order.courier === 'dhl'
+      ? await courierService.checkDhlStatus(order.trackingNumber)
+      : {
+          live: false,
+          reason: `Live status is only available for DHL — ${COURIER_LABELS[order.courier]} has no self-serve tracking API.`,
+        };
+
+  res.json({ success: true, data: { trackingUrl, ...live } });
 });
 
 /**
@@ -1513,6 +1589,7 @@ module.exports = {
   decrementStock,
   stockIsTaken,
   updateFulfilment,
+  getOrderTracking,
   getOrder,
   createOrder,
   updateOrder,

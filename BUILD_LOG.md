@@ -4701,3 +4701,82 @@ to answer.
   all-consenting seed would hide the exact gap this round is built around —
   a campaign to "everyone" in a fully-opted-in demo reports the same number
   sent whether the gate works or not.
+
+## Round 5 — Courier tracking, and being honest about which couriers
+
+The ask: wire an order's shipment up to a real courier — TCS, DHL, Leopards
+— rather than leaving delivery as an internal status with nothing a buyer
+can click on. What made this round different from the marketing channels in
+Round 4 is that "real" turned out to mean two different things depending on
+the courier, and the honest answer was to build both rather than pretend
+they are the same.
+
+### Twilio and Meta hand out a key on signup. TCS and Leopards do not.
+
+The Round 4 pattern for a third-party channel was: console transport by
+default, a real provider one environment variable away, because the real
+provider's signup is self-serve and free. That pattern does not transfer to
+TCS or Leopards — both require a merchant/business account application
+before they issue any API credential at all, and neither publishes a
+sandbox a solo developer can reach today. There was no free test key to put
+in `.env.example` for either of them, which meant the honest options were:
+fake a working integration against an account this app does not have, or
+build something smaller that is actually true. `courierService.js` builds a
+real link to each courier's own public tracking page instead — no account,
+no key, works today — and says so in its own header comment rather than
+looking like an unfinished version of the DHL branch beside it.
+
+DHL is the one exception, and it earns different treatment because it
+actually is different: the DHL API Developer Portal hands out a free
+sandbox key immediately, to the "Shipment Tracking - Unified" API, with no
+business account required. So DHL is the one courier this app can honestly
+call, and `DHL_TRACKING_API_KEY` unlocks a live "Check live status" button
+that pulls a real answer from DHL's own API. Unset, DHL degrades to
+exactly the TCS/Leopards experience — link only — which is the correct
+degradation, not a broken feature.
+
+### Why the tracking-page links are not all deep links
+
+DHL's tracking page takes the number as a documented, stable query
+parameter (`tracking-id`), so `buildTrackingUrl` deep-links straight to the
+result. TCS and Leopards do not publish an equivalent — their pages take
+the number through a form — and guessing at `?cn=` or `?tracking_number=`
+risks a link that looks right and either 404s or lands on an empty results
+page, which is worse than no deep link at all: a broken link erodes trust
+in every other link on the page. So those two open the courier's real
+landing page, with the tracking number shown as plain text right next to it
+for whoever's looking to paste in. Same standard the WhatsApp template
+requirement in Round 4 was held to — refuse to claim something works when
+it does not, rather than degrade silently.
+
+### A tracking number means nothing without knowing whose format it is in
+
+`updateFulfilment` refuses a `trackingNumber` unless a `courier` is present
+either in the same request or already on the order — `buildTrackingUrl` and
+the DHL live lookup both branch on the courier, so a bare number nobody can
+resolve is a number stored for no reason. `courier` alone, with no tracking
+number yet, is accepted: a rep who has booked with TCS but does not have the
+CN number yet is recording a true fact early, not making an error. Neither
+field is required to mark an order shipped at all — plenty of small orders
+go out by hand or with a driver and no courier account ever enters the
+picture, and the existing (Round 3) rule that only the delivery *estimate*
+is mandatory on shipment was left exactly as it was.
+
+### What is genuinely a judgement call, listed rather than buried
+
+- **Only DHL gets a live-status field**, and that line is drawn by which
+  courier has a free self-serve API, not by which is biggest or most used —
+  see above. If TCS or Leopards credentials are ever obtained through a real
+  merchant account, the function belongs in `courierService.js` next to
+  `checkDhlStatus`, following the same seam.
+- **The tracking number is unvalidated free text**, not checked against a
+  per-courier format (Leopards' 14 digits, TCS's own CN format, DHL's own).
+  A shape check here is a way for a real, correctly-typed number to be
+  rejected by a regex that guessed wrong; the number is exactly what the
+  courier printed, and that is treated as ground truth.
+- **No shipment-creation/booking API for any courier**, only tracking.
+  Booking a shipment through TCS or Leopards' API needs the same merchant
+  account their tracking API would, and DHL's own booking API is a
+  different, heavier product (rates, customs, label printing) than the free
+  tracking sandbox this round uses — genuinely a different scope than "does
+  this order have a working tracking link."

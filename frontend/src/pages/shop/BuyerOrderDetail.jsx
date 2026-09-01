@@ -10,6 +10,8 @@ import DeliveryTimeline from '../../components/DeliveryTimeline';
 import {
   btnPrimary,
   btnSecondary,
+  buildTrackingUrl,
+  COURIER_LABELS,
   formatDateTime,
   money,
   orderLabel,
@@ -106,6 +108,28 @@ export default function BuyerOrderDetail() {
       <Card className="p-5">
         <h2 className="mb-4 text-sm font-semibold text-ink">Where your order is</h2>
         <DeliveryTimeline order={order} />
+        {order.courier && (
+          <p className="mt-4 border-t border-hairline pt-4 text-sm text-ink-2">
+            Shipped with {COURIER_LABELS[order.courier] || order.courier}
+            {order.trackingNumber && <> — tracking number {order.trackingNumber}</>}
+            {(() => {
+              const trackingUrl = buildTrackingUrl(order.courier, order.trackingNumber);
+              return trackingUrl ? (
+                <>
+                  {'. '}
+                  <a
+                    href={trackingUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className={`${btnSecondary} mt-2 inline-block`}
+                  >
+                    Track package
+                  </a>
+                </>
+              ) : null;
+            })()}
+          </p>
+        )}
       </Card>
 
       <Card className="p-5">

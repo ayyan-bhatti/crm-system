@@ -9,6 +9,7 @@ const {
   PAYMENT_STATUS_VALUES,
   DELIVERY_SPEED,
   DELIVERY_SPEED_VALUES,
+  COURIER_VALUES,
 } = require('../config/constants');
 
 /**
@@ -331,6 +332,36 @@ const orderSchema = new mongoose.Schema({
   /** When it actually arrived, if anyone said so. */
   deliveredAt: {
     type: Date,
+    default: null,
+  },
+
+  /**
+   * Which third-party courier this parcel went out with, if any.
+   *
+   * `null` on every order that predates this field, and on every order handed
+   * over without a courier at all — an in-person or driver hand-off is a
+   * perfectly ordinary way to fulfil a small order and is not an error state.
+   * See config/constants.js#COURIER for why only DHL gets a live status lookup.
+   */
+  courier: {
+    type: String,
+    enum: {
+      values: COURIER_VALUES,
+      message: `Courier must be one of: ${COURIER_VALUES.join(', ')}`,
+    },
+    default: null,
+  },
+
+  /**
+   * The number the courier gave for this parcel, exactly as they printed it.
+   *
+   * Not validated against a per-courier format — TCS, Leopards and DHL each use
+   * their own, and a shape check here would just be a way for a real, working
+   * number to get rejected by a regex that guessed wrong. Meaningless without
+   * `courier` set alongside it, which the controller enforces on write.
+   */
+  trackingNumber: {
+    type: String,
     default: null,
   },
 

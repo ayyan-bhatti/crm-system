@@ -208,6 +208,36 @@ function estimatedDeliveryFor(speed, from = new Date()) {
   return due;
 }
 
+/**
+ * Which courier a shipped order went out with, if anyone said so.
+ *
+ * `null` remains the default and the correct value for every order that is not
+ * shipped through a third-party courier at all — plenty of small orders are
+ * handed over in person or by a driver with no tracking number to give.
+ *
+ * Only `dhl` has a live status lookup wired up (services/courierService.js),
+ * because DHL is the only one of the three with a genuinely self-serve, free
+ * developer sandbox (developer.dhl.com). TCS and Leopards both require a
+ * merchant/business account application before they issue API credentials at
+ * all — there is no signup flow a solo developer can complete today — so for
+ * those two this app only builds a link to the courier's own public tracking
+ * page, which needs no account and is still a real, working link. `other`
+ * covers any courier not in this list; same treatment as tcs/leopards.
+ */
+const COURIER = {
+  TCS: 'tcs',
+  LEOPARDS: 'leopards',
+  DHL: 'dhl',
+  OTHER: 'other',
+};
+
+const COURIER_LABELS = {
+  tcs: 'TCS',
+  leopards: 'Leopards Courier',
+  dhl: 'DHL',
+  other: 'Other courier',
+};
+
 /** Default stock level at or below which a product counts as "low stock". */
 const DEFAULT_LOW_STOCK_THRESHOLD = 10;
 
@@ -313,6 +343,9 @@ module.exports = {
   DELIVERY_OPTIONS,
   deliveryDaysFor,
   estimatedDeliveryFor,
+  COURIER,
+  COURIER_VALUES: Object.values(COURIER),
+  COURIER_LABELS,
   DEFAULT_LOW_STOCK_THRESHOLD,
   PAYMENT_METHOD,
   PAYMENT_METHOD_VALUES: Object.values(PAYMENT_METHOD),

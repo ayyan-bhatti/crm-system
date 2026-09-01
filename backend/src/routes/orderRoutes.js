@@ -8,6 +8,7 @@ const {
   assignOrder,
   requestOrderTransfer,
   updateFulfilment,
+  getOrderTracking,
   deleteOrder,
 } = require('../controllers/orderController');
 const {
@@ -111,6 +112,13 @@ router.post('/:id/transfer-request', requestOrderTransfer);
  * permissions. See the note above updateFulfilment.
  */
 router.patch('/:id/fulfilment', updateFulfilment);
+
+/*
+ * The tracking-page link plus, for a DHL shipment, a live status pulled from
+ * DHL's own API. Same access rule as the fulfilment update above and for the
+ * same reason — this is a read of the same record, not a role-scoped report.
+ */
+router.get('/:id/tracking', getOrderTracking);
 
 /*
  * The notes timeline.

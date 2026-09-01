@@ -164,10 +164,23 @@ export const ordersApi = {
    * it is open to the rep holding the order, who is usually the person who
    * actually knows it went out.
    */
-  updateFulfilment: (id, fulfilment, estimatedDeliveryAt) =>
+  updateFulfilment: (id, fulfilment, estimatedDeliveryAt, courier, trackingNumber) =>
     client
-      .patch(`/orders/${id}/fulfilment`, { fulfilment, estimatedDeliveryAt })
+      .patch(`/orders/${id}/fulfilment`, {
+        fulfilment,
+        estimatedDeliveryAt,
+        courier,
+        trackingNumber,
+      })
       .then((r) => r.data.data),
+
+  /**
+   * The tracking-page link plus, only for a `dhl` shipment with a live key
+   * configured server-side, a real status pulled from DHL. `live: false` with
+   * a `reason` is an ordinary, expected answer — not an error — for every
+   * other courier and for DHL with no key set.
+   */
+  trackingStatus: (id) => client.get(`/orders/${id}/tracking`).then((r) => r.data.data),
 
   remove: (id) => client.delete(`/orders/${id}`).then((r) => r.data),
 };

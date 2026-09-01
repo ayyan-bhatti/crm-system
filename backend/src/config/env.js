@@ -170,6 +170,21 @@ const env = {
   whatsappTemplateLanguage: process.env.WHATSAPP_TEMPLATE_LANGUAGE || 'en',
 
   /**
+   * A free DHL API Developer Portal key, for live status on a `dhl` shipment.
+   *
+   * Self-serve: sign up at developer.dhl.com, subscribe to "Shipment Tracking -
+   * Unified", and a sandbox key is issued immediately — no business account, no
+   * merchant application, no cost. That is not true of TCS or Leopards, which is
+   * why this is the one courier services/courierService.js can actually call.
+   *
+   * Unset, tracking still works for every courier — buildTrackingUrl() links out
+   * to the courier's own public tracking page, which needs no key at all — this
+   * only adds a live "Delivered / In transit / ..." status pulled into the app
+   * itself for DHL shipments specifically.
+   */
+  dhlTrackingApiKey: process.env.DHL_TRACKING_API_KEY || '',
+
+  /**
    * The shared secret the scheduled post-sale jobs authenticate with.
    *
    * A MACHINE CREDENTIAL, NOT A USER SESSION. The daily job is invoked by a

@@ -399,6 +399,19 @@ app.get('/api/health', async (req, res) => {
       ...require('./services/messagingService').channelStatus(),
       scheduler: { configured: Boolean(env.cronSecret) },
     },
+
+    /*
+     * Courier tracking. `trackingLinks` is always true — a public tracking-page
+     * link needs no configuration for any of the three couriers. `dhlLive` is
+     * the one that can actually be false: whether DHL_TRACKING_API_KEY is set,
+     * which is what a "Check live status" button in the app actually depends
+     * on. See services/courierService.js for why DHL is the only courier with
+     * a live-status field at all.
+     */
+    courier: {
+      trackingLinks: true,
+      dhlLive: require('./services/courierService').isDhlLiveConfigured(),
+    },
     ...(databaseError ? { databaseError } : {}),
     timestamp: new Date(),
   });

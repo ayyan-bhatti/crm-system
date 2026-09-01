@@ -297,6 +297,51 @@ export const PAYMENT_METHOD_LABELS = {
   bank_transfer: 'Bank transfer (demo)',
 };
 
+/**
+ * The couriers an order can be shipped with, mirroring backend
+ * config/constants.js#COURIER. Only DHL gets a live status lookup — see the
+ * long note in backend/src/services/courierService.js for why TCS and
+ * Leopards do not: neither offers a self-serve API a solo developer can reach,
+ * only a merchant-account application. All three still get a real link to
+ * their own public tracking page, which is what `buildTrackingUrl` builds.
+ */
+export const COURIER_OPTIONS = [
+  { value: '', label: 'No courier' },
+  { value: 'tcs', label: 'TCS' },
+  { value: 'leopards', label: 'Leopards Courier' },
+  { value: 'dhl', label: 'DHL' },
+  { value: 'other', label: 'Other courier' },
+];
+
+export const COURIER_LABELS = Object.fromEntries(
+  COURIER_OPTIONS.filter((o) => o.value).map((o) => [o.value, o.label])
+);
+
+const TRACKING_PAGES = {
+  tcs: 'https://www.tcsexpress.com/track/',
+  leopards: 'https://www.leopardscourier.com/leopards-tracking',
+  dhl: 'https://www.dhl.com/pk-en/home/tracking.html',
+};
+
+/**
+ * A link to the courier's own tracking page. `null` for `other` or no
+ * courier — there is nowhere real to send someone.
+ *
+ * Deep-links for DHL only, matching the backend: DHL's tracking page takes the
+ * number as a stable `tracking-id` query parameter, but TCS and Leopards do
+ * not publish an equivalent, so guessing one risks a link that looks right and
+ * 404s. For those two this opens the real page and the tracking number is
+ * shown as text alongside it for the customer to paste in.
+ */
+export function buildTrackingUrl(courier, trackingNumber) {
+  const page = TRACKING_PAGES[courier];
+  if (!page) return null;
+  if (courier === 'dhl' && trackingNumber) {
+    return `${page}?tracking-id=${encodeURIComponent(trackingNumber)}`;
+  }
+  return page;
+}
+
 /** Turn `sales_rep` into `Sales rep` for display. */
 export function humanize(value) {
   if (!value) return '';

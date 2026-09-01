@@ -19,6 +19,7 @@ Mongoose · JWT auth with bcrypt · Jest + Supertest with an in-memory MongoDB.
 - [How AI search works](#how-ai-search-works)
 - [AI customer insights](#ai-customer-insights)
 - [Marketing](#marketing)
+- [Courier tracking](#courier-tracking)
 - [Order stock rules](#order-stock-rules)
 - [Pagination and indexes](#pagination-and-indexes)
 - [Design system](#design-system)
@@ -141,6 +142,7 @@ a deployment immune to host-header injection in reset emails. See `src/utils/pub
 | `WHATSAPP_TEMPLATE_NAME` | no | — | A Meta-**approved** marketing template. Sending is refused without one — see [Marketing](#marketing) |
 | `WHATSAPP_TEMPLATE_LANGUAGE` | no | `en` | The template's approved language code |
 | `CRON_SECRET` | no | — | Shared secret the scheduled post-sale jobs authenticate with. Unset ⇒ they never run — see [Marketing](#marketing) |
+| `DHL_TRACKING_API_KEY` | no | — | Free self-serve key from developer.dhl.com. Unset ⇒ courier tracking still works (public link), just no live DHL status — see [Courier tracking](#courier-tracking) |
 
 #### Setting up Stripe (test mode)
 
@@ -1739,6 +1741,30 @@ trail with who, how many, and which filters. The file is a real `.xlsx` (via `ex
 CSV wearing the wrong extension, which several spreadsheet apps refuse to open cleanly), with
 every free-text cell defused against formula injection — a contact named `=HYPERLINK(...)`
 would otherwise become a live link the moment the file was opened.
+
+---
+
+## Courier tracking
+
+An order can be marked shipped with a courier (TCS, Leopards Courier, DHL, or "other") and a
+tracking number, from `/crm/orders/:id`. This works with **nothing configured**: it builds a
+real link to the courier's own public tracking page, which needs no account at all — the same
+page a customer would reach by searching the courier's name.
+
+**Only DHL gets a live status pulled into the app**, and the split is deliberate rather than
+unfinished. Twilio and Meta (the marketing channels above) both hand a working API key to
+anyone who signs up. TCS and Leopards do not: both require a merchant/business account
+application before they issue *any* API credential, and neither publishes a self-serve sandbox
+a solo developer can reach today — so there is nothing honest to wire up for either of them
+beyond the public tracking link. DHL is the exception: the [DHL API Developer
+Portal](https://developer.dhl.com) hands out a free sandbox key immediately for the "Shipment
+Tracking - Unified" API, no business account needed. Set `DHL_TRACKING_API_KEY` and a "Check
+live status" button appears on a DHL shipment's order page; left unset, DHL behaves exactly
+like TCS and Leopards — link only, with a message that says why.
+
+If TCS or Leopards credentials are ever obtained through a real merchant account, the seam to
+extend is `backend/src/services/courierService.js` — the same console/real split every other
+channel in this app uses (see `services/mailer.js`, `smsClient.js`, `whatsappClient.js`).
 
 ---
 
