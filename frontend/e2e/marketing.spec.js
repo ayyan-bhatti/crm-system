@@ -144,7 +144,21 @@ test.describe('Building and sending a campaign', () => {
     await signIn(page, ADMIN);
 
     await page.getByRole('link', { name: /^campaigns$/i }).click();
-    await page.getByRole('link', { name: /new campaign/i }).click();
+
+    /*
+     * `.first()`, and it is deliberate rather than a workaround.
+     *
+     * This is the CI-only failure caught in the round's first push: on a
+     * fresh database the campaign list is genuinely empty, and — the same
+     * pattern CustomerList/ProductList/OrderList already use — an empty list
+     * renders "New campaign" TWICE, once as the page header's persistent
+     * action and once as the empty state's call to action. Both are the same
+     * link to the same destination; a user would click whichever one their
+     * eye landed on. It never showed up locally because every other seeded
+     * entity in this app always has at least one row, so this is the first
+     * list a test has ever met while it was actually empty.
+     */
+    await page.getByRole('link', { name: /new campaign/i }).first().click();
 
     await page.getByLabel(/campaign name/i).fill('E2E win-back');
     await page.getByLabel(/what is this campaign for/i).fill('Check in with quiet customers');
