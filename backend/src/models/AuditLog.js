@@ -66,10 +66,17 @@ const auditLogSchema = new mongoose.Schema({
    * stops being strictly "writes" and becomes "actions worth accounting for",
    * which was always the intent — `before`/`after`/`changes` are simply empty
    * on an export, and `note` carries the filters and the row count instead.
+   *
+   * `import` is the fifth, for the same reason in reverse: a bulk customer
+   * import is many `create`s from one act, and one entry per row would flood
+   * the trail with what is really a single decision by one person to bring in
+   * a whole spreadsheet. One `import` entry carries the row count, how many
+   * were created versus skipped, and which file — `entityId` stays null, since
+   * there is no one record the action is "about".
    */
   action: {
     type: String,
-    enum: ['create', 'update', 'delete', 'export'],
+    enum: ['create', 'update', 'delete', 'export', 'import'],
     required: true,
   },
   /** Which collection was written to: customer, product, order, user. */

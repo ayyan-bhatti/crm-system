@@ -166,7 +166,10 @@ describe('GET /api/orders/:id/tracking', () => {
     expect(res.status).toBe(200);
     expect(res.body.data.trackingUrl).toBe('https://www.tcsexpress.com/track/');
     expect(res.body.data.live).toBe(false);
-    expect(res.body.data.reason).toMatch(/only available for DHL/i);
+    // No live backend is configured in the test environment, and the message
+    // says how to get one for ANY courier now — not "only DHL", since EasyPost
+    // (checked first) is carrier-agnostic.
+    expect(res.body.data.reason).toMatch(/EASYPOST_API_KEY/i);
   });
 
   it('reports DHL as not live when DHL_TRACKING_API_KEY is unset — the honest default', async () => {

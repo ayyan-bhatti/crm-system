@@ -7,6 +7,8 @@ const shopCheckoutRoutes = require('./shopCheckoutRoutes');
 const shopOrderRoutes = require('./shopOrderRoutes');
 const shopNewsletterRoutes = require('./shopNewsletterRoutes');
 const { getStorefrontConfig } = require('../controllers/shopConfigController');
+const { trackOrder } = require('../controllers/trackingController');
+const { trackOrderLimiter } = require('../middleware/rateLimit');
 
 /**
  * The storefront's route tree, mounted once at `/api/shop` in app.js.
@@ -31,6 +33,16 @@ router.use(verifyShopCsrf);
  * that most needs to be right is the one drawn blind.
  */
 router.get('/config', getStorefrontConfig);
+
+/*
+ * The public "track my order" lookup — no buyer session required, on purpose,
+ * so a guest checkout (which never gets a buyer account at all) can still
+ * check on their parcel. `trackOrderLimiter` is the actual defence against
+ * someone using this to enumerate valid (order number, email) pairs; see
+ * controllers/trackingController.js for why the response itself never says
+ * which of the two was wrong.
+ */
+router.post('/track', trackOrderLimiter, trackOrder);
 
 router.use('/auth', shopAuthRoutes);
 router.use('/products', shopProductRoutes);

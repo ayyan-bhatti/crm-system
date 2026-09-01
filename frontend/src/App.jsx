@@ -91,6 +91,7 @@ const BuyerOrders = lazy(() => import('./pages/shop/BuyerOrders'));
 const BuyerOrderDetail = lazy(() => import('./pages/shop/BuyerOrderDetail'));
 const BuyerAccount = lazy(() => import('./pages/shop/BuyerAccount'));
 const Unsubscribe = lazy(() => import('./pages/shop/Unsubscribe'));
+const TrackOrder = lazy(() => import('./pages/shop/TrackOrder'));
 
 /**
  * Mounts the buyer session and cart contexts around the whole `/shop` tree,
@@ -176,6 +177,12 @@ export default function App() {
                       authorisation.
                     */}
                     <Route path="unsubscribe" element={<Unsubscribe />} />
+                    {/*
+                      Public, no sign-in — a guest checkout never gets a buyer
+                      account, and is exactly who most needs to check on a
+                      parcel without one. See TrackOrder.jsx.
+                    */}
+                    <Route path="track" element={<TrackOrder />} />
                   </Route>
                 </Route>
 

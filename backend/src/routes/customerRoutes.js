@@ -1,4 +1,5 @@
 const express = require('express');
+const multer = require('multer');
 const {
   listCustomers,
   listCustomerOptions,
@@ -6,9 +7,25 @@ const {
   createCustomer,
   updateCustomer,
   deleteCustomer,
+  importCustomers,
 } = require('../controllers/customerController');
 const { protect } = require('../middleware/auth');
-const { requireManagerOrAdmin } = require('../middleware/roles');
+const { requireManagerOrAdmin, requireRole } = require('../middleware/roles');
+const { ROLES } = require('../config/constants');
+
+/*
+ * Memory storage, not disk — this deploys as a Vercel serverless function
+ * (see config/env.js#isServerless), whose filesystem is read-only outside
+ * `/tmp` and does not persist between invocations either way. The file only
+ * ever needs to exist for the length of one request, as a Buffer handed
+ * straight to exceljs; nothing here ever needs it to be a file on disk.
+ *
+ * The size limit is generous for a spreadsheet (a 1000-row workbook of plain
+ * text is a few hundred KB at most) and exists only to reject something that
+ * is obviously not what this endpoint is for before it is fully buffered
+ * into memory.
+ */
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
 const {
   listCustomerActivity,
@@ -77,6 +94,18 @@ router.get(
   aiPerUserLimiter,
   getChurnRollup
 );
+
+/*
+ * Bulk-creating customers from a spreadsheet. Admin only — narrower than the
+ * admin-direct/manager-via-approval split `createCustomer` uses for a SINGLE
+ * new customer; see the long note on the handler for why a batch of rows
+ * does not have a useful change-request equivalent. Declared before `/:id`
+ * for the same routing-order reason `/options` and `/churn-rollup` are: an
+ * unmatched `requireRole` here would otherwise let `/:id` capture "import" as
+ * an id and answer with a CastError instead of the real route.
+ */
+router.post('/import', requireRole(ROLES.ADMIN), upload.single('file'), importCustomers);
+
 router.route('/:id').get(getCustomer).patch(updateCustomer).delete(deleteCustomer);
 
 /*

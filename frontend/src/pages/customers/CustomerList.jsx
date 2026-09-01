@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { customersApi, usersApi } from '../../api/resources';
+import { errorMessage } from '../../api/client';
 import useFetch, { useDebounced } from '../../hooks/useFetch';
 import usePermissions from '../../hooks/usePermissions';
 import Can from '../../components/Can';
@@ -12,10 +13,11 @@ import {
   ErrorBanner,
   PageHeader,
   Pagination,
+  Spinner,
   StatusBadge,
 } from '../../components/common';
 import { CUSTOMER_STATUSES } from '../../constants';
-import { btnPrimary, humanize, input, link, td, th, formatDate } from '../../ui';
+import { btnPrimary, btnSecondary, humanize, input, link, td, th, formatDate } from '../../ui';
 
 /**
  * Customer list with search and filters.
@@ -36,7 +38,7 @@ export default function CustomerList() {
   const [searchInput, setSearchInput] = useState(searchParams.get('search') || '');
   const search = useDebounced(searchInput, 300);
 
-  const { data, loading, error } = useFetch(
+  const { data, loading, error, reload } = useFetch(
     () =>
       customersApi.list({
         page,
@@ -99,9 +101,19 @@ export default function CustomerList() {
         title="Customers"
         subtitle="Everyone you are tracking."
         action={
-          <Link to="/crm/customers/new" className={btnPrimary}>
-            New customer
-          </Link>
+          <div className="flex flex-wrap gap-2">
+            {/*
+              Admin only — see the note on `importCustomers` in
+              usePermissions.js for why a bulk upload does not get the
+              manager-queues-a-request treatment a single new customer does.
+            */}
+            <Can do="importCustomers">
+              <ImportButton onImported={reload} />
+            </Can>
+            <Link to="/crm/customers/new" className={btnPrimary}>
+              New customer
+            </Link>
+          </div>
         }
       />
 
@@ -214,6 +226,129 @@ export default function CustomerList() {
           </>
         )}
       </Card>
+    </div>
+  );
+}
+
+/**
+ * "Import from Excel" — a toggled panel rather than a modal, matching the
+ * app's existing pattern for an occasional action attached to a list screen
+ * (see `FulfilmentSection` on the order detail page for the same shape).
+ *
+ * The expected sheet is Name / Email / Phone / Company / City / Address /
+ * Status — the SAME columns `POST /api/customers` accepts one at a time, not
+ * the marketing contacts export's merged/consent columns. See
+ * services/customerImportService.js for the exact mapping and why a
+ * duplicate email is skipped rather than merged or rejecting the whole file.
+ */
+function ImportButton({ onImported }) {
+  const [open, setOpen] = useState(false);
+  const [file, setFile] = useState(null);
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState('');
+  const [result, setResult] = useState(null);
+  const fileInputRef = useRef(null);
+
+  async function handleUpload(event) {
+    event.preventDefault();
+    if (!file) return;
+
+    setError('');
+    setResult(null);
+    setUploading(true);
+
+    try {
+      const data = await customersApi.importFile(file);
+      setResult(data);
+      setFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      // The list on screen is now stale the moment ANY row was created.
+      if (data.created.length > 0) onImported();
+    } catch (err) {
+      setError(errorMessage(err, 'Could not import that file'));
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  return (
+    <div className="relative">
+      <button type="button" className={btnSecondary} onClick={() => setOpen((v) => !v)}>
+        {open ? 'Close' : 'Import from Excel'}
+      </button>
+
+      {open && (
+        <Card className="absolute right-0 z-10 mt-2 w-96 p-4 shadow-lift">
+          <p className="text-sm font-medium text-ink">Import customers</p>
+          <p className="mt-1 text-xs text-muted">
+            An .xlsx with a header row: Name, Email, and optionally Phone, Company, City,
+            Address, Status. A row whose email already belongs to a customer is skipped, not
+            overwritten.
+          </p>
+
+          <form onSubmit={handleUpload} className="mt-3 space-y-3">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".xlsx"
+              aria-label="Customer spreadsheet"
+              onChange={(e) => setFile(e.target.files?.[0] || null)}
+              className="block w-full text-xs text-ink-2 file:mr-3 file:rounded-lg file:border-0 file:bg-neutral-wash file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-ink hover:file:bg-rule"
+            />
+
+            <ErrorBanner message={error} />
+
+            <button type="submit" className={`${btnPrimary} w-full`} disabled={!file || uploading}>
+              {uploading ? <Spinner /> : 'Upload and import'}
+            </button>
+          </form>
+
+          {result && <ImportResultSummary result={result} />}
+        </Card>
+      )}
+    </div>
+  );
+}
+
+/** What actually happened — every row accounted for as created, skipped, or failed. */
+function ImportResultSummary({ result }) {
+  const { created, skipped, failed, totalRows } = result;
+
+  return (
+    <div className="mt-3 space-y-2 border-t border-hairline pt-3 text-xs">
+      <p className="font-medium text-ink">
+        {created.length} of {totalRows} row{totalRows === 1 ? '' : 's'} created
+        {skipped.length > 0 && `, ${skipped.length} skipped`}
+        {failed.length > 0 && `, ${failed.length} failed`}.
+      </p>
+
+      {skipped.length > 0 && (
+        <div>
+          <p className="font-medium text-ink-2">Skipped (already in the CRM)</p>
+          <ul className="mt-1 space-y-0.5 text-muted">
+            {skipped.slice(0, 5).map((row) => (
+              <li key={row.row}>
+                Row {row.row}: {row.email}
+              </li>
+            ))}
+            {skipped.length > 5 && <li>…and {skipped.length - 5} more</li>}
+          </ul>
+        </div>
+      )}
+
+      {failed.length > 0 && (
+        <div>
+          <p className="font-medium text-critical-ink">Could not import</p>
+          <ul className="mt-1 space-y-0.5 text-muted">
+            {failed.slice(0, 5).map((row) => (
+              <li key={row.row}>
+                Row {row.row}: {row.reason}
+              </li>
+            ))}
+            {failed.length > 5 && <li>…and {failed.length - 5} more</li>}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }

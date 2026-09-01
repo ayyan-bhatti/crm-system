@@ -294,6 +294,18 @@ const PENDING_CHECKOUT_STATUS = {
 };
 
 /**
+ * The most rows one customer-import spreadsheet may contain.
+ *
+ * A ceiling for the same reason `MAX_ORDER_QTY` is one: without it, a single
+ * upload is an unbounded number of writes against the database inside one
+ * HTTP request, which on a serverless function means an unbounded amount of
+ * time inside a function that has a hard execution limit either way — this
+ * just turns "times out and leaves the import half-done with no summary" into
+ * a clear, immediate "split this into smaller files" refusal.
+ */
+const MAX_CUSTOMER_IMPORT_ROWS = 1000;
+
+/**
  * The most of one product a single storefront order may contain.
  *
  * A ceiling rather than a preference. Without one, a cart line's quantity is
@@ -353,5 +365,6 @@ module.exports = {
   PAYMENT_STATUS,
   PAYMENT_STATUS_VALUES: Object.values(PAYMENT_STATUS),
   PENDING_CHECKOUT_STATUS,
+  MAX_CUSTOMER_IMPORT_ROWS,
   PENDING_CHECKOUT_STATUS_VALUES: Object.values(PENDING_CHECKOUT_STATUS),
 };

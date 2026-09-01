@@ -4780,3 +4780,84 @@ is mandatory on shipment was left exactly as it was.
   different, heavier product (rates, customs, label printing) than the free
   tracking sandbox this round uses — genuinely a different scope than "does
   this order have a working tracking link."
+
+### Follow-up: EasyPost, once "a real DHL account" turned out not to be the ask
+
+The first cut of this round treated DHL as the one live backend, on the
+theory that "a free, self-serve, genuinely working key" was the bar to
+clear. It cleared that bar, but not the actual one: DHL's free sandbox only
+answers against a handful of DHL-published demo numbers, so it demonstrates
+that the wiring works without ever feeling like a live tracker. What was
+actually wanted, stated directly, was "a test mode like we did with
+Stripe" — and DHL's sandbox is not that; it is a fixture, not a simulator.
+
+EasyPost is. A free signup hands over a test key immediately, and a small
+published set of "magic" tracking codes (`EZ1000000001` through
+`EZ7000000007`) each drive a real tracker object through EasyPost's own
+API to a specific simulated status — `pre_transit`, `in_transit`,
+`out_for_delivery`, `delivered`, and so on. Point any order's tracking
+number at one of those and "Check live status" gets back a genuine answer,
+not a fixture — the shipping equivalent of a Stripe test card number,
+which is exactly the comparison that was asked for.
+
+`checkLiveStatus` now tries EasyPost first, for every courier, before
+falling back to the DHL-specific path — carrier-agnostic beats
+DHL-specific, and a magic code typed into a `tcs` order still resolves
+correctly, because EasyPost recognises its own test codes regardless of
+what this app's `courier` field says. DHL's own API is kept rather than
+removed: a deployment that only bothered to get a DHL key still gets a
+working, if narrower, live status. The result carries a `testMode` flag
+end to end — set from EasyPost's own `mode: "test"` field — and the UI
+labels a simulated result as "Simulated (test mode)", the same way
+Stripe's own dashboard marks a test-mode payment, so a demo delivered
+status is never mistaken for a real one.
+
+### Also this round: a public tracking page, and importing customers from Excel
+
+Two more asks landed alongside the courier work, both prompted directly:
+"I can't see the DHL tracking" turned out to mean "there is no page a
+customer can reach without logging in," and "isn't there an option to
+import customers from a sheet" was exactly what it sounds like. Neither
+needed the courier plumbing above — they needed their own scoping.
+
+**The public tracking page (`/track`, `POST /api/shop/track`).** No buyer
+session, on purpose: a guest checkout never gets a buyer account at all, so
+a login-gated tracking page would be unreachable by the shopper most likely
+to want it. Order number + email is the two-factor lookup a real courier's
+own page uses, and the whole design turns on ONE rule: a wrong order number
+and the right order with a wrong email produce the *identical* response —
+same status, same message, same shape. Order numbers are sequential and
+meant to be read down a phone line, so they are not a secret; branching the
+response on which factor was wrong would hand an attacker a free oracle
+for which order numbers are real. `trackOrderLimiter` (10 attempts / 15
+minutes / IP, the same shape as the login limiter) is the actual defence
+against brute-forcing the email side of that pair. The response itself is
+deliberately thinner than the signed-in buyer's own order page — status,
+courier, tracking link, an item *count* — no prices, no address, no full
+item list. This is a status page a stranger might land on with a guessed
+pair; it is not a receipt.
+
+**Customer import (`POST /api/customers/import`, admin only).** The column
+set matches what `Customer` actually has — Name, Email, and optionally
+Phone, Company, City, Address, Status — not the marketing contacts export's
+merged, consent-bearing shape; importing into that shape would mean
+inventing an opt-in nobody gave. A duplicate email (checked case-
+insensitively; `Customer.email` carries no uniqueness constraint, since two
+customers sharing an inbox is a real and unremarkable case) is *skipped*,
+never overwritten — the existing record may already have notes, history, an
+assigned rep, none of which a spreadsheet upload should be able to
+clobber. One bad row must not cost the rows around it, so nothing here
+throws on the first problem: every row lands in exactly one of
+created/skipped/failed, and the response is the tally, not a stack trace.
+Admin-only rather than reusing `createCustomer`'s admin-direct/manager-
+queues-a-request split, because a batch has no useful change-request
+equivalent — hundreds of approvals for one upload, or one opaque approval
+covering rows the admin cannot actually see, are both worse than the rule
+the contacts export already set for this shape of action. One audit entry
+per upload, not one per row, for the same reason `export` gets one entry
+per download rather than one per contact.
+
+This is also the first file upload anywhere in this codebase — `multer`
+memory storage, not disk, because this deploys as a Vercel function whose
+filesystem does not persist between invocations, and a spreadsheet buffer
+never needs to touch disk to be read by `exceljs` in the first place.

@@ -139,3 +139,15 @@ export const shopOrdersApi = {
     shopClient.post(`/shop/orders/${id}/request-edit`, { items }).then((r) => r.data),
   ask: (question) => shopClient.post('/shop/orders/ask', { question }).then((r) => r.data.data),
 };
+
+/**
+ * The public "track my order" lookup — no sign-in needed, which matters for a
+ * guest checkout that never got a buyer account to sign into in the first
+ * place. Order number + email, the same two facts a courier asks for on the
+ * phone. A miss (wrong number, wrong email, or both) throws a generic 404 —
+ * see the controller for why it never says which one was wrong.
+ */
+export const trackingApi = {
+  track: (orderNumber, email) =>
+    shopClient.post('/shop/track', { orderNumber, email }).then((r) => r.data.data),
+};

@@ -142,6 +142,28 @@ describe('Per-IP rate limiting', () => {
       }
     });
   });
+
+  /**
+   * The public order-tracking lookup: order number + email is a two-factor
+   * guess exactly like username + password, and this limiter is what makes
+   * brute-forcing the second factor (the email, against an easily-enumerated
+   * sequential order number) expensive per address — see
+   * controllers/trackingController.js.
+   */
+  describe('POST /api/shop/track', () => {
+    it('returns 429 once the window limit is exceeded', async () => {
+      const attempt = () =>
+        api().post('/api/shop/track').send({ orderNumber: 'ORD-000001', email: 'nobody@example.com' });
+
+      let last;
+      for (let i = 0; i < 11; i += 1) {
+        last = await attempt();
+      }
+
+      expect(last.status).toBe(429);
+      expect(last.body.success).toBe(false);
+    });
+  });
 });
 
 describe('Account lockout', () => {

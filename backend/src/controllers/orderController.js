@@ -1443,10 +1443,10 @@ const updateFulfilment = asyncHandler(async (req, res) => {
  * GET /api/orders/:id/tracking — same access as updateFulfilment.
  *
  * Two facts, always both returned: the public tracking-page link (works for
- * every courier, needs no configuration) and, only for a `dhl` shipment with
- * DHL_TRACKING_API_KEY set, a live status pulled from DHL's own API. See the
- * long note at the top of services/courierService.js for why TCS and Leopards
- * stop at the link — neither has a self-serve API this app can call.
+ * every courier, needs no configuration) and a live status, tried through
+ * whichever live backend is actually configured — EasyPost first (works for
+ * any courier, including its test-mode magic tracking codes), DHL's own API
+ * as a fallback. See the long note at the top of services/courierService.js.
  */
 const getOrderTracking = asyncHandler(async (req, res) => {
   const order = await Order.findById(req.params.id);
@@ -1464,14 +1464,7 @@ const getOrderTracking = asyncHandler(async (req, res) => {
   }
 
   const trackingUrl = courierService.buildTrackingUrl(order.courier, order.trackingNumber);
-
-  const live =
-    order.courier === 'dhl'
-      ? await courierService.checkDhlStatus(order.trackingNumber)
-      : {
-          live: false,
-          reason: `Live status is only available for DHL — ${COURIER_LABELS[order.courier]} has no self-serve tracking API.`,
-        };
+  const live = await courierService.checkLiveStatus(order.courier, order.trackingNumber);
 
   res.json({ success: true, data: { trackingUrl, ...live } });
 });

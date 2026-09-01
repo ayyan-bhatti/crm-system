@@ -682,7 +682,7 @@ function FulfilmentSection({ order, onChanged }) {
               )}
             </p>
           )}
-          {order.courier === 'dhl' && (
+          {order.courier && order.trackingNumber && (
             <div className="mt-1.5">
               <button
                 type="button"
@@ -695,7 +695,9 @@ function FulfilmentSection({ order, onChanged }) {
               {liveStatus && (
                 <p className="mt-1 text-xs text-muted">
                   {liveStatus.live
-                    ? `DHL says: ${liveStatus.description || liveStatus.status}`
+                    ? `${liveStatus.testMode ? 'Simulated (test mode): ' : ''}${
+                        liveStatus.description || liveStatus.status
+                      }`
                     : `Live status unavailable — ${liveStatus.reason}`}
                 </p>
               )}
@@ -803,7 +805,9 @@ function FulfilmentSection({ order, onChanged }) {
             label="Tracking number"
             hint={
               courier
-                ? 'Exactly as the courier printed it — this is what the customer sees.'
+                ? 'Exactly as the courier printed it — this is what the customer sees. To try live ' +
+                  'status without a real shipment, use EZ4000000004 (or another EasyPost test code) ' +
+                  '— see backend/.env.example.'
                 : 'Set a courier first — a tracking number on its own has no format to check it against.'
             }
           >

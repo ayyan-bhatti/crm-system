@@ -20,6 +20,7 @@ Mongoose · JWT auth with bcrypt · Jest + Supertest with an in-memory MongoDB.
 - [AI customer insights](#ai-customer-insights)
 - [Marketing](#marketing)
 - [Courier tracking](#courier-tracking)
+- [Importing customers from Excel](#importing-customers-from-excel)
 - [Order stock rules](#order-stock-rules)
 - [Pagination and indexes](#pagination-and-indexes)
 - [Design system](#design-system)
@@ -142,7 +143,8 @@ a deployment immune to host-header injection in reset emails. See `src/utils/pub
 | `WHATSAPP_TEMPLATE_NAME` | no | — | A Meta-**approved** marketing template. Sending is refused without one — see [Marketing](#marketing) |
 | `WHATSAPP_TEMPLATE_LANGUAGE` | no | `en` | The template's approved language code |
 | `CRON_SECRET` | no | — | Shared secret the scheduled post-sale jobs authenticate with. Unset ⇒ they never run — see [Marketing](#marketing) |
-| `DHL_TRACKING_API_KEY` | no | — | Free self-serve key from developer.dhl.com. Unset ⇒ courier tracking still works (public link), just no live DHL status — see [Courier tracking](#courier-tracking) |
+| `EASYPOST_API_KEY` | no | — | Free self-serve **test** key from easypost.com — a genuine test mode with simulated tracking, like Stripe. Recommended over DHL below — see [Courier tracking](#courier-tracking) |
+| `DHL_TRACKING_API_KEY` | no | — | Free self-serve key from developer.dhl.com. Fallback used only when `EASYPOST_API_KEY` is unset — see [Courier tracking](#courier-tracking) |
 
 #### Setting up Stripe (test mode)
 
@@ -1172,6 +1174,7 @@ The refresh token is **never** in a response body; it exists only as a cookie.
 | `GET` | `/customers/:id/summary` | manager, admin | Computed figures + health score + an AI narrative. Rate limited |
 | `PATCH` | `/customers/:id` | admin direct, manager **queues** | `assignedTo` requires manager or admin |
 | `DELETE` | `/customers/:id` | admin direct, manager **queues** | |
+| `POST` | `/customers/import` | admin only | `multipart/form-data`, field `file`, an `.xlsx`. See [Importing customers from Excel](#importing-customers-from-excel) |
 
 `?search=` matches name, email or company, case-insensitively.
 
@@ -1751,20 +1754,95 @@ tracking number, from `/crm/orders/:id`. This works with **nothing configured**:
 real link to the courier's own public tracking page, which needs no account at all — the same
 page a customer would reach by searching the courier's name.
 
-**Only DHL gets a live status pulled into the app**, and the split is deliberate rather than
-unfinished. Twilio and Meta (the marketing channels above) both hand a working API key to
-anyone who signs up. TCS and Leopards do not: both require a merchant/business account
-application before they issue *any* API credential, and neither publishes a self-serve sandbox
-a solo developer can reach today — so there is nothing honest to wire up for either of them
-beyond the public tracking link. DHL is the exception: the [DHL API Developer
-Portal](https://developer.dhl.com) hands out a free sandbox key immediately for the "Shipment
-Tracking - Unified" API, no business account needed. Set `DHL_TRACKING_API_KEY` and a "Check
-live status" button appears on a DHL shipment's order page; left unset, DHL behaves exactly
-like TCS and Leopards — link only, with a message that says why.
+### The public tracking page
 
-If TCS or Leopards credentials are ever obtained through a real merchant account, the seam to
-extend is `backend/src/services/courierService.js` — the same console/real split every other
-channel in this app uses (see `services/mailer.js`, `smsClient.js`, `whatsappClient.js`).
+`/track` on the storefront (linked from the header and footer of every shop page) is a
+**no-login** "where is my order" lookup — order number plus the email it was placed with, the
+same two facts a courier asks for on the phone. It matters that this needs no sign-in: a guest
+checkout never gets a buyer account at all, so gating tracking behind a login would leave the
+shopper most likely to need it unable to reach it.
+
+The two factors are never distinguished in a failure — a made-up order number and the right
+order with the wrong email produce the **exact same** generic message and status code, so the
+endpoint cannot be used to enumerate which order numbers exist (they are sequential and meant
+to be read down a phone line, so they are not a secret on their own). `POST /api/shop/track` is
+rate-limited at 10 attempts per 15 minutes per IP for the same reason a login endpoint is.
+
+The response is deliberately thinner than the signed-in buyer's own order page: delivery status,
+the courier and tracking link, and an item *count* — no prices, no address, no full item list.
+This is a status page, not a receipt.
+
+### Live status: EasyPost, the shipping equivalent of Stripe test mode
+
+Set `EASYPOST_API_KEY` and a "Check live status" button appears for **any** courier, not just
+one. Free signup at [easypost.com](https://easypost.com) hands over a TEST key immediately —
+no business verification — and EasyPost publishes a small set of "magic" tracking codes that
+each simulate a **real status lifecycle** through its own API, the same idea as paying with a
+Stripe test card:
+
+| Tracking code | Simulated status |
+| --- | --- |
+| `EZ1000000001` | pre_transit |
+| `EZ2000000002` | in_transit |
+| `EZ3000000003` | out_for_delivery |
+| `EZ4000000004` | delivered |
+| `EZ5000000005` | return_to_sender |
+| `EZ6000000006` | failure |
+| `EZ7000000007` | unknown |
+
+Set any order's courier to anything and its tracking number to one of those codes, press "Check
+live status", and EasyPost answers for real — a genuine tracker object, not a canned response.
+The result is labelled "Simulated (test mode)" in the UI, the same way Stripe's own dashboard
+marks a test-mode payment, so it is never mistaken for a real delivery. A production EasyPost
+key also tracks real shipments across the many real carriers EasyPost itself supports.
+
+`DHL_TRACKING_API_KEY` remains as a second, DHL-specific backend, used only when
+`EASYPOST_API_KEY` is unset — the [DHL API Developer Portal](https://developer.dhl.com) also
+hands out a free key immediately, but its sandbox only answers against DHL's own published demo
+tracking numbers rather than simulating a lifecycle for a number you choose.
+
+**TCS and Leopards have no live backend**, and that gap is deliberate rather than unfinished.
+Both require a merchant/business account application before they issue *any* API credential,
+and neither publishes a self-serve sandbox a solo developer can reach today — so there is
+nothing honest to wire up for either beyond the public tracking link every courier already
+gets. If real credentials are ever obtained, the seam to extend is
+`backend/src/services/courierService.js` — the same console/real split every other channel in
+this app uses (see `services/mailer.js`, `smsClient.js`, `whatsappClient.js`).
+
+---
+
+## Importing customers from Excel
+
+Admin only, from the "Import from Excel" button on `/crm/customers`: upload an `.xlsx` and
+every valid row becomes a `Customer`. The expected header row is **Name, Email**, and
+optionally **Phone, Company, City, Address, Status** — every field the `Customer` model
+actually has, the same shape `POST /api/customers` accepts one row at a time. This is
+deliberately *not* the same column set as the marketing contacts export
+(`/api/contacts/export`): that is a merged Customer+Buyer view with consent and computed
+segments, and importing into that shape would mean inventing consent state nobody actually gave.
+
+**One bad row never costs the rest of the file.** Every row is either created, skipped, or
+failed, and the response reports all three counts rather than aborting at the first problem —
+an upload of 200 rows where row 47 has no email still creates the other 199. A row whose email
+already belongs to an existing customer is **skipped, not overwritten**: the `Customer` model
+has no uniqueness constraint on email (two customers can legitimately share one — a shared
+company inbox, for instance), so "duplicate" here means "already in the CRM," found by a
+case-insensitive lookup, and the safe default is to leave whatever a sales rep has already been
+doing with that record alone.
+
+**Why this is admin-only** rather than following `POST /api/customers`'s
+admin-direct/manager-queues-a-change-request split: a batch of rows has no useful change-request
+equivalent. Either every row becomes its own request — hundreds of approvals for one upload,
+which nobody clicks through one at a time — or the whole batch becomes one opaque request an
+admin approves blind, unable to see which of the rows they are actually agreeing to. Both are
+worse than the rule the contacts export already established for this shape of action: a
+large, batch-level change to the customer book is admin-only, the same as downloading the whole
+filtered list is.
+
+One entry is written to the audit trail for the whole upload — created/skipped/failed counts and
+the filename — not one per row created; see the `import` action on `AuditLog`. A sheet over
+1000 rows is refused outright (`MAX_CUSTOMER_IMPORT_ROWS` in `config/constants.js`), so a
+serverless function never times out half-way through an import with no summary to show for it.
 
 ---
 
@@ -2273,15 +2351,15 @@ it confirms the backend service is routed and whether it reached the database.
 Three layers, each doing a job the others cannot.
 
 ```bash
-cd backend   && npm test          # 1165 tests, 53 suites
-cd frontend  && npm test          # 297 component tests, 30 files
+cd backend   && npm test          # 1212 tests, 57 suites
+cd frontend  && npm test          # 311 component tests, 32 files
 cd frontend  && npm run test:e2e  # 45 end-to-end tests (real stack, real browser)
 ```
 
 Lint runs in both packages with `npm run lint`. All of it runs in CI on every push and pull
 request - see `.github/workflows/ci.yml`.
 
-### Backend - Jest + Supertest, 1165 tests
+### Backend - Jest + Supertest, 1212 tests
 
 Run against **mongodb-memory-server**: a real MongoDB, downloaded once and run in memory.
 The suite never touches a configured database and leaves nothing behind.
@@ -2313,7 +2391,7 @@ asserts the harness really is a replica set, for exactly that reason.
 stubbed, so tests are fast, deterministic, and need no API key. What is tested is everything
 around the model - parsing, validation, scoping, and degradation.
 
-### Frontend - Vitest + React Testing Library, 297 tests
+### Frontend - Vitest + React Testing Library, 311 tests
 
 Login, protected routes, customer create/edit, order creation, AI search, the error
 boundary and the toast system.

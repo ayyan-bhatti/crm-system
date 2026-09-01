@@ -81,6 +81,16 @@ export const PERMISSIONS = {
   writeCustomers: [ADMIN],
 
   /**
+   * Bulk-create customers from an uploaded spreadsheet.
+   *
+   * ADMIN ONLY, and narrower than `writeCustomers`'s admin-direct/manager-via-
+   * approval split — a batch of rows has no useful change-request equivalent;
+   * see the long note on `importCustomers` in customerController.js. Mirrors
+   * the `requireRole(ADMIN)` on `POST /api/customers/import`.
+   */
+  importCustomers: [ADMIN],
+
+  /**
    * Create an order and decide what is on it.
    *
    * Not a sales rep: an order is a commercial commitment, and a rep fulfils

@@ -105,6 +105,9 @@ export const FOOTER_COLUMNS = [
       { label: 'Create an account', to: '/register' },
       { label: 'Your orders', to: '/account/orders' },
       { label: 'Delivery addresses', to: '/account/addresses' },
+      // No sign-in required — a guest checkout never got an account to sign
+      // into, and still deserves a way to check on their parcel.
+      { label: 'Track an order', to: '/track' },
     ],
   },
 ];

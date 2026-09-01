@@ -9,6 +9,7 @@ const {
 const changeRequestService = require('../services/changeRequestService');
 const { recordAudit } = require('../services/auditService');
 const { applyConsent, consentFromBody } = require('../models/marketingConsent');
+const { parseWorkbook, importCustomers: runImport } = require('../services/customerImportService');
 const {
   containsRegex,
   getPagination,
@@ -403,6 +404,53 @@ const deleteCustomer = asyncHandler(async (req, res) => {
   res.json({ success: true, message: 'Customer deleted', data: { id: req.params.id } });
 });
 
+/**
+ * POST /api/customers/import — admin only.
+ *
+ * Body: multipart/form-data, one file field named `file`, an .xlsx workbook
+ * with a header row of Name, Email, and optionally Phone, Company, City,
+ * Address, Status — see services/customerImportService.js for the full
+ * column mapping and duplicate-handling rules.
+ *
+ * WHY THIS IS ADMIN-ONLY RATHER THAN FOLLOWING createCustomer's
+ * ADMIN-DIRECT/MANAGER-VIA-APPROVAL SPLIT
+ *
+ * `createCustomer` queues a MANAGER'S single new customer as one change
+ * request for an admin to approve. A bulk import of, say, 200 rows does not
+ * have an equivalent that is still a "change request" in any useful sense —
+ * either every row becomes its own request (200 approvals for one upload,
+ * which nobody is going to click through one at a time) or the whole batch
+ * becomes one opaque request an admin approves blind, unable to see which of
+ * the 200 rows they are actually agreeing to. Both are worse than the export
+ * screen's already-established rule for exactly this shape of action: taking
+ * a large, batch-level action on the customer book is admin-only, same as
+ * downloading the whole filtered contact list is.
+ */
+const importCustomers = asyncHandler(async (req, res) => {
+  if (!req.file) {
+    throw ApiError.badRequest('Attach an .xlsx file under the "file" field.');
+  }
+
+  const rows = await parseWorkbook(req.file.buffer);
+  const result = await runImport(rows, req.user);
+
+  /*
+   * One entry for the whole upload, not one per row created — see the note on
+   * the `import` action in models/AuditLog.js for why. `entityId` stays null:
+   * there is no single record this action is "about".
+   */
+  await recordAudit(req, {
+    action: 'import',
+    entity: 'customer',
+    label: req.file.originalname,
+    note:
+      `${result.created.length} created, ${result.skipped.length} skipped, ` +
+      `${result.failed.length} failed, out of ${result.totalRows} rows`,
+  });
+
+  res.json({ success: true, data: result });
+});
+
 module.exports = {
   customerScopeFilter,
   listCustomers,
@@ -411,4 +459,5 @@ module.exports = {
   createCustomer,
   updateCustomer,
   deleteCustomer,
+  importCustomers,
 };

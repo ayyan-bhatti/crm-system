@@ -185,6 +185,19 @@ const env = {
   dhlTrackingApiKey: process.env.DHL_TRACKING_API_KEY || '',
 
   /**
+   * EasyPost — the free, self-serve, genuinely test-mode courier backend.
+   *
+   * A free signup at easypost.com hands over a TEST key immediately, and a
+   * published set of "magic" tracking codes (EZ1000000001 through
+   * EZ7000000007 — see services/courierService.js) each simulate a real
+   * status lifecycle through EasyPost's own API. That is the shipping
+   * equivalent of Stripe's test card numbers, and why this is checked BEFORE
+   * DHL_TRACKING_API_KEY in courierService.checkLiveStatus: it works for any
+   * courier, not only DHL, and needs nothing beyond a free account to try.
+   */
+  easypostApiKey: process.env.EASYPOST_API_KEY || '',
+
+  /**
    * The shared secret the scheduled post-sale jobs authenticate with.
    *
    * A MACHINE CREDENTIAL, NOT A USER SESSION. The daily job is invoked by a

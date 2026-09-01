@@ -402,14 +402,15 @@ app.get('/api/health', async (req, res) => {
 
     /*
      * Courier tracking. `trackingLinks` is always true — a public tracking-page
-     * link needs no configuration for any of the three couriers. `dhlLive` is
-     * the one that can actually be false: whether DHL_TRACKING_API_KEY is set,
-     * which is what a "Check live status" button in the app actually depends
-     * on. See services/courierService.js for why DHL is the only courier with
-     * a live-status field at all.
+     * link needs no configuration for any courier. `easypostLive` and
+     * `dhlLive` say whether a "Check live status" button will actually answer
+     * — EasyPost is tried first (works for any courier, including its
+     * test-mode magic tracking codes), DHL is the fallback. See
+     * services/courierService.js.
      */
     courier: {
       trackingLinks: true,
+      easypostLive: require('./services/courierService').isEasyPostLiveConfigured(),
       dhlLive: require('./services/courierService').isDhlLiveConfigured(),
     },
     ...(databaseError ? { databaseError } : {}),

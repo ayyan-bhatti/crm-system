@@ -42,6 +42,17 @@ function errorHandler(err, req, res, next) {
     message = `Invalid value '${err.value}' for field '${err.path}'`;
   }
 
+  /*
+   * multer rejecting an upload — too large, wrong field name, too many files.
+   * This is a mistake in what the CLIENT sent, not a server failure, so it
+   * belongs at 400 rather than falling through to the 500 default. multer's
+   * own `err.message` ("File too large", "Unexpected field") is already
+   * exactly the sentence a user needs.
+   */
+  if (err.name === 'MulterError') {
+    statusCode = 400;
+  }
+
   // Schema validation failure — report every invalid field at once.
   if (err.name === 'ValidationError') {
     statusCode = 400;

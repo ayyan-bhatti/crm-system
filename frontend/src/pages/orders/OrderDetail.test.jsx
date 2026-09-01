@@ -320,9 +320,11 @@ describe('the assignment bar', () => {
 });
 
 /**
- * Recording a courier and tracking number, and the real-vs-link-only split
- * between DHL and everything else — see the note in services/courierService.js
- * for why only DHL gets a "Check live status" button at all.
+ * Recording a courier and tracking number. The "Check live status" button
+ * shows for ANY courier with a tracking number — EasyPost, tried first in the
+ * backend, is carrier-agnostic and works even for `tcs`/`leopards`/`other`
+ * when its test-mode magic tracking codes are used. See the note in
+ * services/courierService.js.
  */
 describe('courier tracking', () => {
   it('shows the tracking number and a link to the courier once one is recorded', async () => {
@@ -337,10 +339,18 @@ describe('courier tracking', () => {
     ).toHaveAttribute('href', 'https://www.tcsexpress.com/track/');
   });
 
-  it('offers a live-status check only for DHL, not for TCS or Leopards', async () => {
+  it('offers a live-status check for any courier, not only DHL', async () => {
     renderAs('manager', order({ fulfilment: 'shipped', courier: 'tcs', trackingNumber: 'CN1' }));
 
-    await screen.findByText(/CN1/);
+    expect(
+      await screen.findByRole('button', { name: /check live status/i })
+    ).toBeInTheDocument();
+  });
+
+  it('offers no live-status check with a courier set but no tracking number yet', async () => {
+    renderAs('manager', order({ fulfilment: 'confirmed', courier: 'tcs', trackingNumber: null }));
+
+    await screen.findByRole('heading', { name: 'ORD-000142' });
     expect(screen.queryByRole('button', { name: /check live status/i })).not.toBeInTheDocument();
   });
 
@@ -366,13 +376,15 @@ describe('courier tracking', () => {
     });
   });
 
-  it('checks live status through the API and shows what DHL says', async () => {
+  it('checks live status through the API and shows what it says', async () => {
     const user = userEvent.setup();
     ordersApi.trackingStatus.mockResolvedValue({
       trackingUrl: 'https://www.dhl.com/pk-en/home/tracking.html?tracking-id=JD0141',
       live: true,
       status: 'delivered',
-      description: 'Delivered',
+      // Distinct from the DeliveryTimeline's own "Delivered" step label, which
+      // renders on this same page regardless of live status.
+      description: 'Delivered to the front desk',
     });
 
     renderAs(
@@ -382,6 +394,30 @@ describe('courier tracking', () => {
 
     await user.click(await screen.findByRole('button', { name: /check live status/i }));
 
-    expect(await screen.findByText(/DHL says: Delivered/i)).toBeInTheDocument();
+    expect(await screen.findByText('Delivered to the front desk')).toBeInTheDocument();
+  });
+
+  /**
+   * EasyPost's test-mode magic codes are the whole point — a demo shipment
+   * with no real courier account should be visibly labelled as simulated,
+   * the same way a Stripe test-mode payment is labelled in its own dashboard.
+   */
+  it('labels a simulated (test-mode) result so it is never mistaken for a real one', async () => {
+    const user = userEvent.setup();
+    ordersApi.trackingStatus.mockResolvedValue({
+      live: true,
+      status: 'delivered',
+      description: 'Delivered',
+      testMode: true,
+    });
+
+    renderAs(
+      'manager',
+      order({ fulfilment: 'shipped', courier: 'other', trackingNumber: 'EZ4000000004' })
+    );
+
+    await user.click(await screen.findByRole('button', { name: /check live status/i }));
+
+    expect(await screen.findByText(/Simulated \(test mode\): Delivered/i)).toBeInTheDocument();
   });
 });

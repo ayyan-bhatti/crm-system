@@ -81,6 +81,11 @@ export default function ShopLayout() {
           <MegaMenu categories={categories} />
 
           <nav className="ml-auto flex items-center gap-4 text-sm">
+            {/* No sign-in required — a guest checkout has no account to sign into. */}
+            <Link to="/track" className="hidden text-ink-2 hover:text-ink sm:inline">
+              Track order
+            </Link>
+
             {isSignedIn ? (
               <>
                 <Link to="/account/orders" className="hidden text-ink-2 hover:text-ink sm:inline">
@@ -152,6 +157,9 @@ export default function ShopLayout() {
                   My orders
                 </Link>
               )}
+              <Link to="/track" className="block py-2 text-sm text-ink-2">
+                Track order
+              </Link>
               <Link to="/crm" className="block py-2 text-xs text-muted">
                 Staff CRM
               </Link>

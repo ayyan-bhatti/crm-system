@@ -229,6 +229,23 @@ const newsletterLimiter = createLimiter({
   message: 'Too many sign-ups from this address. Please try again later.',
 });
 
+/**
+ * The public order-tracking lookup: 10 attempts per 15 minutes per IP.
+ *
+ * Same shape as `loginLimiter`, and deliberately so: an order number plus an
+ * email is a two-factor credential exactly like a username plus a password,
+ * and guessing at it is the same attack — find a valid pair by brute force.
+ * Order numbers are sequential (`ORD-000142`, `ORD-000143`, ...) rather than
+ * random, which makes the FIRST factor easy to enumerate; this limiter is what
+ * makes guessing the second factor (the email) expensive per address.
+ */
+const trackOrderLimiter = createLimiter({
+  name: 'track-order',
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  message: 'Too many tracking attempts from this address. Please wait a few minutes and try again.',
+});
+
 module.exports = {
   createLimiter,
   newsletterLimiter,
@@ -239,4 +256,5 @@ module.exports = {
   aiPerUserLimiter,
   shopLoginLimiter,
   shopRegisterLimiter,
+  trackOrderLimiter,
 };

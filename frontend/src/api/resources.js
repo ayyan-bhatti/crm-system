@@ -53,6 +53,24 @@ export const customersApi = {
   create: (payload) => client.post('/customers', payload).then((r) => r.data.data),
   update: (id, payload) => client.patch(`/customers/${id}`, payload).then((r) => r.data.data),
   remove: (id) => client.delete(`/customers/${id}`).then((r) => r.data),
+
+  /**
+   * Bulk-create customers from an uploaded .xlsx. Admin only.
+   *
+   * `FormData`, not JSON — axios detects it and lets the browser set the
+   * `Content-Type: multipart/form-data; boundary=...` header itself, which is
+   * NOT the same as this client's default `application/json` and cannot be
+   * set by hand (the boundary is generated per-request).
+   *
+   * Resolves even on a partial success: `data.failed`/`data.skipped` can be
+   * non-empty on a 200, because most rows succeeding while a few did not is
+   * the ordinary outcome of importing a real spreadsheet, not an error.
+   */
+  importFile: (file) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return client.post('/customers/import', formData).then((r) => r.data.data);
+  },
   // Figures computed server-side plus an AI narrative about them. Always
   // returns both; `mode` says whether the narrative came from the model.
   summary: (id) => client.get(`/customers/${id}/summary`).then((r) => r.data.data),
