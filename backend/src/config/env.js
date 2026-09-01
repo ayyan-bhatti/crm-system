@@ -127,6 +127,64 @@ const env = {
   mailWebhookAuth: process.env.MAIL_WEBHOOK_AUTH || '',
   mailFrom: process.env.MAIL_FROM || 'SimpleCRM <no-reply@simplecrm.local>',
 
+  /* -------------------------------------------------------------------------
+   * SMS and WhatsApp
+   *
+   * Both follow `MAIL_TRANSPORT`'s pattern exactly, and the repetition is the
+   * point: three channels behaving identically means one thing to learn rather
+   * than three, and the console default means every one of them works end to
+   * end with no account anywhere. See services/smsClient.js and
+   * services/whatsappClient.js.
+   *
+   * Neither is validated below. A missing SMS account is not a configuration
+   * ERROR — it is a deployment that does not send SMS, which is the default
+   * and entirely reasonable state. What would be an error is claiming to send
+   * and not sending, and that is prevented by the transport refusing to start
+   * rather than by a check here.
+   * ---------------------------------------------------------------------- */
+
+  /** console (default) | twilio */
+  smsTransport: process.env.SMS_TRANSPORT || 'console',
+  twilioAccountSid: process.env.TWILIO_ACCOUNT_SID || '',
+  twilioAuthToken: process.env.TWILIO_AUTH_TOKEN || '',
+  /** The sending number, in E.164 (`+441234567890`). */
+  twilioFrom: process.env.TWILIO_FROM || '',
+
+  /** console (default) | meta */
+  whatsappTransport: process.env.WHATSAPP_TRANSPORT || 'console',
+  /** The Cloud API phone-number id — NOT the phone number itself. */
+  whatsappPhoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID || '',
+  whatsappAccessToken: process.env.WHATSAPP_ACCESS_TOKEN || '',
+  /**
+   * The Meta-APPROVED template to send outside the 24-hour service window.
+   *
+   * Not optional in practice, and the reason is a platform rule rather than a
+   * preference: outside 24 hours of the customer's own last message, Meta
+   * accepts ONLY a pre-approved template. Marketing is by definition outside
+   * that window — nobody messages a shop to ask to be marketed at — so an
+   * unset template name means live WhatsApp marketing cannot work, and the
+   * transport says so at the point of sending rather than failing at Meta's.
+   * See services/whatsappClient.js and the README.
+   */
+  whatsappTemplateName: process.env.WHATSAPP_TEMPLATE_NAME || '',
+  whatsappTemplateLanguage: process.env.WHATSAPP_TEMPLATE_LANGUAGE || 'en',
+
+  /**
+   * The shared secret the scheduled post-sale jobs authenticate with.
+   *
+   * A MACHINE CREDENTIAL, NOT A USER SESSION. The daily job is invoked by a
+   * scheduler (Vercel Cron), which has no login, no cookie and no CSRF token,
+   * so gating it on a staff session would be either impossible or a lie —
+   * a service account whose password sits in an environment variable is
+   * a shared secret wearing a costume.
+   *
+   * Unset, the endpoint refuses EVERY request rather than running unprotected.
+   * An automation endpoint open to the internet sends real messages to real
+   * people on demand, so failing closed is the only safe default; see
+   * routes/cronRoutes.js.
+   */
+  cronSecret: process.env.CRON_SECRET || '',
+
   /**
    * Log verbosity: fatal | error | warn | info | debug | trace.
    *

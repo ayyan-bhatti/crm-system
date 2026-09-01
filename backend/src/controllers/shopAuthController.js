@@ -12,6 +12,7 @@ const {
   SHOP_REFRESH_COOKIE,
 } = require('../utils/shopCookies');
 const { assertStrongPassword } = require('../utils/passwordPolicy');
+const { applyConsent, consentFromBody } = require('../models/marketingConsent');
 
 /**
  * Buyer auth: `/api/shop/auth/*`.
@@ -61,6 +62,30 @@ const register = asyncHandler(async (req, res) => {
   }
 
   const buyer = await Buyer.create({ name, email, password });
+
+  /*
+   * MARKETING CONSENT AT REGISTRATION.
+   *
+   * This is where the round's "opt-in checkboxes on guest checkout" lands, and
+   * it is worth saying why it is not on a guest checkout. There is no guest
+   * checkout any more — an earlier round made an account mandatory before
+   * buying, enforced by `protectBuyer` on the route rather than only in the UI
+   * — so registration IS the step every storefront purchase now passes
+   * through. Putting the boxes anywhere else would mean building a form nobody
+   * can reach.
+   *
+   * Applied AFTER the account is created rather than passed to `create`, so
+   * that a malformed consent body can never be the reason a registration
+   * fails. Somebody who cannot make an account because a checkbox confused the
+   * server has lost more than a marketing opt-in.
+   *
+   * `consentFromBody` only accepts a literal `true`, so every value that is
+   * not an explicitly ticked box leaves the channel off.
+   */
+  const consentChanges = consentFromBody(req.body);
+  if (Object.keys(consentChanges).length && applyConsent(buyer, consentChanges).length) {
+    await buyer.save();
+  }
 
   const session = await issueBuyerSession(buyer, req);
   sendShopSession(res, { buyer, ...session }, 201);

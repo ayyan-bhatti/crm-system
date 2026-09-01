@@ -306,6 +306,38 @@ async function seed() {
         assignedTo: owner._id,
         createdBy: owner._id,
         createdAt: daysAgoDate(120 + index * 5),
+
+        /*
+         * MARKETING CONSENT, SEEDED AS A MIXTURE ON PURPOSE.
+         *
+         * The obvious thing is to opt everybody in, so the campaign screens
+         * look impressive. That would make the demo actively misleading: the
+         * whole point of the consent gate is the gap between "matched the
+         * audience" and "can actually be messaged", and a book where everyone
+         * has agreed hides both the gap and the counter that explains it.
+         *
+         * So roughly two thirds take email, a third take SMS and a couple take
+         * WhatsApp, keyed off the index so the data is the same on every seed.
+         * A campaign to "everyone" therefore reports a real skipped count, and
+         * the number is the feature working rather than a bug.
+         */
+        marketing: {
+          email: {
+            optIn: index % 3 !== 2,
+            optInAt: index % 3 !== 2 ? daysAgoDate(118 + index * 5) : null,
+          },
+          sms: {
+            optIn: index % 3 === 0,
+            optInAt: index % 3 === 0 ? daysAgoDate(118 + index * 5) : null,
+          },
+          whatsapp: {
+            optIn: index % 5 === 0,
+            optInAt: index % 5 === 0 ? daysAgoDate(118 + index * 5) : null,
+          },
+        },
+
+        /* One hand-assigned tag, so the tag filter has something to find. */
+        marketingTags: index === 0 ? ['VIP'] : index === 1 ? ['wholesale'] : [],
       })
     );
   }

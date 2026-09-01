@@ -17,6 +17,7 @@ import ResetPassword from './pages/ResetPassword';
 import AcceptInvite from './pages/AcceptInvite';
 
 import {
+  CAMPAIGN_ROLES,
   CUSTOMER_VIEW_ROLES,
   ORDER_WRITE_ROLES,
   PRODUCT_WRITE_ROLES,
@@ -73,6 +74,12 @@ const AuditLog = lazy(() => import('./pages/AuditLog'));
 const Approvals = lazy(() => import('./pages/Approvals'));
 const Account = lazy(() => import('./pages/Account'));
 
+const ContactList = lazy(() => import('./pages/marketing/ContactList'));
+const CampaignList = lazy(() => import('./pages/marketing/CampaignList'));
+const CampaignForm = lazy(() => import('./pages/marketing/CampaignForm'));
+const CampaignDetail = lazy(() => import('./pages/marketing/CampaignDetail'));
+const AutomationLog = lazy(() => import('./pages/marketing/AutomationLog'));
+
 const ShopHome = lazy(() => import('./pages/shop/Home'));
 const ShopProductGrid = lazy(() => import('./pages/shop/ProductGrid'));
 const ShopProductDetail = lazy(() => import('./pages/shop/ProductDetail'));
@@ -83,6 +90,7 @@ const OrderConfirmation = lazy(() => import('./pages/shop/OrderConfirmation'));
 const BuyerOrders = lazy(() => import('./pages/shop/BuyerOrders'));
 const BuyerOrderDetail = lazy(() => import('./pages/shop/BuyerOrderDetail'));
 const BuyerAccount = lazy(() => import('./pages/shop/BuyerAccount'));
+const Unsubscribe = lazy(() => import('./pages/shop/Unsubscribe'));
 
 /**
  * Mounts the buyer session and cart contexts around the whole `/shop` tree,
@@ -156,6 +164,18 @@ export default function App() {
                     <Route path="account/orders" element={<BuyerOrders />} />
                     <Route path="account/orders/:id" element={<BuyerOrderDetail />} />
                     <Route path="account/addresses" element={<BuyerAccount />} />
+                    {/*
+                      Where the unsubscribe link in a marketing email lands.
+
+                      In the SHOP tree and outside every guard, which is the
+                      whole point: a guest contact — somebody who checked out
+                      before accounts were mandatory — has no account to sign
+                      in to, and requiring one would make it impossible to stop
+                      the mail for exactly the people most likely to want it
+                      stopped. The signed token in the link is the
+                      authorisation.
+                    */}
+                    <Route path="unsubscribe" element={<Unsubscribe />} />
                   </Route>
                 </Route>
 
@@ -279,6 +299,48 @@ export default function App() {
                         </ProtectedRoute>
                       }
                     />
+
+                    {/*
+                      MARKETING.
+
+                      `contacts` has NO role guard, deliberately, and it is the
+                      one CRM section that does not. Every role reaches it and
+                      the server scopes what they see: an admin and a manager
+                      get everyone, a sales rep gets only the customers on
+                      orders assigned to them. That is contact detail a rep
+                      already receives with every order, so gating the screen
+                      would withhold nothing while removing the only marketing
+                      action their job calls for — messaging the customer whose
+                      parcel they are holding.
+
+                      `campaigns` IS guarded, because a bulk send is a
+                      commitment made in the business's name to many people at
+                      once. Same reasoning as ORDER_WRITE_ROLES.
+
+                      `automation` is ungated for the same reason its API is:
+                      a scheduled job that stops firing has no symptom other
+                      than a date that stopped moving, and the more people who
+                      can notice that, the shorter the silence. Changing the
+                      settings is admin-only, enforced inside the page and on
+                      the API.
+                    */}
+                    <Route path="contacts" element={<ContactList />} />
+
+                    <Route
+                      path="campaigns"
+                      element={
+                        <ProtectedRoute roles={CAMPAIGN_ROLES}>
+                          <Outlet />
+                        </ProtectedRoute>
+                      }
+                    >
+                      <Route index element={<CampaignList />} />
+                      {/* Before ":id", or "new" is captured as a campaign id. */}
+                      <Route path="new" element={<CampaignForm />} />
+                      <Route path=":id" element={<CampaignDetail />} />
+                    </Route>
+
+                    <Route path="automation" element={<AutomationLog />} />
 
                     {/* Opened to managers alongside admins for buyer-initiated
                         requests — see the backend's phase 4 note on

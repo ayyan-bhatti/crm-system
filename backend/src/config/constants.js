@@ -282,7 +282,16 @@ const PENDING_CHECKOUT_STATUS = {
  */
 const MAX_ORDER_QTY = 20;
 
+/**
+ * The marketing subsystem's own enums and thresholds, spread in here so that
+ * `require('../config/constants')` remains the single place anything imports a
+ * shared constant from. See config/marketing.js for why they live in their own
+ * file — readability, not a different import surface.
+ */
+const marketing = require('./marketing');
+
 module.exports = {
+  ...marketing,
   MAX_ORDER_QTY,
   ROLES,
   REQUESTABLE_ROLES,

@@ -45,7 +45,18 @@ describe('CustomerForm', () => {
       renderWithProviders(<CustomerForm />, { route: '/customers/new', guarded: true });
 
       await user.type(await screen.findByLabelText(/^name/i), 'Karachi Traders');
-      await user.type(screen.getByLabelText(/email/i), 'contact@karachitraders.com');
+      /*
+       * ANCHORED, matching the `/^name/i` above it, and it had to become
+       * anchored when the marketing consent boxes arrived: an unanchored
+       * `/email/i` also matches the "Marketing emails" checkbox, so the query
+       * found two elements and failed.
+       *
+       * The ambiguity was real rather than a testing artefact — a form with a
+       * field labelled "Email" and a checkbox labelled "Email" reads the same
+       * way to a screen reader, which is why the checkbox says "Marketing
+       * emails" rather than the query being loosened.
+       */
+      await user.type(screen.getByLabelText(/^email/i), 'contact@karachitraders.com');
       await user.type(screen.getByLabelText(/city/i), 'Karachi');
 
       await user.click(screen.getByRole('button', { name: /create|save/i }));
@@ -83,7 +94,7 @@ describe('CustomerForm', () => {
       renderWithProviders(<CustomerForm />, { route: '/customers/new', guarded: true });
 
       await user.type(await screen.findByLabelText(/^name/i), 'Karachi Traders');
-      await user.type(screen.getByLabelText(/email/i), 'not-an-email@x.co');
+      await user.type(screen.getByLabelText(/^email/i), 'not-an-email@x.co');
       await user.click(screen.getByRole('button', { name: /create|save/i }));
 
       expect(await screen.findByText(/valid email address/i)).toBeInTheDocument();
@@ -96,7 +107,7 @@ describe('CustomerForm', () => {
       renderWithProviders(<CustomerForm />, { route: '/customers/new', guarded: true });
 
       await user.type(await screen.findByLabelText(/^name/i), 'Acme');
-      await user.type(screen.getByLabelText(/email/i), 'a@b.co');
+      await user.type(screen.getByLabelText(/^email/i), 'a@b.co');
 
       const submit = screen.getByRole('button', { name: /create|save/i });
       await user.click(submit);

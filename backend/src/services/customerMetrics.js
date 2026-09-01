@@ -170,6 +170,114 @@ async function computeCustomerMetrics(customerId) {
 }
 
 /**
+ * The same figures, for MANY customers, in one pipeline.
+ *
+ * WHY THIS EXISTS RATHER THAN A LOOP OVER `computeCustomerMetrics`
+ *
+ * The marketing contacts screen shows a segment tag for every row, and those
+ * tags are read off these metrics. Calling the single-customer function once
+ * per row is one aggregation per contact — a hundred round trips to render one
+ * page, and a thousand once the book grows. That is not a performance nicety:
+ * a list that takes twelve seconds is a list nobody filters, and the filtering
+ * is the feature.
+ *
+ * WHY THE ARITHMETIC IS DUPLICATED RATHER THAN SHARED
+ *
+ * It is not duplicated — it is the same `$group` body with a different `_id`.
+ * The definitions that matter (revenue is completed orders only; the trend
+ * windows are 90 days and the 90 before that) are stated once at the top of
+ * this file and used by both, so the two cannot disagree about what revenue
+ * means. That was the risk worth designing against: a contacts screen calling
+ * someone "high value" on a different definition of value from the one their
+ * own summary page uses.
+ *
+ * @param {Array} customerIds
+ * @returns {Promise<Map<string, object>>} keyed by customer id as a string.
+ *   Customers with no orders are ABSENT rather than present with zeroes — the
+ *   caller has to distinguish "no purchase history" from "spent nothing", and
+ *   a zero-filled row cannot express the difference.
+ */
+async function computeMetricsForCustomers(customerIds) {
+  const ids = (customerIds || [])
+    .filter(Boolean)
+    .map((id) => new mongoose.Types.ObjectId(String(id)));
+
+  if (!ids.length) return new Map();
+
+  const windowStart = daysAgo(TREND_WINDOW_DAYS);
+  const previousWindowStart = daysAgo(TREND_WINDOW_DAYS * 2);
+
+  const rows = await Order.aggregate([
+    { $match: { customer: { $in: ids } } },
+    {
+      $group: {
+        _id: '$customer',
+        orderCount: { $sum: 1 },
+        completedCount: {
+          $sum: { $cond: [{ $eq: ['$status', REVENUE_STATUS] }, 1, 0] },
+        },
+        totalRevenue: {
+          $sum: { $cond: [{ $eq: ['$status', REVENUE_STATUS] }, '$total', 0] },
+        },
+        recentRevenue: {
+          $sum: {
+            $cond: [
+              {
+                $and: [
+                  { $eq: ['$status', REVENUE_STATUS] },
+                  { $gte: ['$createdAt', windowStart] },
+                ],
+              },
+              '$total',
+              0,
+            ],
+          },
+        },
+        previousRevenue: {
+          $sum: {
+            $cond: [
+              {
+                $and: [
+                  { $eq: ['$status', REVENUE_STATUS] },
+                  { $gte: ['$createdAt', previousWindowStart] },
+                  { $lt: ['$createdAt', windowStart] },
+                ],
+              },
+              '$total',
+              0,
+            ],
+          },
+        },
+        firstOrderDate: { $min: '$createdAt' },
+        lastOrderDate: { $max: '$createdAt' },
+      },
+    },
+  ]);
+
+  const now = new Date();
+  const byCustomer = new Map();
+
+  for (const row of rows) {
+    const totalRevenue = round(row.totalRevenue);
+
+    byCustomer.set(String(row._id), {
+      orderCount: row.orderCount,
+      completedCount: row.completedCount,
+      totalRevenue,
+      averageOrderValue: row.completedCount ? round(totalRevenue / row.completedCount) : 0,
+      firstOrderDate: row.firstOrderDate,
+      lastOrderDate: row.lastOrderDate,
+      daysSinceLastOrder: row.lastOrderDate ? daysBetween(row.lastOrderDate, now) : null,
+      trend: describeTrend(row),
+      recentRevenue: round(row.recentRevenue),
+      previousRevenue: round(row.previousRevenue),
+    });
+  }
+
+  return byCustomer;
+}
+
+/**
  * Classify the revenue trend.
  *
  * Deliberately coarse — five buckets, not a percentage. A percentage change
@@ -207,6 +315,7 @@ function round(value) {
 
 module.exports = {
   computeCustomerMetrics,
+  computeMetricsForCustomers,
   describeTrend,
   TREND_WINDOW_DAYS,
   REVENUE_STATUS,

@@ -131,9 +131,87 @@ function canAdvanceOrder(user, order) {
   return canAccessOrder(user, order);
 }
 
+/* ---------------------------------------------------------------------------
+ * THE MARKETING RULES
+ *
+ * Mirrored by `usePermissions.js` on the frontend, which shows or hides the
+ * matching controls. These are the enforcement; that is the courtesy.
+ * -------------------------------------------------------------------------*/
+
+/**
+ * Reach the marketing contacts screen.
+ *
+ * EVERY ROLE MAY, and the interesting part is that this does not contradict
+ * `canViewCustomers` refusing a sales rep the customer book. The two screens
+ * answer different questions and are scoped differently:
+ *
+ *   the customer book   every customer, with notes, history and commercial
+ *                       detail. A rep gets none of it.
+ *   marketing contacts  the people a rep is already fulfilling orders for,
+ *                       with their contact details and consent state — which
+ *                       they already receive, one at a time, on every order
+ *                       assigned to them.
+ *
+ * A rep's scope here is enforced in `contactService.visibleCustomerIds`, and
+ * it is narrow by construction: the customers on orders assigned to them, and
+ * nobody else. Gating the whole screen instead would leave a rep unable to
+ * message the customer whose parcel they are holding, which is the one
+ * marketing action their job actually calls for.
+ */
+const canViewContacts = () => true;
+
+/**
+ * Launch a bulk campaign.
+ *
+ * Not a sales rep, for the same reason they cannot create an order: a campaign
+ * is a commitment made in the business's name to many people at once, and a
+ * rep's remit is the work in front of them. They may still message an
+ * individual contact of their own — see `canMessageContact`.
+ */
+const canLaunchCampaigns = (user) => hasFullRecordAccess(user);
+
+/**
+ * Message ONE contact directly.
+ *
+ * Everyone, scoped by whose contacts they can see. This is the extension of
+ * the existing AI follow-up draft from "text to copy" to "text that sends",
+ * and withholding it from the rep would leave the feature useful to exactly
+ * the two roles least likely to be chasing a delivery.
+ */
+const canMessageContact = () => true;
+
+/**
+ * Decide a campaign waiting for approval.
+ *
+ * Admin only, and deliberately not delegated to managers — the same rule as
+ * `approveChanges`, for the same reason: managers are where these requests
+ * come from, and an approver who can approve their own is not an approver.
+ */
+const canApproveCampaigns = (user) => isAdmin(user);
+
+/**
+ * Export the contact book to a file.
+ *
+ * ADMIN ONLY, and this is a deliberate step up from viewing. Reading contacts
+ * a page at a time and downloading the whole filtered book as a spreadsheet
+ * are different acts even over identical rows: the first is looking something
+ * up, the second is a copy of the customer list leaving the building. Every
+ * export is also written to the audit trail.
+ */
+const canExportContacts = (user) => isAdmin(user);
+
+/** Change how and when the post-sale automations run. Admin only. */
+const canConfigureAutomation = (user) => isAdmin(user);
+
 module.exports = {
   requireRole,
   requireManagerOrAdmin,
+  canViewContacts,
+  canLaunchCampaigns,
+  canMessageContact,
+  canApproveCampaigns,
+  canExportContacts,
+  canConfigureAutomation,
   requireAdmin: requireRole(ROLES.ADMIN),
   isAdmin,
   isSalesRep,

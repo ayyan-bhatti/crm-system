@@ -26,6 +26,12 @@ const icons = {
     'M9 11a3.5 3.5 0 100-7 3.5 3.5 0 000 7zm7.5 0a3 3 0 100-6 3 3 0 000 6zM9 13c-3.9 0-7 1.9-7 4.3V19h14v-1.7C16 14.9 12.9 13 9 13zm7.8.2c1.9.6 3.2 1.9 3.2 3.4V19h2v-2.4c0-1.7-2.2-3-5.2-3.4z',
   audit:
     'M6 2h9l5 5v15H6V2zm8 1.5V8h4.5L14 3.5zM8 12h8v1.5H8V12zm0 4h8v1.5H8V16z',
+  /* An envelope, for the marketing contacts list. */
+  campaigns:
+    'M3 5h18v14H3V5zm2 2.4V17h14V7.4l-7 4.6-7-4.6zm.9-.4L12 10.6 18.1 7H5.9z',
+  /* A clock with a check, for the scheduled post-sale jobs. */
+  automation:
+    'M12 2a10 10 0 100 20 10 10 0 000-20zm0 2a8 8 0 110 16 8 8 0 010-16zm-1 3v6l5 2.9 1-1.7-4-2.3V7h-2z',
 };
 
 const NAV_ITEMS = [
@@ -43,6 +49,26 @@ const NAV_ITEMS = [
    * person actually holding the parcel.
    */
   { to: '/crm/deliveries', label: 'Deliveries', icon: 'deliveries' },
+  /*
+   * MARKETING.
+   *
+   * `Contacts` has no `requires` for the same reason `Deliveries` has none:
+   * every role reaches it and the endpoint scopes it. A rep sees the people
+   * whose orders they are fulfilling, which is contact detail they already
+   * receive with each order — and it is the one screen from which they can
+   * message that customer.
+   *
+   * `Campaigns` does, because a bulk send is not a rep's decision.
+   *
+   * `Automation` has none either, deliberately: a scheduled job that stops
+   * firing produces no error and no complaint, and the only visible symptom is
+   * a last-run date that stopped moving. The more people who can notice that,
+   * the shorter the silence — so reading it is open and only CHANGING it is
+   * gated, inside the page.
+   */
+  { to: '/crm/contacts', label: 'Contacts', icon: 'customers', requires: 'viewContacts' },
+  { to: '/crm/campaigns', label: 'Campaigns', icon: 'campaigns', requires: 'launchCampaigns' },
+  { to: '/crm/automation', label: 'Automation', icon: 'automation' },
   // `requires` names an ACTION, not a role. See hooks/usePermissions for why:
   // the role list is an implementation detail of the permission, and repeating
   // it here is how the app ended up with the same policy spelled three ways.

@@ -8,6 +8,7 @@ const {
 } = require('../middleware/roles');
 const changeRequestService = require('../services/changeRequestService');
 const { recordAudit } = require('../services/auditService');
+const { applyConsent, consentFromBody } = require('../models/marketingConsent');
 const {
   containsRegex,
   getPagination,
@@ -198,6 +199,26 @@ const createCustomer = asyncHandler(async (req, res) => {
   };
 
   /*
+   * MARKETING CONSENT, CAPTURED AT CREATION.
+   *
+   * Built by `applyConsent` onto a bare object rather than assigned as raw
+   * booleans, so the timestamps are stamped by the same code that stamps them
+   * everywhere else — a consent recorded here has to be indistinguishable from
+   * one recorded at the storefront, or "when did they agree" gets a different
+   * quality of answer depending on which form was used.
+   *
+   * A checkbox that is absent leaves the channel off, which is what the
+   * schema defaults to anyway. There is no path through this handler that can
+   * produce an opted-in customer without an explicit `true` in the body.
+   */
+  const consentChanges = consentFromBody(req.body);
+  if (Object.keys(consentChanges).length) {
+    const holder = { marketing: {} };
+    applyConsent(holder, consentChanges);
+    fields.marketing = holder.marketing;
+  }
+
+  /*
    * A manager PROPOSES; an admin DOES.
    *
    * Nothing is written here for a manager — the intended customer is held in a
@@ -268,6 +289,28 @@ const updateCustomer = asyncHandler(async (req, res) => {
 
   if (req.body.assignedTo !== undefined) {
     changes.assignedTo = req.body.assignedTo || null;
+  }
+
+  /*
+   * Consent, if the form sent any.
+   *
+   * Applied to a copy of the CURRENT block so `applyConsent` sees the existing
+   * state and can tell a change from a no-op — that is what keeps `optInAt`
+   * from being pushed forward every time somebody saves the form with the box
+   * already ticked. Reconstructing it from scratch would reset the date
+   * consent was given to the date the record was last edited, which is the
+   * one field whose whole value is that it does not move.
+   *
+   * It goes through the same change-request queue as every other field below,
+   * so a MANAGER ticking a consent box proposes it rather than writing it —
+   * consistent with the rest of the customer book, and arguably more important
+   * here than for a phone number.
+   */
+  const consentChanges = consentFromBody(req.body);
+  if (Object.keys(consentChanges).length) {
+    const holder = { marketing: customer.toObject().marketing || {} };
+    applyConsent(holder, consentChanges);
+    changes.marketing = holder.marketing;
   }
 
   /*

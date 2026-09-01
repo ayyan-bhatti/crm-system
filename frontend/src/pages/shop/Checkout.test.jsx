@@ -210,7 +210,18 @@ describe('Checkout', () => {
           'cod',
           // The delivery speed the buyer chose. Standard is the default, and
           // the option list only renders once the server's config arrives.
-          'standard'
+          'standard',
+          /*
+           * The marketing consent map, added this round.
+           *
+           * EMPTY, and the emptiness is the assertion. These fixtures tick no
+           * consent box, so the checkout must post no consent changes at all.
+           * An object carrying `emailOptIn: false` would be this page silently
+           * WITHDRAWING a consent the buyer gave somewhere else — the whole
+           * difference between "they did not tick it" and "they asked to be
+           * taken off". See `applyConsent` in models/marketingConsent.js.
+           */
+          {}
         )
       );
       expect(await screen.findByText('CONFIRMATION PAGE')).toBeInTheDocument();
@@ -250,7 +261,18 @@ describe('Checkout', () => {
           [{ product: 'p1', quantity: 1, variantId: null }],
           'addr-1',
           'card',
-          'standard'
+          'standard',
+          /*
+           * The marketing consent map, added this round.
+           *
+           * EMPTY, and the emptiness is the assertion. These fixtures tick no
+           * consent box, so the checkout must post no consent changes at all.
+           * An object carrying `emailOptIn: false` would be this page silently
+           * WITHDRAWING a consent the buyer gave somewhere else — the whole
+           * difference between "they did not tick it" and "they asked to be
+           * taken off". See `applyConsent` in models/marketingConsent.js.
+           */
+          {}
         )
       );
 
@@ -299,7 +321,18 @@ describe('Checkout', () => {
           'cod',
           // The delivery speed the buyer chose. Standard is the default, and
           // the option list only renders once the server's config arrives.
-          'standard'
+          'standard',
+          /*
+           * The marketing consent map, added this round.
+           *
+           * EMPTY, and the emptiness is the assertion. These fixtures tick no
+           * consent box, so the checkout must post no consent changes at all.
+           * An object carrying `emailOptIn: false` would be this page silently
+           * WITHDRAWING a consent the buyer gave somewhere else — the whole
+           * difference between "they did not tick it" and "they asked to be
+           * taken off". See `applyConsent` in models/marketingConsent.js.
+           */
+          {}
         )
       );
     });

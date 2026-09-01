@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { customersApi, usersApi } from '../../api/resources';
+import ConsentCheckboxes from '../../components/ConsentCheckboxes';
 import { errorMessage } from '../../api/client';
 import useFetch from '../../hooks/useFetch';
 import usePermissions from '../../hooks/usePermissions';
@@ -32,6 +33,9 @@ export default function CustomerForm() {
     status: 'lead',
     notes: '',
     assignedTo: '',
+    emailOptIn: false,
+    smsOptIn: false,
+    whatsappOptIn: false,
   });
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -74,6 +78,11 @@ export default function CustomerForm() {
       status: existing.status || 'lead',
       notes: existing.notes || '',
       assignedTo: existing.assignedTo?._id || '',
+      // Read out of the stored channel-keyed block into the flat names the
+      // checkboxes and the API speak. See models/marketingConsent.js.
+      emailOptIn: Boolean(existing.marketing?.email?.optIn),
+      smsOptIn: Boolean(existing.marketing?.sms?.optIn),
+      whatsappOptIn: Boolean(existing.marketing?.whatsapp?.optIn),
     });
   }, [existing]);
 
@@ -227,6 +236,27 @@ export default function CustomerForm() {
               placeholder="Anything worth remembering about this account."
             />
           </Field>
+
+          {/*
+            Marketing consent.
+
+            THREE SEPARATE BOXES, and every one starts unchecked — for a new
+            customer because the schema defaults them off, and on an edit
+            because they are read from what is actually stored. There is no
+            code path through this form that produces an opted-in customer
+            without somebody ticking a box.
+
+            The warning is not decoration. A rep can type a customer in from a
+            business card, and a business card is not consent. Every change
+            here is written to the audit trail against the name of whoever made
+            it, which is exactly the record a complaint gets checked against.
+          */}
+          <ConsentCheckboxes
+            legend="Marketing consent"
+            hint="Only tick these if this person has actually agreed to be contacted this way. Changes are recorded in the audit trail against your name."
+            value={form}
+            onChange={(next) => setForm((prev) => ({ ...prev, ...next }))}
+          />
 
           <div className="flex gap-3 pt-2">
             <button type="submit" className={btnPrimary} disabled={submitting}>

@@ -12,6 +12,11 @@ const { matchOrCreateCustomer } = require('../services/storefrontCustomerService
 const { recordAudit } = require('../services/auditService');
 const stripeService = require('../services/stripeService');
 const { publicOrigin } = require('../utils/publicUrl');
+const { consentFromBody } = require('../models/marketingConsent');
+const { setConsentEverywhere } = require('../services/unsubscribeService');
+const { componentLogger } = require('../config/logger');
+
+const log = componentLogger('shop-checkout');
 const {
   PAYMENT_METHOD_VALUES,
   STRIPE_PAYMENT_METHODS,
@@ -129,6 +134,35 @@ const checkout = asyncHandler(async (req, res) => {
     city: chosen.city || '',
     phone: chosen.phone || '',
   };
+
+  /*
+   * MARKETING CONSENT AT CHECKOUT.
+   *
+   * The round asks for opt-in checkboxes on guest checkout. There is no guest
+   * checkout — an account is mandatory before buying — so the boxes live on
+   * registration AND here, which between them cover both kinds of person
+   * reaching this point: somebody buying for the first time, and a returning
+   * buyer who registered before these boxes existed and would otherwise never
+   * be asked.
+   *
+   * Written through `setConsentEverywhere` so it lands on the `Buyer` AND on
+   * the linked `Customer`, rather than only on the record this request happens
+   * to be holding. A consent that exists on one half of a person is a consent
+   * the merged contact view has to reconcile, and a checkout is exactly where
+   * the two records for one human are most likely to both exist.
+   *
+   * Deliberately NOT awaited into the checkout's failure path: a consent that
+   * cannot be recorded must not stop somebody buying something. It is logged
+   * and the purchase proceeds, which is the same trade the mailer makes.
+   */
+  const consentChanges = consentFromBody(req.body);
+  if (Object.keys(consentChanges).length) {
+    try {
+      await setConsentEverywhere(buyer.email, consentChanges);
+    } catch (err) {
+      log.warn({ err, buyerId: buyer._id }, 'could not record checkout marketing consent');
+    }
+  }
 
   if (STRIPE_PAYMENT_METHODS.includes(paymentMethod)) {
     return startStripeCheckout(req, res, { buyer, rawItems, shipping, deliverySpeed });

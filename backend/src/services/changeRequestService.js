@@ -47,7 +47,7 @@ const log = componentLogger('change-requests');
  */
 
 /** The models a request can target, by entity name. */
-const MODELS = { customer: Customer, order: Order };
+const MODELS = { customer: Customer, order: Order, campaign: require('../models/Campaign') };
 
 /**
  * Record a proposed change.
@@ -185,6 +185,28 @@ async function applyChange(request, session) {
 
   if (request.action === 'delete') {
     await doc.deleteOne({ session });
+    return doc;
+  }
+
+  /*
+   * A CAMPAIGN SEND WRITES NOTHING HERE, AND THAT IS THE POINT.
+   *
+   * Approving a campaign dispatches messages to real people. That cannot go
+   * inside this transaction, for the same two reasons the refund path stays
+   * outside it and states at length: a MongoDB transaction can be retried
+   * automatically on a write conflict, and a retried dispatch is a list
+   * messaged twice; and an email, once sent, cannot be rolled back by
+   * aborting anything.
+   *
+   * So the transaction does the part that IS transactional — marking the
+   * request approved — and `approve()` dispatches afterwards, once the commit
+   * has actually happened. The ordering is the opposite of the refund's
+   * (money moves first, because a failed refund should leave nothing changed)
+   * and for a symmetrical reason: an approval that commits and then fails to
+   * send leaves a campaign an admin can retry, whereas a send that succeeds
+   * against an aborted approval leaves messages nobody authorised.
+   */
+  if (request.action === 'send') {
     return doc;
   }
 
@@ -327,6 +349,22 @@ async function approve(requestId, actor) {
     'change approved and applied'
   );
 
+  /*
+   * The dispatch, deliberately after the commit — see the `send` branch in
+   * `applyChange` for why it cannot be inside the transaction.
+   *
+   * A failure here does NOT un-approve the request. The approval is a real
+   * decision that was really made, and reverting it would hide the fact that
+   * an administrator agreed; the campaign is left marked `failed` with its
+   * reason attached, which is a state an admin can see and retry from.
+   */
+  if (request.action === 'send' && request.entity === 'campaign') {
+    const campaignService = require('./campaignService');
+    const campaign = await campaignService.dispatchApproved(request.entityId, actor);
+
+    return { request, result: campaign };
+  }
+
   await notifyBuyerOfOutcome(request, 'approved');
 
   return { request, result };
@@ -352,6 +390,19 @@ async function reject(requestId, actor, note = '') {
   await request.save();
 
   log.info({ requestId: request._id, by: actor._id }, 'change rejected');
+
+  /*
+   * A rejected campaign goes back to `draft` rather than staying stuck in
+   * `pending_approval`. Nothing was sent, so there is nothing to undo — but
+   * leaving it in the approval state would make it unsendable AND uneditable,
+   * which is a dead record rather than a rejected proposal. The author can
+   * narrow the audience and ask again, which is the outcome a rejection is
+   * usually reaching for.
+   */
+  if (request.action === 'send' && request.entity === 'campaign') {
+    const campaignService = require('./campaignService');
+    await campaignService.markRejected(request.entityId);
+  }
 
   await notifyBuyerOfOutcome(request, 'rejected');
 

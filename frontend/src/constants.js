@@ -54,3 +54,15 @@ export const CUSTOMER_VIEW_ROLES = [ROLES.ADMIN, ROLES.MANAGER];
 
 /** Roles that may create an order and decide what is on it. */
 export const ORDER_WRITE_ROLES = [ROLES.ADMIN, ROLES.MANAGER];
+
+/**
+ * Roles that may launch a bulk campaign.
+ *
+ * Not a sales rep — the same reasoning as ORDER_WRITE_ROLES: a campaign is a
+ * commitment made in the business's name to many people at once. A rep may
+ * still message ONE contact of their own, which is why the contacts screen
+ * itself has no role list here at all: every role reaches it, scoped by the
+ * server. Mirrors `canLaunchCampaigns` and the `requireManagerOrAdmin` on
+ * backend/src/routes/campaignRoutes.js.
+ */
+export const CAMPAIGN_ROLES = [ROLES.ADMIN, ROLES.MANAGER];

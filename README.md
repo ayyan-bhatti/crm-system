@@ -18,6 +18,7 @@ Mongoose · JWT auth with bcrypt · Jest + Supertest with an in-memory MongoDB.
 - [API reference](#api-reference)
 - [How AI search works](#how-ai-search-works)
 - [AI customer insights](#ai-customer-insights)
+- [Marketing](#marketing)
 - [Order stock rules](#order-stock-rules)
 - [Pagination and indexes](#pagination-and-indexes)
 - [Design system](#design-system)
@@ -133,6 +134,13 @@ a deployment immune to host-header injection in reset emails. See `src/utils/pub
 | `STRIPE_WEBHOOK_SECRET` | no | — | `whsec_…` Verifies incoming webhooks. **Required if the secret key is set** — see below |
 | `STRIPE_SUCCESS_PATH` | no | `/order-confirmation` | Where Stripe returns a buyer after paying |
 | `STRIPE_CANCEL_PATH` | no | `/checkout` | Where Stripe returns a buyer who backs out |
+| `SMS_TRANSPORT` | no | `console` | `console` logs the message; `twilio` sends it for real |
+| `TWILIO_ACCOUNT_SID` / `TWILIO_AUTH_TOKEN` / `TWILIO_FROM` | no | — | Required when `SMS_TRANSPORT=twilio`. `TWILIO_FROM` is a number Twilio gave you, in E.164 |
+| `WHATSAPP_TRANSPORT` | no | `console` | `console` logs the message; `meta` sends through the WhatsApp Cloud API |
+| `WHATSAPP_PHONE_NUMBER_ID` / `WHATSAPP_ACCESS_TOKEN` | no | — | Required when `WHATSAPP_TRANSPORT=meta`. The phone number ID, not the number itself |
+| `WHATSAPP_TEMPLATE_NAME` | no | — | A Meta-**approved** marketing template. Sending is refused without one — see [Marketing](#marketing) |
+| `WHATSAPP_TEMPLATE_LANGUAGE` | no | `en` | The template's approved language code |
+| `CRON_SECRET` | no | — | Shared secret the scheduled post-sale jobs authenticate with. Unset ⇒ they never run — see [Marketing](#marketing) |
 
 #### Setting up Stripe (test mode)
 
@@ -887,6 +895,16 @@ account would be one.
 | Reassign a customer to another user | ✅ | ✅ | ❌ 403 |
 | List colleagues for an "assign to" dropdown | ✅ | ✅ | ✅ |
 | User management (list / create / edit / delete) | ✅ | ❌ 403 | ❌ 403 |
+| View marketing contacts | ✅ all | ✅ all | ✅ own assigned only |
+| Message one contact | ✅ | ✅ | ✅ (own assigned only) |
+| Launch a campaign (own contacts) | ✅ | ✅ | ❌ 403 |
+| Launch a campaign (beyond own contacts) | ✅ immediate | ⏳ queues for admin | ❌ 403 |
+| Approve a pending campaign | ✅ | ❌ 403 | ❌ 403 |
+| Export contacts to Excel | ✅ | ❌ 403 | ❌ 403 |
+| Configure post-sale automation timing | ✅ | ❌ 403 | ❌ 403 |
+
+See [Marketing](#marketing) for the full reasoning, especially why "own contacts" means
+something specific in a codebase with no team model.
 
 **"Own" means** a customer the rep created *or* is assigned to; and an order they created
 *or* whose customer is assigned to them.
@@ -1551,6 +1569,179 @@ summary endpoint already calculates.
 
 ---
 
+## Marketing
+
+Everyone this business can reach — CRM customers, storefront buyers, and the guest contacts
+left over from before an account was mandatory — merged into one contactable list, with
+AI-drafted campaigns and two scheduled post-sale nudges. All of it is built on the pieces
+above: consent lives next to the customer record, segments reuse churn risk unchanged, and
+approval reuses the existing change-request queue.
+
+### The one rule everything else follows
+
+**Nobody is messaged on a channel they have not explicitly opted in to.** Not by a campaign,
+not by a staff member messaging one contact, not by either scheduled job, and not because an
+administrator approved the send — approving a campaign means agreeing it should reach the
+people who agreed to receive it, nothing wider.
+
+This is enforced in exactly one place, `services/messagingService.sendToContact`. Every send
+path in the codebase — the campaign dispatcher, the individual-contact message, both post-sale
+jobs — calls through it, and consent is checked there before a transport is ever touched.
+Checking it in four places would be four chances for the rule to be subtly different, and the
+one that drifted is by definition the one nobody looked at.
+
+A contact who matches an audience but has not opted in is not silently dropped: they get an
+`OutboundMessage` row with `skipped_no_consent`, and the campaign's `skippedNoConsentCount`
+goes up. "Sent to 40 of 60" is never a mystery — the other 20 are counted, not lost.
+
+### Contacts are merged, not duplicated
+
+A `Customer` (a rep typed them in, or a checkout upserted one) and a `Buyer` (a storefront
+account) can be the same human, and the marketing list merges them **on email**, the same key
+the rest of the app already dedupes on. `linkedCustomerId` is deliberately *not* the merge
+key — it is only set at a buyer's first checkout, so a buyer who registered and never ordered
+has none, and merging on the link alone would show them as a stranger to their own CRM record.
+
+| Source | Means |
+| --- | --- |
+| `crm` | A `Customer` with no matching `Buyer` — entered by staff |
+| `storefront` | A `Buyer` with no matching `Customer` |
+| `both` | The same email on both records |
+| `guest` | A `Customer` with no `createdBy` and no `Buyer` — upserted from a checkout placed before accounts were mandatory. No new ones are created, but the ones that exist stay reachable and, importantly, excludable |
+
+Segment tags (`new`, `healthy`, `at_risk`, `dormant`, `high_value`) are **computed on every
+read**, not stored — the same reasoning as the delivery board's ranking: they are true only of
+a particular day, and a stored tag would go stale the moment the clock passed midnight with
+nothing to refresh it. They are entirely the existing churn-risk and revenue-trend arithmetic;
+nothing here is a second scoring system, so a contact cannot be "at risk" on this screen and
+"on track" on their own summary page.
+
+### Consent, and where it is collected
+
+`emailOptIn`, `smsOptIn` and `whatsappOptIn` are three **independent** fields — never one
+combined checkbox, because agreeing to email is not agreeing to a WhatsApp message on a
+Sunday evening. Every one defaults to `false`; there is no code path that produces an
+opted-in contact without somebody explicitly ticking a box. Collected at:
+
+- the internal Add/Edit Customer form (an admin write, or a manager's change request, exactly
+  like every other field on that form)
+- storefront registration (checkout no longer accepts guests, so this is the step every
+  purchase now passes through)
+- checkout itself, for a returning buyer who registered before these boxes existed
+
+An unsubscribe link is appended to every marketing email automatically and **genuinely
+works** — the token is an HMAC over the email and channel, verified server-side, requiring no
+login (a guest contact has no account to sign in to). Clicking it flips the opt-in off on
+*every* record for that email in one call, which is the detail a per-record implementation
+gets wrong: turn it off on only the `Customer` and the linked `Buyer` still says yes, the
+merged contact still resolves as consented, and the next campaign reaches them anyway.
+
+### Campaigns: who may send, and who has to ask first
+
+| Action | admin | manager | sales_rep |
+| --- | :---: | :---: | :---: |
+| View marketing contacts | all | all | own assigned only |
+| Message one contact | ✅ | ✅ | ✅ (own assigned only) |
+| Launch a campaign to their own contacts | ✅ immediate | ✅ immediate | ❌ 403 |
+| Launch a campaign reaching beyond their own contacts | ✅ immediate | ⏳ needs approval | ❌ 403 |
+| Approve a pending campaign | ✅ | ❌ | ❌ |
+| Export contacts to Excel | ✅ | ❌ 403 | ❌ 403 |
+| Configure automation timing | ✅ | ❌ 403 | ❌ 403 |
+
+"A manager's own contacts" needed a definition this codebase does not otherwise have — there
+is no team model, no `managerId` on `User`; managers see every customer and own none of them,
+by design from earlier rounds. So it is read as the contacts a manager is personally
+connected to: assigned to, or created by, them. Anything wider queues through the **same**
+`ChangeRequest` model that already carries customer and order edits, rather than a second
+approval queue — an admin has one place to look.
+
+The check runs **at send time**, against the audience as it resolves right then, not when the
+campaign was drafted. An audience is a filter ("at-risk customers"), not a fixed list — it is
+a different set of people every morning — so approving a campaign that matched forty of a
+manager's own contacts must not let it go out a week later to four hundred strangers on the
+strength of an approval that was honest when it was given.
+
+A sent campaign is terminal. It cannot be re-sent — "it looked like it failed so I pressed it
+again" is exactly how a list gets messaged twice — a repeat has to be a new campaign with its
+own recipient rows.
+
+### Drafting content
+
+One AI call drafts all four forms — an email subject and body, an SMS, a WhatsApp message,
+and a social post — from a goal and an audience description, so a campaign cannot end up with
+its email announcing something its SMS does not mention. **Nothing sends without a human
+reviewing it first**, in this round: saving a draft is a separate act from sending it, and
+sending is a separate, deliberate act on the campaign's own page.
+
+**Social media posting is deliberately out of scope.** The social post is generated as text
+for a staff member to copy and paste; nothing in this app posts to any platform. Real
+auto-posting means a per-platform OAuth app, platform review and approval, stored tokens with
+posting permission on the business's own accounts, and a silent failure mode when a token
+expires — that is a project on its own, not a field on this one. Generating strong copy for a
+human to post is the right-sized version of "social media marketing" for this round.
+
+### The channel transports
+
+Email, SMS and WhatsApp all follow the same pattern the password-reset mailer already uses: a
+`console` transport that works today with zero accounts (the full message is written to the
+log, not dropped), and a real provider one environment variable away.
+
+| Channel | Real transport | Notes |
+| --- | --- | --- |
+| Email | `MAIL_TRANSPORT=webhook` | Already existed; bulk sends now batch rather than firing every request at once |
+| SMS | `SMS_TRANSPORT=twilio` | Twilio's REST API, form-encoded, HTTP Basic auth |
+| WhatsApp | `WHATSAPP_TRANSPORT=meta` | The WhatsApp Cloud API |
+
+**WhatsApp needs a template, and there is no way around it.** Outside 24 hours of a
+customer's own last message, WhatsApp accepts *only* a Meta-approved message template —
+marketing is always outside that window, because nobody messages a shop asking to be
+marketed at. Sending free-form text there does not fail loudly; it is silently discarded. So
+the transport refuses to send at all when `WHATSAPP_TEMPLATE_NAME` is unset, rather than
+reporting success for a message the platform dropped. What has to happen on Meta's side
+before this can go live — a verified Business account, a registered WhatsApp Business number,
+a template submitted under the **Marketing** category and approved, a permanent System User
+access token — is documented at length in `backend/.env.example`.
+
+### Post-sale automation
+
+Two scheduled jobs, both idempotent, both respecting consent, both visible on `/crm/automation`
+to any signed-in staff member (only an administrator may change their settings):
+
+- **Review request** — N days (default **5**, admin-configurable 1–30) after an order is
+  marked delivered, ask how it went. Warm and plain, no fabricated praise, no incentive that
+  was never authorised.
+- **Reorder reminder** — nudges a customer who is *approaching* their own usual reorder
+  point (0.8–1.2 of their typical gap, reusing the exact cadence churn risk measures), before
+  they go quiet rather than after. The window deliberately does not overlap churn risk's: a
+  customer must never be both "coming up for a reorder" and "at risk of churn" in the same
+  week.
+
+**Idempotence is the actual engineering problem here**, and it is defended three ways at
+once: each order is claimed with a conditional update (`findOneAndUpdate` on the flag still
+being `null`) *before* anything is sent, so two overlapping runs cannot both send; the flag is
+set before sending rather than after, and rolled back only on a failed delivery so a genuine
+failure can retry; and a job only ever looks back 30 days, so the very first run does not mail
+the entire order history — every existing order's flag starts `null`, which the naive version
+of this feature gets wrong on day one and nowhere else.
+
+Both jobs run behind `POST /api/cron/post-sale`, authenticated by `CRON_SECRET` rather than a
+user session — a scheduler has no login, no cookie, no CSRF token, so this is a machine
+credential, checked in constant time, that **fails closed**: unset, every request is refused,
+which is a visible failure (the automation screen's last-run date stops moving) rather than an
+endpoint anyone on the internet could use to make the business send real mail. Vercel Cron is
+configured in `vercel.json` to hit it daily at 09:00 UTC.
+
+### Exporting to Excel
+
+Admin only — reading contacts a page at a time and downloading the whole filtered book as a
+file are different acts even over identical rows, and every export is written to the audit
+trail with who, how many, and which filters. The file is a real `.xlsx` (via `exceljs`, not a
+CSV wearing the wrong extension, which several spreadsheet apps refuse to open cleanly), with
+every free-text cell defused against formula injection — a contact named `=HYPERLINK(...)`
+would otherwise become a live link the moment the file was opened.
+
+---
+
 ## Order stock rules
 
 This is the only place in the app where one request mutates a second collection, so the
@@ -2056,15 +2247,15 @@ it confirms the backend service is routed and whether it reached the database.
 Three layers, each doing a job the others cannot.
 
 ```bash
-cd backend   && npm test          # 442 tests, 19 suites
-cd frontend  && npm test          # 60 component tests, 7 files
-cd frontend  && npm run test:e2e  # 11 end-to-end tests (real stack, real browser)
+cd backend   && npm test          # 1165 tests, 53 suites
+cd frontend  && npm test          # 297 component tests, 30 files
+cd frontend  && npm run test:e2e  # 45 end-to-end tests (real stack, real browser)
 ```
 
 Lint runs in both packages with `npm run lint`. All of it runs in CI on every push and pull
 request - see `.github/workflows/ci.yml`.
 
-### Backend - Jest + Supertest, 442 tests
+### Backend - Jest + Supertest, 1165 tests
 
 Run against **mongodb-memory-server**: a real MongoDB, downloaded once and run in memory.
 The suite never touches a configured database and leaves nothing behind.
@@ -2096,7 +2287,7 @@ asserts the harness really is a replica set, for exactly that reason.
 stubbed, so tests are fast, deterministic, and need no API key. What is tested is everything
 around the model - parsing, validation, scoping, and degradation.
 
-### Frontend - Vitest + React Testing Library, 60 tests
+### Frontend - Vitest + React Testing Library, 297 tests
 
 Login, protected routes, customer create/edit, order creation, AI search, the error
 boundary and the toast system.
@@ -2110,7 +2301,7 @@ with their inputs (so screen readers announced every field as unlabelled), and a
 rendered blank when its record failed to load - where pressing Save would have written the
 blank fields over the record.
 
-### End-to-end - Playwright, 11 tests
+### End-to-end - Playwright, 45 tests
 
 These start the **real backend** against a throwaway in-memory replica set, the real
 frontend, and a real browser. Nothing is mocked.

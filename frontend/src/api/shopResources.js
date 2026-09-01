@@ -97,11 +97,23 @@ export const shopCheckoutApi = {
    * from the shape of what it got, which is precisely the kind of inference
    * that breaks the first time a field is added.
    */
-  checkout: (items, addressId, paymentMethod, deliverySpeed) =>
+  /**
+   * `consent` is a flat map of the marketing checkboxes
+   * (`{ emailOptIn: true }`), spread into the body rather than nested so it
+   * matches the shape every other consent surface posts — the registration
+   * form and the internal customer form both send the same field names, and
+   * the server reads all three with one parser.
+   *
+   * Defaulted to an empty object, so every existing caller and every existing
+   * test still posts a valid checkout with no consent fields at all. A checkout
+   * that omits them changes nobody's preferences, which is the correct
+   * behaviour for a form that did not ask.
+   */
+  checkout: (items, addressId, paymentMethod, deliverySpeed, consent = {}) =>
     shopClient
       .post(
         '/shop/checkout',
-        { items, addressId, paymentMethod, deliverySpeed },
+        { items, addressId, paymentMethod, deliverySpeed, ...consent },
         { headers: { 'Idempotency-Key': idempotencyKey() } }
       )
       .then((r) => r.data),

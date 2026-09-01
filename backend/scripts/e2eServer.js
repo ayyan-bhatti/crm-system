@@ -138,6 +138,32 @@ const SEED = {
     email: 'contact@karachitraders.example',
     city: 'Karachi',
     status: 'active',
+    /*
+     * OPTED IN TO EMAIL, so a campaign has somebody to reach and the
+     * unsubscribe spec has a consent to withdraw.
+     */
+    marketing: {
+      email: { optIn: true, optInAt: new Date('2025-01-15') },
+      sms: { optIn: false },
+      whatsapp: { optIn: false },
+    },
+    marketingTags: ['VIP'],
+  },
+  /*
+   * A SECOND CONTACT WHO HAS AGREED TO NOTHING.
+   *
+   * Seeded deliberately, and it is the more important of the two. A book where
+   * everyone has opted in would exercise the send path and quietly stop
+   * proving the thing this round is actually built around — that a campaign
+   * SKIPS the people who have not agreed and says so. With this record, the
+   * campaign spec can assert "1 sent, 1 skipped" rather than a number that
+   * would be the same whether the gate worked or not.
+   */
+  optedOutCustomer: {
+    name: 'Quiet Trading Co',
+    email: 'quiet@karachitraders.example',
+    city: 'Lahore',
+    status: 'active',
   },
   product: {
     name: 'Blue Widget',
@@ -193,6 +219,11 @@ async function main() {
   await User.create(SEED.manager);
   await User.create(SEED.rep);
   await Customer.create({ ...SEED.customer, createdBy: admin._id, assignedTo: admin._id });
+  await Customer.create({
+    ...SEED.optedOutCustomer,
+    createdBy: admin._id,
+    assignedTo: admin._id,
+  });
   await Product.create(SEED.product);
   // `create`, not `insertMany`, so the pre-save hook that keeps `stockQty`
   // equal to the sum of the variants actually runs.

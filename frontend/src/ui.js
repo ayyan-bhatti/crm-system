@@ -495,3 +495,116 @@ export function priceRange(product) {
   const max = Math.max(...prices);
   return min === max ? null : { min, max };
 }
+
+/* ---------------------------------------------------------------------------
+ * MARKETING
+ * -------------------------------------------------------------------------*/
+
+/**
+ * The three consent channels, in the order every form shows them.
+ *
+ * Email first because it is the least intrusive of the three and the only one
+ * carrying a working unsubscribe link — the same ordering the post-sale jobs
+ * use when choosing a channel, for the same reason.
+ */
+export const CONTACT_CHANNELS = [
+  { value: 'email', label: 'Email' },
+  { value: 'sms', label: 'SMS' },
+  { value: 'whatsapp', label: 'WhatsApp' },
+];
+
+export const CONTACT_SOURCE_LABELS = {
+  crm: 'CRM',
+  storefront: 'Storefront',
+  guest: 'Guest',
+  both: 'CRM + storefront',
+};
+
+export const SEGMENT_LABELS = {
+  new: 'New',
+  healthy: 'Healthy',
+  at_risk: 'At risk',
+  dormant: 'Dormant',
+  high_value: 'High value',
+};
+
+/**
+ * Colours for the computed segment pills.
+ *
+ * `at_risk` is the only one that gets a warning colour, and the restraint is
+ * deliberate — the same reasoning as the delivery board's uncoloured zero
+ * tile. If four of five tags are coloured, none of them is a signal, and the
+ * one that means "call this person" stops being noticed.
+ */
+export const SEGMENT_STYLES = {
+  new: 'bg-sky-50 text-sky-700 ring-sky-600/20',
+  healthy: 'bg-emerald-50 text-emerald-700 ring-emerald-600/20',
+  at_risk: 'bg-red-50 text-red-700 ring-red-600/20',
+  dormant: 'bg-amber-50 text-amber-800 ring-amber-600/20',
+  high_value: 'bg-violet-50 text-violet-700 ring-violet-600/20',
+};
+
+export const CAMPAIGN_STATUS_LABELS = {
+  draft: 'Draft',
+  pending_approval: 'Awaiting approval',
+  scheduled: 'Scheduled',
+  sending: 'Sending',
+  sent: 'Sent',
+  failed: 'Failed',
+};
+
+export const CAMPAIGN_STATUS_STYLES = {
+  draft: 'bg-neutral-100 text-neutral-700 ring-neutral-500/20',
+  pending_approval: 'bg-amber-50 text-amber-800 ring-amber-600/20',
+  scheduled: 'bg-sky-50 text-sky-700 ring-sky-600/20',
+  sending: 'bg-sky-50 text-sky-700 ring-sky-600/20',
+  sent: 'bg-emerald-50 text-emerald-700 ring-emerald-600/20',
+  failed: 'bg-red-50 text-red-700 ring-red-600/20',
+};
+
+export const RECIPIENT_STATUS_LABELS = {
+  pending: 'Pending',
+  sent: 'Sent',
+  failed: 'Failed',
+  skipped_no_consent: 'No opt-in',
+};
+
+export const OUTBOUND_KIND_LABELS = {
+  campaign: 'Campaign',
+  direct: 'Direct message',
+  review_request: 'Review request',
+  reorder_reminder: 'Reorder reminder',
+};
+
+/**
+ * How many of a contact's three channels are opted in.
+ *
+ * Returned as a pair rather than a string so the caller decides the wording —
+ * a table cell wants "2/3" and a detail page wants a sentence.
+ */
+export function consentCount(contact) {
+  const opted = CONTACT_CHANNELS.filter((c) => contact?.consent?.[c.value]?.optIn).length;
+  return { opted, total: CONTACT_CHANNELS.length };
+}
+
+/**
+ * Why a channel cannot be used for this contact, or empty if it can.
+ *
+ * Two different reasons, and telling them apart is the whole point: "they have
+ * not agreed" is a consent problem a person can fix by asking, and "we have no
+ * number for them" is a data problem. A single disabled control with no
+ * explanation makes both look like a bug.
+ */
+export function channelBlockedReason(contact, channel) {
+  if (!contact?.consent?.[channel]?.optIn) {
+    return `${contact?.name || 'This contact'} has not opted in to ${
+      CONTACT_CHANNELS.find((c) => c.value === channel)?.label || channel
+    }.`;
+  }
+
+  if (channel !== 'email' && !contact.phone) {
+    return 'No phone number on this contact.';
+  }
+
+  return '';
+}

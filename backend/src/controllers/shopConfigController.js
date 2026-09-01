@@ -4,7 +4,41 @@ const {
   DELIVERY_OPTIONS,
   estimatedDeliveryFor,
 } = require('../config/constants');
+const {
+  CONTACT_CHANNEL_VALUES,
+  CONTACT_CHANNEL_LABELS,
+} = require('../config/marketing');
 const stripeService = require('../services/stripeService');
+
+/**
+ * What each opt-in box promises, in the shopper's words rather than ours.
+ *
+ * Wording matters legally as well as commercially: a box saying "marketing"
+ * with no indication of what arrives or how often is the kind of consent that
+ * does not survive being questioned. Each line says what the channel is for
+ * and, implicitly, that it is optional.
+ */
+/**
+ * The consent boxes say MARKETING, not just the channel name.
+ *
+ * The storefront registration form has an "Email" field on it, so a checkbox
+ * also labelled "Email" is ambiguous — to a screen reader reading them in
+ * sequence, and to anyone glancing at the form and reading it as "is this
+ * address right". Naming what they are agreeing to RECEIVE is also the more
+ * honest label: "Email" describes a channel, "Marketing emails" describes the
+ * thing being consented to.
+ */
+const MARKETING_LABELS = {
+  email: 'Marketing emails',
+  sms: 'Marketing text messages',
+  whatsapp: 'Marketing WhatsApp messages',
+};
+
+const MARKETING_HINTS = {
+  email: 'Occasional emails about new products and offers. Unsubscribe any time.',
+  sms: 'Text messages about orders you might want to repeat. Reply STOP to end them.',
+  whatsapp: 'WhatsApp messages about new products. You can opt out whenever you like.',
+};
 
 /**
  * GET /api/shop/config
@@ -80,6 +114,27 @@ const getStorefrontConfig = asyncHandler(async (req, res) => {
         // The actual date each choice would produce, resolved now, so the
         // shopper compares dates rather than doing arithmetic on "days".
         estimatedDate: estimatedDeliveryFor(option.value),
+      })),
+
+      /*
+       * The marketing opt-in boxes, published rather than hard-coded in the
+       * storefront — same reasoning as everything else on this endpoint.
+       *
+       * THREE SEPARATE CHECKBOXES, NEVER ONE. Somebody may want email and not
+       * WhatsApp, and bundling them means the only way to stop the WhatsApp
+       * messages is to stop the emails too. That is a product decision the
+       * server owns, and publishing the list is what stops a future form
+       * quietly rendering a single "yes to marketing" box.
+       *
+       * `defaultChecked` is absent on purpose and is not an oversight: there
+       * is no shape of this response that can pre-tick a box. A pre-ticked
+       * consent checkbox is not consent, and the way to guarantee the client
+       * never renders one is to give it nothing to render one from.
+       */
+      marketingChannels: CONTACT_CHANNEL_VALUES.map((value) => ({
+        value,
+        label: MARKETING_LABELS[value] || CONTACT_CHANNEL_LABELS[value],
+        hint: MARKETING_HINTS[value],
       })),
     },
   });

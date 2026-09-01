@@ -284,3 +284,131 @@ export const internalApi = {
   metrics: () => client.get('/internal/metrics').then((r) => r.data.data),
   aiUsage: (days) => client.get('/internal/ai-usage', { params: { days } }).then((r) => r.data.data),
 };
+
+// --- marketing contacts -----------------------------------------------------
+/**
+ * A CONTACT IS ADDRESSED BY EMAIL, not by an id, and every path here encodes
+ * it. A merged contact is not a document — it is up to two records, a
+ * `Customer` and a `Buyer`, joined on the address — so there is no `_id` to
+ * use, and inventing a synthetic one would give the screen a key that changes
+ * whenever the merge does. `encodeURIComponent` matters rather than being
+ * defensive: a perfectly ordinary `first+tag@example.com` breaks the route
+ * without it.
+ */
+export const contactsApi = {
+  /**
+   * Returns `{ data, count, options }` rather than just the rows, because the
+   * filter dropdowns come from the server. Same reasoning as the storefront
+   * config: a client that hard-codes the segment list disagrees with the
+   * server the day one is added.
+   */
+  list: (params) => client.get('/contacts', { params }).then((r) => r.data),
+
+  get: (email) => client.get(`/contacts/${encodeURIComponent(email)}`).then((r) => r.data.data),
+
+  /** Record a consent the customer gave a member of staff directly. */
+  setConsent: (email, changes) =>
+    client
+      .patch(`/contacts/${encodeURIComponent(email)}/consent`, changes)
+      .then((r) => r.data),
+
+  /** Replaces the hand-assigned tags. Computed segments are not settable. */
+  setTags: (email, tags) =>
+    client.put(`/contacts/${encodeURIComponent(email)}/tags`, { tags }).then((r) => r.data.data),
+
+  /**
+   * Send one message to one contact.
+   *
+   * Resolves even when the message was NOT sent — a contact who has not opted
+   * in comes back as `{ status: 'skipped_no_consent' }` with a 200, because
+   * that is an answer rather than an error. The caller has to read `status`;
+   * treating any resolved promise as success would report a blocked send as
+   * a delivered one.
+   */
+  message: (email, payload) =>
+    client.post(`/contacts/${encodeURIComponent(email)}/message`, payload).then((r) => r.data.data),
+
+  /**
+   * Download the current view as a spreadsheet. Admin only.
+   *
+   * `responseType: 'blob'` is essential and easy to omit: without it axios
+   * parses the binary xlsx as text, and the file that reaches the user is a
+   * corrupted archive Excel refuses to open. Takes the SAME params the list
+   * does, so the file matches what is on screen.
+   */
+  exportUrl: (params) =>
+    client
+      .get('/contacts/export', { params, responseType: 'blob' })
+      .then((r) => r.data),
+};
+
+// --- campaigns (admin and manager) ------------------------------------------
+export const campaignsApi = {
+  list: (params) => client.get('/campaigns', { params }).then((r) => r.data),
+
+  /** `{ campaign, recipients }` — the rows, not just the counts. */
+  get: (id) => client.get(`/campaigns/${id}`).then((r) => r.data.data),
+
+  /**
+   * How many this audience matches and how many can actually be reached.
+   *
+   * The second number is the point: an audience of 400 is not 400 messages,
+   * and finding that out only after sending makes the consent skips look like
+   * a bug in the sender.
+   */
+  preview: (audience) => client.post('/campaigns/preview', { audience }).then((r) => r.data.data),
+
+  /** AI copy for all four forms at once. Creates nothing. */
+  draft: (payload) => client.post('/campaigns/draft', payload).then((r) => r.data.data),
+
+  create: (payload) => client.post('/campaigns', payload).then((r) => r.data.data),
+  update: (id, payload) => client.patch(`/campaigns/${id}`, payload).then((r) => r.data.data),
+  remove: (id) => client.delete(`/campaigns/${id}`).then((r) => r.data),
+
+  /**
+   * Send it — or queue it for an admin. The response's `queued` flag says
+   * which, and the caller must not assume the first.
+   */
+  send: (id) => client.post(`/campaigns/${id}/send`).then((r) => r.data),
+};
+
+// --- post-sale automation ---------------------------------------------------
+export const automationApi = {
+  /**
+   * The log, plus each job's last-run date and the current settings.
+   *
+   * The last-run dates are the reason this screen exists: a scheduled job that
+   * stops firing produces no error anywhere, and the only visible symptom is a
+   * date that stopped moving.
+   */
+  log: (params) => client.get('/automation/log', { params }).then((r) => r.data),
+
+  settings: () => client.get('/automation/settings').then((r) => r.data.data),
+
+  /** Admin only. */
+  updateSettings: (payload) =>
+    client.patch('/automation/settings', payload).then((r) => r.data.data),
+
+  /** Admin only. Safe to press twice — the jobs claim each order before sending. */
+  run: () => client.post('/automation/run').then((r) => r.data.data),
+};
+
+// --- unsubscribe (public, no session) ---------------------------------------
+/**
+ * The landing page for the link in a marketing email.
+ *
+ * PUBLIC BY NECESSITY. Requiring a login to stop receiving marketing is a dark
+ * pattern, and for a contact who has no account it is impossible. The signed
+ * token in the link is the authorisation.
+ */
+export const unsubscribeApi = {
+  /**
+   * What this token WOULD do, without doing it. Safe for a mail client to
+   * prefetch, which is exactly why the change itself is a POST — several mail
+   * clients and security scanners fetch every link before a human sees it.
+   */
+  check: (token) => client.get(`/unsubscribe/${encodeURIComponent(token)}`).then((r) => r.data.data),
+
+  /** Does it. Idempotent — a second click changes nothing and still succeeds. */
+  confirm: (token) => client.post('/unsubscribe', { token }).then((r) => r.data),
+};

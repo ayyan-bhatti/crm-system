@@ -52,9 +52,24 @@ const auditLogSchema = new mongoose.Schema({
     type: actorSchema,
     required: true,
   },
+  /**
+   * `export` is the fourth action, and the only one that is not a write.
+   *
+   * Every other entry in this collection describes a change to a record. An
+   * export changes nothing — and is, for a contact list, the single most
+   * consequential thing a user can do: viewing a page of contacts is looking
+   * something up, downloading the whole filtered book is a copy of the
+   * customer list leaving the building on somebody's laptop.
+   *
+   * An audit trail that records who edited one phone number and not who took a
+   * copy of every phone number is recording the wrong thing. So this collection
+   * stops being strictly "writes" and becomes "actions worth accounting for",
+   * which was always the intent — `before`/`after`/`changes` are simply empty
+   * on an export, and `note` carries the filters and the row count instead.
+   */
   action: {
     type: String,
-    enum: ['create', 'update', 'delete'],
+    enum: ['create', 'update', 'delete', 'export'],
     required: true,
   },
   /** Which collection was written to: customer, product, order, user. */

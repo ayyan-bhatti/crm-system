@@ -4457,3 +4457,247 @@ confirms express is promised sooner, makes one overdue, loads the board, clicks
 the advance button, and then checks the BUYER's tracking page shows "At the
 warehouse". That last hop is the whole feature — a staff change the customer
 can see — and it is the one a unit test cannot make a claim about.
+
+---
+
+## Round 4 — marketing contacts, AI campaigns, post-sale automation, Excel export
+
+A layer on top of everything above, built on it rather than beside it:
+consent lives next to the customer record, segments are churn risk unchanged,
+approval reuses the change-request queue, and every channel follows the
+pluggable-transport pattern the password-reset mailer already established.
+
+### The rule the whole round hangs off
+
+"Nobody is messaged on a channel they have not opted in to" is not a feature
+of this round, it is the constraint everything else was built to satisfy. The
+risk with a rule like that is not that it gets implemented wrong once — it is
+that it gets implemented four times, once per send path, and the one that
+drifts is by construction the one nobody looked at.
+
+So there is exactly one gate: `services/messagingService.sendToContact`. The
+campaign dispatcher, the individual-contact send, and both post-sale jobs all
+call through it, and none of them may reach a transport (`mailer`,
+`smsClient`, `whatsappClient`) directly for a marketing message. Consent is
+checked before the transport is even selected, and a refusal is not a silent
+drop — it writes an `OutboundMessage` row with `skipped_no_consent`, so a
+campaign's "sent to 40 of 60" is never a mystery.
+
+Proving this was the point of the first test file written
+(`marketingConsent.test.js`), and it attacks the rule from every direction a
+message can leave the system before touching anything else — a bulk
+campaign, an individual send, and (in a second file) both scheduled jobs.
+
+### There is no team model, and the approval rule needed one
+
+The brief's approval rule — a manager sends freely to their own team,
+anything wider needs an admin — assumes an org chart this codebase has never
+had. `User` carries no `managerId`, no reporting line; managers see every
+customer and own none of them, which was a deliberate choice in an earlier
+round ("managers run the business, admins own the record").
+
+Two ways to close that gap were considered. Adding `managerId` to `User` is
+closer to the brief's literal wording and is a real feature on its own — a
+new field, an admin screen to set it, a migration for every existing
+manager, and a new place for the permission model to be wrong. The other,
+what got built: read "the manager's own contacts" the same way
+`canAccessOrder` already reads a sales rep's own orders — assigned to them,
+or created by them. It reuses a rule the codebase already trusts rather than
+inventing a second one, and it is the interpretation written down in
+`contactService.isWithinOwnScope`'s own comment for the next person who
+wonders why there is no `Team` model here.
+
+The check runs at **send time**, against the audience as it resolves right
+then, deliberately not at draft time. An audience is a filter — "at-risk
+customers" — not a fixed list, and it is a different set of people every
+morning. Approving a campaign that matched forty of a manager's own contacts
+must not let it go out a week later to four hundred strangers on the
+strength of an approval that was honest when it was given.
+
+Routed through the **existing** `ChangeRequest` model rather than a second
+approval queue, with a sixth action (`send`) added because a campaign send
+is not a record write like the other five — approving it dispatches
+messages to real people, and that has to be visible to an admin skimming the
+queue without opening the row. It is also the one action whose apply step
+runs the actual side effect *outside* the transaction that marks the
+request approved, for the same reason the refund path in round 3 does: a
+MongoDB transaction can retry itself on a write conflict, and a retried
+send is a list messaged twice.
+
+### Segments are arithmetic borrowed, not arithmetic invented
+
+`at_risk`, `dormant`, `healthy`, `new`, `high_value` are computed on every
+read, never stored — the same reasoning as the delivery board's ranking:
+they are statements about *today*, and a stored tag goes stale the moment
+the clock passes midnight with nothing to refresh it.
+
+More importantly, they are the **existing** `assessChurnRisk` and revenue-
+trend calculations, called unchanged. The round was explicit that this must
+not become a second scoring system, and it is worth saying why that
+mattered enough to hold to under time pressure: a contact tagged "at risk"
+on the marketing screen and "on track" on their own customer summary would
+make both screens untrustworthy at once, and there would be no way for a
+user to tell which one was lying without reading the code.
+
+### Merging two records into one person
+
+A `Customer` and a `Buyer` can describe the same human, and the contacts
+screen merges them on **email**, the same key the rest of the app already
+dedupes storefront checkouts on. `linkedCustomerId` — set at a buyer's first
+checkout — was the tempting merge key and the wrong one: a buyer who
+registered and never ordered has none, and merging on the link alone would
+show that person as a stranger to their own CRM record, which is precisely
+who a welcome campaign exists for.
+
+When the two records disagree on consent — reachable only for data
+predating this round, since every write path here now propagates to both —
+the reconciliation is "the most recent decision wins," comparing `optInAt`
+against `optOutAt`. Both simpler rules are wrong in a way worth spelling
+out: "any opt-in wins" can resurrect a consent someone has since withdrawn,
+which is the exact harm this feature exists to prevent; "any opt-out wins"
+sounds cautious and permanently silences anyone who ever unsubscribed and
+later deliberately opted back in — refusing to honour a person's *current*
+wish is not caution, it is a different kind of wrong.
+
+### The unsubscribe link had to actually work
+
+Stated as a definition-of-done item because a decorative unsubscribe link
+is a common failure that looks identical to a working one until someone
+clicks it: it satisfies a reviewer glancing at a rendered email and changes
+nothing in the database. The token is an HMAC over `(email, channel)`,
+verified server-side, requiring no login — a guest contact has no account
+to sign in to, and requiring one to escape a mailing list is the dark
+pattern this whole mechanism exists to avoid. The landing page's GET only
+*checks* what the token would do; the actual flip is a POST, because mail
+clients and security scanners prefetch every link in a message before a
+human sees it, and an unsubscribe that happened on GET would be one nobody
+asked for.
+
+The write goes through `setConsentEverywhere`, reaching every `Customer`
+and `Buyer` record for that email in one call — the half a per-record
+implementation gets wrong. Turn it off on only the `Customer` and the
+linked `Buyer` still says yes; the merged contact still resolves as
+consented, and the next campaign reaches them anyway, so the unsubscribe
+*appears* to work and does nothing. There is an end-to-end test that drives
+the real `/unsubscribe` page in a real browser with a token minted the way
+the server signs one, specifically because this is the step most likely to
+be decorative and least likely to be caught by an API test.
+
+### Idempotence, three times over, for the post-sale jobs
+
+The interesting engineering problem in this round was not the AI drafting
+or the merge — it was making sure two scheduled jobs never send the same
+automated message twice, and there turned out to be three separate ways
+that goes wrong if only one is defended against:
+
+1. **The job runs twice.** A scheduler retries on a timeout it cannot tell
+   from a failure, or a serverless platform wakes two instances in the same
+   minute. Both would read `reviewRequestSentAt: null` and both would send.
+   Defended with a conditional claim — `findOneAndUpdate` on the flag still
+   being null — *before* anything is sent; the loser of the race gets
+   `null` back and moves on. Proven by literally running two instances of
+   the job concurrently with `Promise.all` and asserting exactly one
+   message.
+
+2. **The flag is set after sending, not before.** The obvious ordering, and
+   it leaves the whole send window open — both concurrent runs would read
+   null, both would send, and only then would both write the flag. Claiming
+   first is what closes it; the flag is rolled back to null only on a
+   *failed* delivery, so a genuine transport failure can retry tomorrow
+   without the guard treating "failed" and "never attempted" as the same
+   thing forever.
+
+3. **The first run mails the entire order archive.** Every order ever
+   placed has `reviewRequestSentAt: null` — that field did not exist until
+   this round — so "delivered more than five days ago and unsent" matches
+   years of history the moment this ships. This one would not show up in
+   any test written against a small fixture set; it only shows up against a
+   real database on deploy day, which is exactly why it is called out here
+   rather than left to be rediscovered. `POST_SALE_WINDOW_DAYS` bounds how
+   far back either job will look, so anything older is skipped rather than
+   mailed — a review request about a purchase from last spring is worse
+   than no review request at all.
+
+A fourth defence sits underneath all three, in the database: a partial
+unique index on `(order, kind)` over the *settled* outcomes
+(`sent`/`skipped_no_consent`, not `failed`) on `OutboundMessage` — the belt
+to the claim-step's braces, for whichever future caller forgets to go
+through `postSaleService` at all.
+
+The reorder reminder reuses `typicalGapDays` from churn risk without
+touching it, and is drawn deliberately narrower than churn's own trigger —
+0.8 to 1.2 of a customer's typical gap, strictly before churn risk's 1.5.
+The gap between 1.2 and 1.5 is empty on purpose: a customer must never be
+both "coming up for a reorder" and "at risk of churn" in the same week,
+because two automated messages a few days apart saying opposite things is
+exactly how a CRM announces that nobody is actually reading it.
+
+### Social posting: generate the copy, do not publish it
+
+The brief explicitly asked this be a judgement call rather than a silent
+decision, so it is written down here. The AI drafts a social post alongside
+the email/SMS/WhatsApp copy — one call, four forms of the same idea — and
+nothing in this application posts it anywhere. Real auto-posting is a
+different-sized project: a per-platform OAuth app, that platform's own
+review and approval process, stored tokens carrying posting permission on
+the business's *own* accounts, and a failure mode (an expired token) whose
+only symptom is that a post silently never went out. Generating strong copy
+for a person to paste into whatever they already use is the right-sized
+version of "social media marketing" for a round already carrying three real
+messaging channels, a consent model, and two scheduled jobs.
+
+### The scheduler endpoint is a machine credential, not a session
+
+`POST /api/cron/post-sale` is authenticated by `CRON_SECRET`, checked in
+constant time, and — the part worth stating plainly — it **fails closed**.
+Unset, every request is refused rather than the endpoint quietly running
+open. The alternative, a service-account `User` whose password sits in an
+env var, is a shared secret wearing a costume and a worse one: it shows up
+in the user list, can be granted more permissions by an unrelated future
+change, and appears as a person in the audit trail for something no person
+did. An IP allow-list was ruled out for the same reason `/api/internal`
+already is — this app runs on serverless, and the app sees the edge
+network's addresses, not a stable caller.
+
+### Excel, actually
+
+`exceljs` produces a real `.xlsx`, not a CSV wearing the extension — that
+trick corrupts phone numbers with a leading `+` and mangles non-ASCII names
+the moment a reader guesses the wrong encoding, and this dataset's Karachi
+and Lahore addresses are exactly the case that breaks. Every free-text cell
+(name, tags) is defused against formula injection before it is written — a
+contact named `=HYPERLINK(...)` would otherwise execute the moment the file
+was opened in the recipient's own spreadsheet, in every program that opens
+it. `exceljs` pulls in `uuid` below the version with a moderate advisory
+about a missing bounds check; the vulnerable path requires a caller to
+supply its own `buf` argument, `exceljs` never does, and nothing in this
+codebase calls `uuid` directly — noted here rather than left for a future
+`npm audit` to rediscover from nothing.
+
+The export is admin-only though every role above sales rep can already see
+every row on screen — reading a list a page at a time and taking a
+spreadsheet copy of the whole filtered book out of the building are
+different acts over identical data, and the round's own RBAC table draws
+that line explicitly. Every export is written to the audit trail with who,
+how many rows, and which filters were active, because "who took a copy of
+the customer list, and when" is exactly the question an audit trail exists
+to answer.
+
+### What is genuinely a judgement call, listed rather than buried
+
+- **"Own contacts" = assigned-to-or-created-by**, not a new `managerId`
+  field. Reasoned above; revisit if a real org chart is ever needed for
+  something else, at which point this rule should move to reuse it rather
+  than staying its own thing.
+- **Consent governs marketing, not transactional mail.** An order
+  confirmation, a delivery update, a change-request outcome all still go
+  through `mailer.sendMail` directly and are unaffected by any opt-in — a
+  customer who declined the newsletter still needs to hear their refund
+  went through. Automated review requests and reorder reminders *are*
+  classed as marketing and *are* gated, even though both are about an order
+  the customer placed, because the test is "did we send this because we
+  want something from them," not "is it about a real order."
+- **Consent seeded as a genuine mixture**, not everyone opted in. An
+  all-consenting seed would hide the exact gap this round is built around —
+  a campaign to "everyone" in a fully-opted-in demo reports the same number
+  sent whether the gate works or not.

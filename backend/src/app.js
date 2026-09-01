@@ -26,6 +26,11 @@ const auditRoutes = require('./routes/auditRoutes');
 const internalRoutes = require('./routes/internalRoutes');
 const changeRequestRoutes = require('./routes/changeRequestRoutes');
 const shopRoutes = require('./routes/shopRoutes');
+const contactRoutes = require('./routes/contactRoutes');
+const campaignRoutes = require('./routes/campaignRoutes');
+const automationRoutes = require('./routes/automationRoutes');
+const cronRoutes = require('./routes/cronRoutes');
+const unsubscribeRoutes = require('./routes/unsubscribeRoutes');
 
 /**
  * The Express application.
@@ -277,9 +282,24 @@ app.use(cookieParser());
  * can coexist. `/api/shop` has its own complete CSRF pair
  * (`middleware/shopCsrf.js`, mounted in `routes/shopRoutes.js`); this one has
  * no business there at all.
+ *
+ * EXCLUDED FROM `/api/unsubscribe` TOO, for a different reason.
+ *
+ * CSRF is an attack on AMBIENT authority — a credential the browser attaches
+ * by itself, which somebody else's page can therefore ride. The unsubscribe
+ * endpoint has none: it is authorised entirely by a signed token carried in
+ * the request, which an attacker would have to already hold — and if they hold
+ * it they have the recipient's address and no need for the recipient's
+ * browser. Without this exclusion, a staff member who happened to be signed in
+ * to the CRM could not click the unsubscribe link in their own copy of a
+ * marketing email, because the browser would attach the staff cookie and the
+ * check would then demand a header a mail client cannot send.
  */
-app.use((req, res, next) => (req.path.startsWith('/api/shop') ? next() : issueCsrfToken(req, res, next)));
-app.use((req, res, next) => (req.path.startsWith('/api/shop') ? next() : verifyCsrf(req, res, next)));
+const CSRF_EXEMPT = ['/api/shop', '/api/unsubscribe'];
+const csrfExempt = (req) => CSRF_EXEMPT.some((prefix) => req.path.startsWith(prefix));
+
+app.use((req, res, next) => (csrfExempt(req) ? next() : issueCsrfToken(req, res, next)));
+app.use((req, res, next) => (csrfExempt(req) ? next() : verifyCsrf(req, res, next)));
 
 /*
  * morgan is gone: middleware/requestLogger replaces it.
@@ -357,6 +377,28 @@ app.get('/api/health', async (req, res) => {
       cardPayment: env.stripeEnabled,
       webhookVerification: Boolean(env.stripeWebhookSecret),
     },
+
+    /*
+     * The messaging channels, reported for exactly the reason `payments` is.
+     *
+     * `available` is true for all three always — every channel works through
+     * its console transport with nothing configured, and saying otherwise
+     * would hide a path that genuinely delivers (to the log) and is what makes
+     * this whole feature demonstrable with no accounts.
+     *
+     * `live` is the one that matters operationally: whether a real provider is
+     * wired up. A campaign reporting "sent to 400" while `live` is false has
+     * written four hundred log lines, which is the correct behaviour and a
+     * catastrophic misunderstanding if somebody thinks it is otherwise.
+     *
+     * `scheduler` says whether the post-sale cron can authenticate at all.
+     * Unset, the endpoint refuses everything and the automations silently
+     * never run — the failure with no symptom, which is why it is here.
+     */
+    messaging: {
+      ...require('./services/messagingService').channelStatus(),
+      scheduler: { configured: Boolean(env.cronSecret) },
+    },
     ...(databaseError ? { databaseError } : {}),
     timestamp: new Date(),
   });
@@ -405,6 +447,11 @@ app.use('/api/audit-logs', auditRoutes);
 app.use('/api/internal', internalRoutes);
 app.use('/api/change-requests', changeRequestRoutes);
 app.use('/api/shop', shopRoutes);
+app.use('/api/contacts', contactRoutes);
+app.use('/api/campaigns', campaignRoutes);
+app.use('/api/automation', automationRoutes);
+app.use('/api/unsubscribe', unsubscribeRoutes);
+app.use('/api/cron', cronRoutes);
 
 // --- Error handling --------------------------------------------------------
 // Registered last so they see errors from every route above.

@@ -204,8 +204,15 @@ test.describe('Buyer registration and session', () => {
   test('registers a new buyer account', async ({ page }) => {
     await page.goto('/register');
 
+    /*
+     * ANCHORED, for the same reason `/^name/i` already is: the page now also
+     * carries the marketing consent checkboxes (round 4), and the "Marketing
+     * emails" checkbox's accessible name contains the word "email" — so an
+     * unanchored query matches both the field and the checkbox and fails
+     * Playwright's strict mode.
+     */
     await main(page).getByLabel(/^name/i).fill(BUYER.name);
-    await main(page).getByLabel(/email/i).fill(BUYER.email);
+    await main(page).getByLabel(/^email/i).fill(BUYER.email);
     await main(page).getByLabel(/password/i).fill(BUYER.password);
     await main(page).getByRole('button', { name: /create account/i }).click();
 
@@ -219,7 +226,7 @@ test.describe('Buyer registration and session', () => {
     await page.goto('/register');
 
     await main(page).getByLabel(/^name/i).fill('Weak Password');
-    await main(page).getByLabel(/email/i).fill('weak.password@example.com');
+    await main(page).getByLabel(/^email/i).fill('weak.password@example.com');
     await main(page).getByLabel(/password/i).fill('short');
     await main(page).getByRole('button', { name: /create account/i }).click();
 

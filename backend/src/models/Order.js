@@ -334,6 +334,47 @@ const orderSchema = new mongoose.Schema({
     default: null,
   },
 
+  /* -------------------------------------------------------------------------
+   * POST-SALE AUTOMATION MARKERS
+   *
+   * Two nullable dates whose entire job is to make an automated send happen
+   * AT MOST ONCE. Neither is decoration and neither is a log — the log is
+   * `OutboundMessage`, which records what was sent and to whom. These are the
+   * IDEMPOTENCY KEYS, and they live on the order rather than in the job
+   * because a scheduled job has no memory of its previous run and a serverless
+   * one may not even be the same process.
+   *
+   * Written INSIDE the same conditional update that claims the order for
+   * sending (see services/postSaleService.js), so two overlapping runs of the
+   * daily job cannot both decide to mail the same person. Setting the flag
+   * after a successful send would leave exactly that race open, and the
+   * failure it produces — a customer receiving the same automated message
+   * twice — is the one thing an automation must never do.
+   * ---------------------------------------------------------------------- */
+
+  /** When the post-delivery review request went out. Null means it has not. */
+  reviewRequestSentAt: {
+    type: Date,
+    default: null,
+  },
+
+  /**
+   * When a reorder nudge was sent off the back of THIS order.
+   *
+   * A reorder reminder is really about a customer rather than an order, so it
+   * is worth saying why the marker lives here. The nudge is triggered by how
+   * long it has been since their MOST RECENT order — that order is the thing
+   * being measured, and "we have already nudged based on this order" is
+   * precisely the fact that stops a daily job sending the same reminder every
+   * morning for the rest of the window. Storing it on the customer would need
+   * a second date to say which order it referred to, which is the same fact
+   * with an extra step and one more thing to keep in sync.
+   */
+  reorderReminderSentAt: {
+    type: Date,
+    default: null,
+  },
+
   /**
    * What Stripe knows about this order, mirrored locally.
    *

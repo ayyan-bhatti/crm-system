@@ -3,6 +3,7 @@ import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useBuyerAuth } from '../../context/BuyerAuthContext';
 import { errorMessage } from '../../api/client';
 import { Card, ErrorBanner, Field, Spinner } from '../../components/common';
+import ConsentCheckboxes from '../../components/ConsentCheckboxes';
 import { btnPrimary, link } from '../../ui';
 
 const EMAIL_RE = /^\S+@\S+\.\S+$/;
@@ -21,7 +22,19 @@ export default function BuyerRegister() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const [form, setForm] = useState({ name: '', email: '', password: '' });
+  /*
+   * The three consent flags live in the same state object as the credentials
+   * and are posted with them. `validate()` ignores them — they are optional by
+   * definition, and creating an account must never fail because of a checkbox.
+   */
+  const [form, setForm] = useState({
+    name: '',
+    email: '',
+    password: '',
+    emailOptIn: false,
+    smsOptIn: false,
+    whatsappOptIn: false,
+  });
   const [touched, setTouched] = useState({});
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -110,6 +123,28 @@ export default function BuyerRegister() {
               onBlur={() => blur('password')}
               onChange={(e) => setForm({ ...form, password: e.target.value })}
               error={touched.password ? fieldErrors.password : undefined}
+            />
+
+            {/*
+              MARKETING CONSENT AT REGISTRATION.
+
+              This is where the round's "opt-in checkboxes on guest checkout"
+              lands, and it is worth knowing why it is not on a guest checkout:
+              there is no guest checkout. An earlier round made an account
+              mandatory before buying, enforced on the route rather than only
+              in the UI, so registration is the step every storefront purchase
+              now passes through.
+
+              Every box starts unchecked and creating the account is not
+              conditional on any of them — which is the difference between
+              collecting consent and extracting it.
+            */}
+            <ConsentCheckboxes
+              legend="Keep in touch (optional)"
+              hint="Entirely up to you — your account works the same either way, and you can change your mind at any time."
+              value={form}
+              onChange={(next) => setForm({ ...form, ...next })}
+              disabled={submitting}
             />
 
             <button type="submit" className={`${btnPrimary} w-full`} disabled={submitting}>

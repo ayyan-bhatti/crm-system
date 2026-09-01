@@ -1,5 +1,7 @@
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
+const { MAX_TAG_LENGTH, MAX_TAGS_PER_CONTACT } = require('../config/marketing');
+const { marketingConsentField } = require('./marketingConsent');
 
 const SALT_ROUNDS = 10;
 
@@ -120,6 +122,41 @@ const buyerSchema = new mongoose.Schema({
     type: Date,
     default: null,
     select: false,
+  },
+
+  /**
+   * The same consent block `Customer` carries, from the same definition.
+   *
+   * WHY IT IS STORED HERE TOO, RATHER THAN ONLY ON THE LINKED `Customer`.
+   *
+   * A buyer who has registered and not yet ordered HAS NO LINKED CUSTOMER —
+   * `linkedCustomerId` is set at their first checkout — and that person can
+   * still tick a consent box on the registration form. Consent with nowhere to
+   * live is consent that gets lost, and the loss is silent: they agreed, the
+   * checkbox looked like it worked, and nothing recorded it.
+   *
+   * Two records holding one person's consent raises the obvious question of
+   * what happens when they disagree. Every write propagates to BOTH records so
+   * that they normally cannot, and services/contactService.js reconciles the
+   * legacy case by taking the most recent decision — see the long note there.
+   */
+  marketing: marketingConsentField(),
+
+  /** Staff-assigned tags, the same field as on `Customer` and unioned with it. */
+  marketingTags: {
+    type: [String],
+    default: [],
+    validate: [
+      {
+        validator: (tags) => tags.length <= MAX_TAGS_PER_CONTACT,
+        message: `A contact cannot have more than ${MAX_TAGS_PER_CONTACT} tags`,
+      },
+      {
+        validator: (tags) =>
+          tags.every((t) => typeof t === 'string' && t.length <= MAX_TAG_LENGTH),
+        message: `A tag cannot be longer than ${MAX_TAG_LENGTH} characters`,
+      },
+    ],
   },
 
   createdAt: {

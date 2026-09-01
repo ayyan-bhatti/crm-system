@@ -160,6 +160,73 @@ export const PERMISSIONS = {
    * Mirrors `requireAdmin` on `POST /api/ai-search`.
    */
   internalAiSearch: [ADMIN],
+
+  /* -------------------------------------------------------------------------
+   * MARKETING
+   *
+   * Mirrors the helpers of the same names in backend/src/middleware/roles.js.
+   * ---------------------------------------------------------------------- */
+
+  /**
+   * Reach the marketing contacts screen.
+   *
+   * ALL THREE ROLES, which looks like it contradicts `viewCustomers` refusing
+   * a sales rep the customer book — and does not, because the two screens show
+   * different things and are scoped differently.
+   *
+   * The customer book is every customer with their notes, history and
+   * commercial detail. Marketing contacts, for a rep, is the people whose
+   * orders they are already fulfilling: a name, an address, a consent state.
+   * They receive exactly that today, one record at a time, with every order
+   * assigned to them. The server enforces the narrowing
+   * (`contactService.visibleCustomerIds`); this entry only decides whether the
+   * nav item appears.
+   *
+   * Gating the screen instead would leave a rep unable to message the customer
+   * whose parcel they are holding — the one marketing action their job calls
+   * for. Mirrors `canViewContacts`.
+   */
+  viewContacts: [ADMIN, MANAGER, SALES_REP],
+
+  /**
+   * Launch a bulk campaign.
+   *
+   * Not a sales rep, for the same reason as `writeOrders`: a campaign is a
+   * commitment made in the business's name to many people at once. A manager
+   * may, and a send that reaches beyond their own contacts queues for an admin
+   * — a rule this table cannot express, exactly as it cannot express "except
+   * your own colleagues' rows" for `approveBuyerRequest`. The server decides
+   * it at dispatch from the resolved audience; the UI asks and reports.
+   * Mirrors `canLaunchCampaigns` and `requireManagerOrAdmin` on /api/campaigns.
+   */
+  launchCampaigns: [ADMIN, MANAGER],
+
+  /**
+   * Decide a campaign waiting for approval. Admin only, same self-approval
+   * reasoning as `approveChanges`. Mirrors `canApproveCampaigns`.
+   */
+  approveCampaigns: [ADMIN],
+
+  /**
+   * Export the contact book to a spreadsheet.
+   *
+   * ADMIN ONLY, and deliberately stricter than viewing the same rows. Reading
+   * contacts a page at a time and downloading the whole filtered book as a
+   * file are different acts: the first is looking something up, the second is
+   * a copy of the customer list leaving the building. Mirrors
+   * `canExportContacts` and the `requireRole(ADMIN)` on /api/contacts/export.
+   */
+  exportContacts: [ADMIN],
+
+  /**
+   * Change when and whether the post-sale automations run.
+   *
+   * Admin only — but note that READING the automation log is not gated at all,
+   * on purpose. A stopped automation has no symptom other than silence, so the
+   * more people who can see its last-run date, the shorter that silence is.
+   * Mirrors `canConfigureAutomation`, and the split on /api/automation.
+   */
+  configureAutomation: [ADMIN],
 };
 
 /*

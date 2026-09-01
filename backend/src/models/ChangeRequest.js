@@ -37,8 +37,8 @@ const changeRequestSchema = new mongoose.Schema({
     type: String,
     required: true,
     enum: {
-      values: ['customer', 'order'],
-      message: 'A change request must be for a customer or an order',
+      values: ['customer', 'order', 'campaign'],
+      message: 'A change request must be for a customer, an order or a campaign',
     },
   },
 
@@ -74,12 +74,23 @@ const changeRequestSchema = new mongoose.Schema({
    * document in place, because a buyer's order history has to keep showing
    * the order they cancelled, not lose it.
    */
+  /**
+   * `send` is a sixth action, and the only one that does not write a record.
+   *
+   * Approving it DISPATCHES A CAMPAIGN — it puts messages in front of real
+   * people — which makes it the least reversible thing in this queue. Every
+   * other action can be undone by another edit; a sent email cannot be
+   * unsent. It is a separate action rather than an `update` for exactly the
+   * reason `transfer` and `cancel` are: an admin skimming the queue has to be
+   * able to see, without opening it, that this row is different in kind.
+   */
   action: {
     type: String,
     required: true,
     enum: {
-      values: ['create', 'update', 'delete', 'transfer', 'cancel'],
-      message: 'A change request must be a create, an update, a delete, a transfer or a cancel',
+      values: ['create', 'update', 'delete', 'transfer', 'cancel', 'send'],
+      message:
+        'A change request must be a create, an update, a delete, a transfer, a cancel or a send',
     },
   },
 

@@ -1,5 +1,7 @@
 const mongoose = require('mongoose');
 const { CUSTOMER_STATUS, CUSTOMER_STATUS_VALUES } = require('../config/constants');
+const { MAX_TAG_LENGTH, MAX_TAGS_PER_CONTACT } = require('../config/marketing');
+const { marketingConsentField } = require('./marketingConsent');
 
 const customerSchema = new mongoose.Schema({
   name: {
@@ -89,6 +91,46 @@ const customerSchema = new mongoose.Schema({
     ref: 'User',
     default: null,
   },
+  /**
+   * Channel-by-channel marketing consent. See models/marketingConsent.js.
+   *
+   * Every channel defaults to false, so a customer created by ANY path — a rep
+   * typing them in, an approved change request, or `matchOrCreateCustomer`
+   * upserting them from a storefront checkout — starts opted out of all three.
+   * That is not a policy this model hopes its callers will follow: it is the
+   * only value the schema can produce unless somebody explicitly sets another,
+   * which is what makes "consent is never assumed" structural rather than
+   * aspirational.
+   */
+  marketing: marketingConsentField(),
+
+  /**
+   * Free-form tags a staff member assigns by hand: "VIP", "wholesale".
+   *
+   * DELIBERATELY SEPARATE FROM THE COMPUTED SEGMENTS. "At risk" and "dormant"
+   * are arithmetic about dates, recomputed on every read because they are true
+   * only of a particular day. These are human judgements no calculation could
+   * reach, so they are the half that has to be stored — and keeping the two in
+   * different fields means a recomputation can never wipe a hand-assigned tag,
+   * and a person can never assign one that then silently disagrees with the
+   * data behind it.
+   */
+  marketingTags: {
+    type: [String],
+    default: [],
+    validate: [
+      {
+        validator: (tags) => tags.length <= MAX_TAGS_PER_CONTACT,
+        message: `A contact cannot have more than ${MAX_TAGS_PER_CONTACT} tags`,
+      },
+      {
+        validator: (tags) =>
+          tags.every((t) => typeof t === 'string' && t.length <= MAX_TAG_LENGTH),
+        message: `A tag cannot be longer than ${MAX_TAG_LENGTH} characters`,
+      },
+    ],
+  },
+
   createdAt: {
     type: Date,
     default: Date.now,

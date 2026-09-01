@@ -5,6 +5,7 @@ import { useCart, lineKey } from '../../context/CartContext';
 import { shopCheckoutApi, shopAuthApi } from '../../api/shopResources';
 import { errorMessage } from '../../api/client';
 import { Card, ErrorBanner, Field, Spinner } from '../../components/common';
+import ConsentCheckboxes from '../../components/ConsentCheckboxes';
 import { btnPrimary, btnSecondary, formatDate, galleryFor, money, variantLabel } from '../../ui';
 import ProductImage from '../../components/shop/ProductImage';
 
@@ -79,6 +80,8 @@ export default function Checkout() {
   const [configResolved, setConfigResolved] = useState(false);
   const [deliveryOptions, setDeliveryOptions] = useState([]);
   const [deliverySpeed, setDeliverySpeed] = useState('standard');
+  const [marketingChannels, setMarketingChannels] = useState([]);
+  const [consent, setConsent] = useState({});
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [addingAddress, setAddingAddress] = useState(false);
@@ -107,6 +110,7 @@ export default function Checkout() {
         if (cancelled) return;
         if (config?.paymentMethods?.length) setPaymentMethods(config.paymentMethods);
         if (config?.deliveryOptions?.length) setDeliveryOptions(config.deliveryOptions);
+        if (config?.marketingChannels?.length) setMarketingChannels(config.marketingChannels);
       })
       .catch(() => {})
       /*
@@ -196,7 +200,13 @@ export default function Checkout() {
         variantId: line.variant?.variantId || null,
       }));
 
-      const result = await shopCheckoutApi.checkout(payload, addressId, paymentMethod, deliverySpeed);
+      const result = await shopCheckoutApi.checkout(
+        payload,
+        addressId,
+        paymentMethod,
+        deliverySpeed,
+        consent
+      );
 
       if (result.mode === 'stripe') {
         /*
@@ -375,6 +385,30 @@ export default function Checkout() {
                   })}
                 </div>
               </fieldset>
+
+              {/*
+                MARKETING CONSENT AT CHECKOUT.
+
+                Below the payment method and above the button, deliberately —
+                it is the least important thing on this page and must not sit
+                between a shopper and paying. Every box starts unchecked and
+                nothing here can block the order.
+
+                Shown only once the server has told us which channels exist,
+                rather than from a hard-coded list, for the same reason the
+                payment methods are: a capability the server owns has to be
+                published by the server.
+              */}
+              {marketingChannels.length > 0 && (
+                <ConsentCheckboxes
+                  legend="Keep in touch (optional)"
+                  hint="Nothing to do with this order — you will get your confirmation and delivery updates either way."
+                  channels={marketingChannels}
+                  value={consent}
+                  onChange={setConsent}
+                  disabled={submitting}
+                />
+              )}
 
               {/*
                 Disabled until a payment method is actually settled, which is a
