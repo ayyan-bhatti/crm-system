@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, Outlet, useLocation } from 'react-router-dom';
 import { useBuyerAuth } from '../context/BuyerAuthContext';
 import { useCart } from '../context/CartContext';
-import { shopProductsApi, shopNewsletterApi } from '../api/shopResources';
+import { shopProductsApi, shopNewsletterApi, shopMessagesApi } from '../api/shopResources';
 import { errorMessage } from '../api/client';
 import CartDrawer from './CartDrawer';
 import MegaMenu from './shop/MegaMenu';
@@ -23,6 +23,7 @@ export default function ShopLayout() {
   const [cartOpen, setCartOpen] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [categories, setCategories] = useState([]);
+  const [messageCount, setMessageCount] = useState(0);
   const location = useLocation();
 
   useEffect(() => {
@@ -34,6 +35,24 @@ export default function ShopLayout() {
      */
     shopProductsApi.categories().then(setCategories).catch(() => {});
   }, []);
+
+  /*
+   * The notification badge count. Only fetched once signed in — there is no
+   * notifications endpoint a guest could call, and `shopMessagesApi.list`
+   * would 401 for one anyway. Swallowed on failure like the categories fetch
+   * above: a badge that fails to load should render as "no badge", not break
+   * the header.
+   */
+  useEffect(() => {
+    if (!isSignedIn) {
+      setMessageCount(0);
+      return;
+    }
+    shopMessagesApi
+      .list()
+      .then((result) => setMessageCount(result.count || 0))
+      .catch(() => {});
+  }, [isSignedIn]);
 
   // Any navigation closes the mobile drawer. Without this it stays open over
   // the page it just navigated to, which on a phone looks like the tap failed.
@@ -91,9 +110,26 @@ export default function ShopLayout() {
                 <Link to="/account/orders" className="hidden text-ink-2 hover:text-ink sm:inline">
                   My orders
                 </Link>
-                <span className="hidden text-ink-2 lg:inline">
-                  Hi, {buyer.name.split(' ')[0]}
-                </span>
+                {/*
+                  THE NOTIFICATION ENTRY POINT. A greeting doubling as the
+                  link in, rather than a separate bell icon plus a separate
+                  "Hi, Name" — one thing to notice and click, not two
+                  competing for the same corner of the header.
+                */}
+                <Link
+                  to="/account/notifications"
+                  className="relative hidden items-center text-ink-2 hover:text-ink lg:inline-flex"
+                >
+                  Hey, {buyer.name.split(' ')[0]}
+                  {messageCount > 0 && (
+                    <span
+                      className="ml-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-brand px-1 text-[10px] font-semibold text-white"
+                      aria-label={`${messageCount} new message${messageCount === 1 ? '' : 's'}`}
+                    >
+                      {messageCount > 9 ? '9+' : messageCount}
+                    </span>
+                  )}
+                </Link>
                 <button type="button" onClick={logout} className="text-ink-2 hover:text-ink">
                   Sign out
                 </button>
@@ -153,9 +189,14 @@ export default function ShopLayout() {
             ))}
             <div className="mt-2 border-t border-hairline pt-2">
               {isSignedIn && (
-                <Link to="/account/orders" className="block py-2 text-sm text-ink-2">
-                  My orders
-                </Link>
+                <>
+                  <Link to="/account/orders" className="block py-2 text-sm text-ink-2">
+                    My orders
+                  </Link>
+                  <Link to="/account/notifications" className="block py-2 text-sm text-ink-2">
+                    Notifications{messageCount > 0 ? ` (${messageCount})` : ''}
+                  </Link>
+                </>
               )}
               <Link to="/track" className="block py-2 text-sm text-ink-2">
                 Track order

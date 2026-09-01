@@ -4861,3 +4861,18 @@ This is also the first file upload anywhere in this codebase — `multer`
 memory storage, not disk, because this deploys as a Vercel function whose
 filesystem does not persist between invocations, and a spreadsheet buffer
 never needs to touch disk to be read by `exceljs` in the first place.
+
+### Also: buyer notifications, and campaign edit
+
+A buyer's own "Notifications" (`/account/notifications`, linked from a
+badged "Hey, {name}" in the storefront header) lists the campaigns actually
+delivered to them — `GET /api/shop/messages`, filtered to `kind: campaign`
+and `status: sent` only, so a skipped-for-no-consent row never appears as
+something the buyer "received" when they did not. Full subject/body comes
+from `Campaign.content` rather than `OutboundMessage.preview`, which is
+deliberately truncated to 300 characters for staff-log purposes only.
+
+Campaigns can now also be edited from the UI (`/crm/campaigns/:id/edit`,
+reusing `CampaignForm`), matching the PATCH the backend already supported
+but the UI never called. Same draft-only rule the existing delete button
+already enforced.

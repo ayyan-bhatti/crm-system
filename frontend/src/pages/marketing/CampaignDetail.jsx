@@ -82,9 +82,14 @@ export default function CampaignDetail() {
         subtitle={campaign.goal}
         action={
           sendable && (
-            <button type="button" className={btnPrimary} onClick={handleSend} disabled={sending}>
-              {sending ? <Spinner /> : 'Send campaign'}
-            </button>
+            <div className="flex flex-wrap gap-2">
+              <Link to={`/crm/campaigns/${id}/edit`} className={btnSecondary}>
+                Edit
+              </Link>
+              <button type="button" className={btnPrimary} onClick={handleSend} disabled={sending}>
+                {sending ? <Spinner /> : 'Send campaign'}
+              </button>
+            </div>
           )
         }
       />

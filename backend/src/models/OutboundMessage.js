@@ -196,6 +196,16 @@ outboundMessageSchema.index({ kind: 1, createdAt: -1, _id: -1 });
 /** Everything ever sent to one contact — the per-contact message history. */
 outboundMessageSchema.index({ customer: 1, createdAt: -1, _id: -1 });
 
+/**
+ * A signed-in buyer's own notifications screen — "what has this account
+ * actually been sent". Separate from the `customer` index above: a buyer and
+ * their matching `Customer` record are two different documents that happen
+ * to share an email, and a buyer reading their own message history has to
+ * query by the id on THEIR session, not by a `Customer` id they may not even
+ * know exists.
+ */
+outboundMessageSchema.index({ buyer: 1, createdAt: -1, _id: -1 });
+
 /** The unfiltered log, newest first. */
 outboundMessageSchema.index({ createdAt: -1, _id: -1 });
 

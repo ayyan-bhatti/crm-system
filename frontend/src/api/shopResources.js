@@ -151,3 +151,13 @@ export const trackingApi = {
   track: (orderNumber, email) =>
     shopClient.post('/shop/track', { orderNumber, email }).then((r) => r.data.data),
 };
+
+/**
+ * A signed-in buyer's own notifications — the marketing campaigns actually
+ * delivered to them. Returns the whole envelope, not just `data`, because
+ * `count` is what the header bell badges without the caller re-deriving it
+ * from the array length.
+ */
+export const shopMessagesApi = {
+  list: () => shopClient.get('/shop/messages').then((r) => r.data),
+};

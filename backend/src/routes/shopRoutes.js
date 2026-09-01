@@ -6,6 +6,7 @@ const shopCartRoutes = require('./shopCartRoutes');
 const shopCheckoutRoutes = require('./shopCheckoutRoutes');
 const shopOrderRoutes = require('./shopOrderRoutes');
 const shopNewsletterRoutes = require('./shopNewsletterRoutes');
+const shopMessageRoutes = require('./shopMessageRoutes');
 const { getStorefrontConfig } = require('../controllers/shopConfigController');
 const { trackOrder } = require('../controllers/trackingController');
 const { trackOrderLimiter } = require('../middleware/rateLimit');
@@ -50,6 +51,7 @@ router.use('/cart', shopCartRoutes);
 router.use('/checkout', shopCheckoutRoutes);
 router.use('/orders', shopOrderRoutes);
 router.use('/newsletter', shopNewsletterRoutes);
+router.use('/messages', shopMessageRoutes);
 
 /*
  * NOTE: `/api/shop/stripe/webhook` is NOT mounted here, and cannot be.

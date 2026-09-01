@@ -88,6 +88,7 @@ const BuyerRegister = lazy(() => import('./pages/shop/BuyerRegister'));
 const Checkout = lazy(() => import('./pages/shop/Checkout'));
 const OrderConfirmation = lazy(() => import('./pages/shop/OrderConfirmation'));
 const BuyerOrders = lazy(() => import('./pages/shop/BuyerOrders'));
+const BuyerNotifications = lazy(() => import('./pages/shop/BuyerNotifications'));
 const BuyerOrderDetail = lazy(() => import('./pages/shop/BuyerOrderDetail'));
 const BuyerAccount = lazy(() => import('./pages/shop/BuyerAccount'));
 const Unsubscribe = lazy(() => import('./pages/shop/Unsubscribe'));
@@ -163,6 +164,7 @@ export default function App() {
                     <Route path="order-confirmation" element={<OrderConfirmation />} />
                     <Route path="order-confirmation/:id" element={<OrderConfirmation />} />
                     <Route path="account/orders" element={<BuyerOrders />} />
+                    <Route path="account/notifications" element={<BuyerNotifications />} />
                     <Route path="account/orders/:id" element={<BuyerOrderDetail />} />
                     <Route path="account/addresses" element={<BuyerAccount />} />
                     {/*
@@ -344,6 +346,8 @@ export default function App() {
                       <Route index element={<CampaignList />} />
                       {/* Before ":id", or "new" is captured as a campaign id. */}
                       <Route path="new" element={<CampaignForm />} />
+                      {/* Also before the bare ":id", for the same reason. */}
+                      <Route path=":id/edit" element={<CampaignForm />} />
                       <Route path=":id" element={<CampaignDetail />} />
                     </Route>
 

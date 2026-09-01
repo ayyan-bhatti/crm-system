@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { campaignsApi } from '../../api/resources';
 import { errorMessage } from '../../api/client';
 import useFetch from '../../hooks/useFetch';
@@ -37,11 +37,20 @@ import {
  * NOTHING SENDS FROM THIS PAGE. Saving creates a DRAFT. Sending is a separate,
  * deliberate act on the campaign's own page, so that no single click can both
  * invent a campaign and put it in front of four thousand people.
+ *
+ * ALSO THE EDIT FORM, when reached via `/crm/campaigns/:id/edit`. Editing and
+ * creating ask for the same six fields, so this is one component rather than
+ * two that would drift apart the first time a field changed — the only real
+ * difference is which `campaignsApi` call the save button makes, and that a
+ * campaign that has already sent (or is queued for approval) cannot be
+ * edited at all, mirroring the backend's own rule in `updateCampaign`.
  */
 export default function CampaignForm() {
   const navigate = useNavigate();
   const toast = useToast();
   const { isAdmin } = usePermissions();
+  const { id } = useParams();
+  const editing = Boolean(id);
 
   const [name, setName] = useState('');
   const [goal, setGoal] = useState('');
@@ -62,12 +71,54 @@ export default function CampaignForm() {
   const [drafting, setDrafting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [loaded, setLoaded] = useState(!editing);
+  // Only meaningful in edit mode — a campaign that has already sent, or is
+  // queued for approval, cannot be edited; the backend refuses the PATCH
+  // outright, and the form says so up front rather than letting someone
+  // fill in changes that will be rejected on save.
+  const [campaignStatus, setCampaignStatus] = useState(null);
 
   // The audience and channel option lists come from the server — same
   // reasoning as the storefront config: a hard-coded segment list disagrees
   // with the server the day one is added.
   const { data: options } = useFetch(() => campaignsApi.list(), []);
   const meta = options?.options;
+
+  /*
+   * Loading the existing campaign, only in edit mode. Deliberately its own
+   * effect rather than folded into `useFetch` above: this one has to POPULATE
+   * five pieces of local state once, the moment the data arrives, and a
+   * plain `useFetch` result would re-run that population on every unrelated
+   * re-render if written as a render-time derivation instead.
+   */
+  useEffect(() => {
+    if (!editing) return;
+
+    let cancelled = false;
+
+    campaignsApi
+      .get(id)
+      .then(({ campaign }) => {
+        if (cancelled) return;
+        setName(campaign.name);
+        setGoal(campaign.goal || '');
+        setChannel(campaign.channel);
+        setAudience(campaign.audience);
+        setContent(campaign.content);
+        setCampaignStatus(campaign.status);
+        setLoaded(true);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setError(errorMessage(err, 'Could not load this campaign'));
+          setLoaded(true);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [editing, id]);
 
   const audienceKey = JSON.stringify(audience);
 
@@ -128,11 +179,17 @@ export default function CampaignForm() {
     setError('');
 
     try {
-      const campaign = await campaignsApi.create({ name, goal, channel, audience, content });
-      toast.success('Saved as a draft. Review it, then send from the campaign page.');
-      navigate(`/crm/campaigns/${campaign._id}`);
+      if (editing) {
+        await campaignsApi.update(id, { name, goal, channel, audience, content });
+        toast.success('Changes saved.');
+        navigate(`/crm/campaigns/${id}`);
+      } else {
+        const campaign = await campaignsApi.create({ name, goal, channel, audience, content });
+        toast.success('Saved as a draft. Review it, then send from the campaign page.');
+        navigate(`/crm/campaigns/${campaign._id}`);
+      }
     } catch (err) {
-      setError(errorMessage(err, 'Could not save the campaign'));
+      setError(errorMessage(err, editing ? 'Could not save these changes' : 'Could not save the campaign'));
       setSaving(false);
     }
   }
@@ -147,11 +204,29 @@ export default function CampaignForm() {
       ? content.subject.trim() && content.body.trim()
       : Boolean(bodyForChannel?.trim() || content.body.trim()));
 
+  if (!loaded) return <Spinner full />;
+
+  // The backend refuses this PATCH outright once a campaign has left draft —
+  // see updateCampaign's guard. Said here too, before anyone fills anything
+  // in, rather than as a save error after the fact.
+  if (editing && campaignStatus && campaignStatus !== 'draft') {
+    return (
+      <div className="max-w-3xl space-y-5">
+        <PageHeader title="Edit campaign" />
+        <ErrorBanner message="This campaign has already sent, or is waiting on approval, so it can no longer be edited. A sent campaign is a record of something that happened." />
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-3xl space-y-5">
       <PageHeader
-        title="New campaign"
-        subtitle="Saving creates a draft. Nothing is sent until you send it from the campaign page."
+        title={editing ? 'Edit campaign' : 'New campaign'}
+        subtitle={
+          editing
+            ? 'Still a draft until it is sent — changes here are safe.'
+            : 'Saving creates a draft. Nothing is sent until you send it from the campaign page.'
+        }
       />
 
       <ErrorBanner message={error} onDismiss={() => setError('')} />
@@ -378,9 +453,13 @@ export default function CampaignForm() {
 
       <div className="flex gap-2">
         <button type="button" className={btnPrimary} onClick={handleSave} disabled={saving || !canSave}>
-          {saving ? <Spinner /> : 'Save as draft'}
+          {saving ? <Spinner /> : editing ? 'Save changes' : 'Save as draft'}
         </button>
-        <button type="button" className={btnSecondary} onClick={() => navigate('/crm/campaigns')}>
+        <button
+          type="button"
+          className={btnSecondary}
+          onClick={() => navigate(editing ? `/crm/campaigns/${id}` : '/crm/campaigns')}
+        >
           Cancel
         </button>
       </div>
