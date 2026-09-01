@@ -113,7 +113,7 @@ export default function ShopLayout() {
                 {/*
                   THE NOTIFICATION ENTRY POINT. A greeting doubling as the
                   link in, rather than a separate bell icon plus a separate
-                  "Hi, Name" — one thing to notice and click, not two
+                  "Hi, Name" text used to be — one thing to notice and click, not two
                   competing for the same corner of the header.
                 */}
                 <Link

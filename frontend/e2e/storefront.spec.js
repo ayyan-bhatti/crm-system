@@ -219,7 +219,7 @@ test.describe('Buyer registration and session', () => {
     // Registration signs the buyer straight in and lands on the shop home
     // (the app's front door, at "/" — see the note at the top of App.jsx).
     await expect(page).toHaveURL(/\/$/);
-    await expect(page.getByText(new RegExp(`hi, ${BUYER.name.split(' ')[0]}`, 'i'))).toBeVisible();
+    await expect(page.getByText(new RegExp(`hey, ${BUYER.name.split(' ')[0]}`, 'i'))).toBeVisible();
   });
 
   test('rejects a weak password with a visible message', async ({ page }) => {
@@ -236,10 +236,10 @@ test.describe('Buyer registration and session', () => {
 
   test('signs in and keeps the session across a reload, then signs out', async ({ page }) => {
     await signInBuyer(page);
-    await expect(page.getByText(new RegExp(`hi, ${BUYER.name.split(' ')[0]}`, 'i'))).toBeVisible();
+    await expect(page.getByText(new RegExp(`hey, ${BUYER.name.split(' ')[0]}`, 'i'))).toBeVisible();
 
     await page.reload();
-    await expect(page.getByText(new RegExp(`hi, ${BUYER.name.split(' ')[0]}`, 'i'))).toBeVisible();
+    await expect(page.getByText(new RegExp(`hey, ${BUYER.name.split(' ')[0]}`, 'i'))).toBeVisible();
 
     await page.getByRole('button', { name: /sign out/i }).click();
     /*
@@ -265,7 +265,7 @@ test.describe('Buyer registration and session', () => {
     const buyerPage = await context.newPage();
     await signInBuyer(buyerPage);
     await expect(
-      buyerPage.getByText(new RegExp(`hi, ${BUYER.name.split(' ')[0]}`, 'i'))
+      buyerPage.getByText(new RegExp(`hey, ${BUYER.name.split(' ')[0]}`, 'i'))
     ).toBeVisible();
 
     const staffPage = await context.newPage();
@@ -288,7 +288,7 @@ test.describe('Buyer registration and session', () => {
     await buyerPage.reload();
     await expect(buyerPage).not.toHaveURL(/\/login/);
     await expect(
-      buyerPage.getByText(new RegExp(`hi, ${BUYER.name.split(' ')[0]}`, 'i'))
+      buyerPage.getByText(new RegExp(`hey, ${BUYER.name.split(' ')[0]}`, 'i'))
     ).toBeVisible();
 
     await staffPage.close();
