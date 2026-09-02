@@ -8,9 +8,14 @@ const {
   addAddress,
   updateAddress,
   deleteAddress,
+  resendVerification,
 } = require('../controllers/shopAuthController');
 const { protectBuyer } = require('../middleware/buyerAuth');
-const { shopLoginLimiter, shopRegisterLimiter } = require('../middleware/rateLimit');
+const {
+  shopLoginLimiter,
+  shopRegisterLimiter,
+  shopVerificationLimiter,
+} = require('../middleware/rateLimit');
 
 const router = express.Router();
 
@@ -31,5 +36,12 @@ router.get('/me', protectBuyer, getMe);
 router.post('/addresses', protectBuyer, addAddress);
 router.patch('/addresses/:addressId', protectBuyer, updateAddress);
 router.delete('/addresses/:addressId', protectBuyer, deleteAddress);
+
+/*
+ * Authenticated rather than taking an email in the body — same reasoning as
+ * the identical staff-side route: an anonymous "resend to this address"
+ * endpoint is a way to make this server spam anyone's inbox on demand.
+ */
+router.post('/resend-verification', protectBuyer, shopVerificationLimiter, resendVerification);
 
 module.exports = router;

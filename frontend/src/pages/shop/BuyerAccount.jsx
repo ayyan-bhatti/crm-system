@@ -4,6 +4,7 @@ import { useBuyerAuth } from '../../context/BuyerAuthContext';
 import { shopAuthApi } from '../../api/shopResources';
 import { errorMessage } from '../../api/client';
 import { useToast } from '../../components/Toast';
+import { useConfirm } from '../../components/ConfirmDialog';
 import { Card, ErrorBanner, Field, PageHeader, Spinner } from '../../components/common';
 import { btnDanger, btnPrimary, btnSecondary, link } from '../../ui';
 
@@ -21,6 +22,20 @@ const EMPTY_FORM = { label: '', address: '', city: '', phone: '' };
 export default function BuyerAccount() {
   const { buyer, isSignedIn, loading: authLoading } = useBuyerAuth();
   const toast = useToast();
+  const confirm = useConfirm();
+  const [resending, setResending] = useState(false);
+
+  async function handleResendVerification() {
+    setResending(true);
+    try {
+      const result = await shopAuthApi.resendVerification();
+      toast.success(result.message || 'Verification email sent.');
+    } catch (err) {
+      toast.error(errorMessage(err, 'Could not send the verification email'));
+    } finally {
+      setResending(false);
+    }
+  }
 
   const [addresses, setAddresses] = useState(buyer?.addresses || []);
   const [error, setError] = useState('');
@@ -88,7 +103,8 @@ export default function BuyerAccount() {
   }
 
   async function handleDelete(addressId) {
-    if (!window.confirm('Remove this address?')) return;
+    const ok = await confirm('Remove this address?', { confirmLabel: 'Remove', tone: 'danger' });
+    if (!ok) return;
 
     setBusy(true);
     try {
@@ -116,6 +132,20 @@ export default function BuyerAccount() {
           )
         }
       />
+
+      {buyer && !buyer.emailVerified && (
+        <Card className="mb-6 flex flex-wrap items-center justify-between gap-3 p-4 text-sm">
+          <span className="text-ink-2">Your email address has not been confirmed yet.</span>
+          <button
+            type="button"
+            onClick={handleResendVerification}
+            disabled={resending}
+            className="font-medium text-brand hover:underline disabled:opacity-50"
+          >
+            {resending ? 'Sending…' : 'Resend confirmation email'}
+          </button>
+        </Card>
+      )}
 
       <p className="mb-6 text-sm text-ink-2">
         Looking for an order?{' '}

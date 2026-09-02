@@ -27,13 +27,18 @@ import { formatDate, humanize, input, td, th } from '../ui';
  */
 
 const ENTITIES = ['customer', 'product', 'order', 'user'];
-const ACTIONS = ['create', 'update', 'delete'];
+const ACTIONS = ['create', 'update', 'delete', 'export', 'import', 'login', 'login_failed', 'logout'];
 
 /** Colour by action, so a page of entries is scannable without reading it. */
 const ACTION_STYLES = {
   create: 'bg-good-wash text-good-ink',
   update: 'bg-brand-wash text-brand-ink',
   delete: 'bg-critical-wash text-critical-ink',
+  export: 'bg-neutral-wash text-neutral-ink',
+  import: 'bg-good-wash text-good-ink',
+  login: 'bg-neutral-wash text-neutral-ink',
+  login_failed: 'bg-critical-wash text-critical-ink',
+  logout: 'bg-neutral-wash text-neutral-ink',
 };
 
 function ActionBadge({ action }) {
@@ -78,6 +83,27 @@ function ChangeList({ log }) {
         </pre>
       </div>
     );
+  }
+  /*
+   * These five never carry a before/after diff — none of them changes a
+   * record, so "no field values changed" would be technically true and
+   * genuinely confusing. See models/AuditLog.js for why they exist in this
+   * collection at all despite not being writes.
+   */
+  if (log.action === 'login') {
+    return <p className="text-sm text-ink-2">Signed in.</p>;
+  }
+  if (log.action === 'login_failed') {
+    return <p className="text-sm text-critical-ink">A sign-in attempt used the wrong password.</p>;
+  }
+  if (log.action === 'logout') {
+    return <p className="text-sm text-ink-2">Signed out.</p>;
+  }
+  if (log.action === 'export') {
+    return <p className="text-sm text-ink-2">{log.note || 'Data exported.'}</p>;
+  }
+  if (log.action === 'import') {
+    return <p className="text-sm text-ink-2">{log.note || 'Data imported.'}</p>;
   }
   if (!log.changes?.length) {
     return <p className="text-sm text-muted">No field values changed.</p>;

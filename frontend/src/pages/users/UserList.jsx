@@ -3,6 +3,7 @@ import { usersApi } from '../../api/resources';
 import { errorMessage } from '../../api/client';
 import useFetch from '../../hooks/useFetch';
 import { useToast } from '../../components/Toast';
+import { useConfirm } from '../../components/ConfirmDialog';
 import {
   Card,
   CardSkeleton,
@@ -26,6 +27,7 @@ import { btnPrimary, btnSecondary, formatDate, humanize, input, td, th } from '.
 export default function UserList() {
   const { user: currentUser } = useAuth();
   const toast = useToast();
+  const confirm = useConfirm();
   const [showForm, setShowForm] = useState(false);
 
   /*
@@ -67,14 +69,13 @@ export default function UserList() {
   async function setStatus(id, name, status) {
     const deactivating = status === 'deactivated';
 
-    if (
-      deactivating &&
-      !window.confirm(
+    if (deactivating) {
+      const ok = await confirm(
         `Deactivate ${name}? They will be signed out immediately and cannot sign in again ` +
-          'until reactivated.'
-      )
-    ) {
-      return;
+          'until reactivated.',
+        { confirmLabel: 'Deactivate', tone: 'danger' }
+      );
+      if (!ok) return;
     }
 
     try {
@@ -123,7 +124,11 @@ export default function UserList() {
   }
 
   async function removeUser(id, name) {
-    if (!window.confirm(`Delete ${name}? This cannot be undone.`)) return;
+    const ok = await confirm(`Delete ${name}? This cannot be undone.`, {
+      confirmLabel: 'Delete',
+      tone: 'danger',
+    });
+    if (!ok) return;
 
     try {
       await usersApi.remove(id);

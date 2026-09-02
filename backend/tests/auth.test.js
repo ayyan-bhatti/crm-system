@@ -1,6 +1,10 @@
+const request = require('supertest');
+const app = require('../src/app');
 const { api, createRep } = require('./helpers');
 const User = require('../src/models/User');
+const AuditLog = require('../src/models/AuditLog');
 const env = require('../src/config/env');
+const { CSRF_COOKIE, CSRF_HEADER } = require('../src/middleware/csrf');
 
 describe('Authentication', () => {
   describe('POST /api/auth/register', () => {
@@ -252,6 +256,92 @@ describe('Authentication', () => {
       const res = await api().post('/api/auth/login').send({ email: 'ayesha@example.com' });
 
       expect(res.status).toBe(400);
+    });
+  });
+
+  /**
+   * "Who accessed this system, and when" is a question the audit trail must
+   * answer even though none of these three events changes a record — see the
+   * note on the `login`/`login_failed`/`logout` actions in models/AuditLog.js.
+   */
+  describe('sign-in and sign-out on the audit trail', () => {
+    beforeEach(async () => {
+      await api()
+        .post('/api/auth/register')
+        .send({ name: 'Ayesha', email: 'ayesha@example.com', password: 'Karachi-Ledger-72' });
+    });
+
+    it('records a successful sign-in', async () => {
+      const res = await api()
+        .post('/api/auth/login')
+        .send({ email: 'ayesha@example.com', password: 'Karachi-Ledger-72' });
+
+      const user = await User.findOne({ email: 'ayesha@example.com' });
+      const entry = await AuditLog.findOne({ action: 'login', entityId: user._id });
+
+      expect(res.status).toBe(200);
+      expect(entry).not.toBeNull();
+      expect(entry.actor.email).toBe('ayesha@example.com');
+    });
+
+    it('records a failed sign-in against the real account, not a phantom one', async () => {
+      const res = await api()
+        .post('/api/auth/login')
+        .send({ email: 'ayesha@example.com', password: 'wrong-password' });
+
+      const user = await User.findOne({ email: 'ayesha@example.com' });
+      const entry = await AuditLog.findOne({ action: 'login_failed', entityId: user._id });
+
+      expect(res.status).toBe(401);
+      expect(entry).not.toBeNull();
+    });
+
+    /**
+     * An unknown email has no account to attach the entry to — inventing one
+     * would be worse than not recording it, and the per-IP limiter is
+     * already the defence against a stranger guessing at addresses.
+     */
+    it('does not record a failed sign-in for an email with no account', async () => {
+      await api()
+        .post('/api/auth/login')
+        .send({ email: 'nobody@example.com', password: 'Karachi-Ledger-72' });
+
+      const entry = await AuditLog.findOne({ action: 'login_failed' });
+
+      expect(entry).toBeNull();
+    });
+
+    it('records a sign-out', async () => {
+      /*
+       * A cookie-jar agent, not the plain `api()` helper — logout is a POST,
+       * so it is behind the CSRF check, which needs the token COOKIE and its
+       * matching HEADER both present. `api()` alone does not carry cookies
+       * across requests; see tests/csrf.test.js for the identical pattern.
+       */
+      const agent = request.agent(app);
+      const login = await agent
+        .post('/api/auth/login')
+        .send({ email: 'ayesha@example.com', password: 'Karachi-Ledger-72' });
+
+      const csrfCookie = (login.headers['set-cookie'] || []).find((c) =>
+        c.startsWith(`${CSRF_COOKIE}=`)
+      );
+      const csrfToken = decodeURIComponent(csrfCookie.slice(CSRF_COOKIE.length + 1).split(';')[0]);
+
+      const res = await agent.post('/api/auth/logout').set(CSRF_HEADER, csrfToken);
+
+      const user = await User.findOne({ email: 'ayesha@example.com' });
+      const entry = await AuditLog.findOne({ action: 'logout', entityId: user._id });
+
+      expect(res.status).toBe(200);
+      expect(entry).not.toBeNull();
+    });
+
+    it('is a harmless no-op, on the audit trail too, for a logout with no session', async () => {
+      const res = await api().post('/api/auth/logout');
+
+      expect(res.status).toBe(200);
+      expect(await AuditLog.countDocuments({ action: 'logout' })).toBe(0);
     });
   });
 

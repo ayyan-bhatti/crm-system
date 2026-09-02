@@ -44,6 +44,16 @@ export const authApi = {
    */
   getInvite: (token) => client.get(`/auth/invite/${token}`).then((r) => r.data.data),
   acceptInvite: (payload) => client.post('/auth/accept-invite', payload).then((r) => r.data),
+
+  /*
+   * Email verification. `checkEmailVerification` is read-only — it never
+   * redeems the token, so a mail client prefetching the link cannot burn it
+   * before a human clicks. `verifyEmail` is the POST that actually does.
+   */
+  checkEmailVerification: (token) =>
+    client.get(`/auth/verify-email/${token}`).then((r) => r.data.data),
+  verifyEmail: (token) => client.post('/auth/verify-email', { token }).then((r) => r.data),
+  resendVerification: () => client.post('/auth/resend-verification').then((r) => r.data),
 };
 
 // --- customers --------------------------------------------------------------

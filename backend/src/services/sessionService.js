@@ -125,14 +125,23 @@ async function rotateSession(presentedToken, req) {
   return { ...tokens, user: record.user };
 }
 
-/** Revoke a single refresh token. Used by logout. Unknown tokens are a no-op. */
+/**
+ * Revoke a single refresh token. Used by logout. Unknown tokens are a no-op.
+ *
+ * Returns the user the token belonged to, or `null` — logout has no `req.user`
+ * to attach an audit entry to (the route runs before `protect`, deliberately,
+ * so a client with an already-expired access token can still log out), and
+ * this is the one place that still knows who was signed in.
+ */
 async function revokeToken(presentedToken, reason = 'logout') {
-  if (!presentedToken) return;
+  if (!presentedToken) return null;
 
-  await RefreshToken.updateOne(
+  const record = await RefreshToken.findOneAndUpdate(
     { tokenHash: hashRefreshToken(presentedToken), revokedAt: null },
     { revokedAt: new Date(), revokedReason: reason }
-  );
+  ).populate('user', 'name email role');
+
+  return record?.user || null;
 }
 
 /** Revoke every live token descended from one login. */

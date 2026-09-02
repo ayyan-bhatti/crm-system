@@ -101,25 +101,28 @@ describe('when somebody is waiting', () => {
    */
   it('confirms before rejecting', async () => {
     const user = userEvent.setup();
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
     render();
 
     await user.click(await screen.findByRole('button', { name: /reject/i }));
 
-    expect(confirm).toHaveBeenCalled();
+    const dialog = await screen.findByRole('alertdialog');
+    await user.click(within(dialog).getByRole('button', { name: /^cancel$/i }));
+
     expect(usersApi.reject).not.toHaveBeenCalled();
-    confirm.mockRestore();
   });
 
   it('rejects when confirmed', async () => {
     const user = userEvent.setup();
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
     render();
 
     await user.click(await screen.findByRole('button', { name: /reject/i }));
 
+    const dialog = await screen.findByRole('alertdialog');
+    // Scoped to the dialog: the row's own "Reject" trigger is still in the
+    // document behind it, and its accessible name matches the same regex.
+    await user.click(within(dialog).getByRole('button', { name: /^reject$/i }));
+
     await waitFor(() => expect(usersApi.reject).toHaveBeenCalledWith('u9'));
-    confirm.mockRestore();
   });
 
   it('refreshes the queue after a decision', async () => {

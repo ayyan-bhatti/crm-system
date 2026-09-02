@@ -111,6 +111,22 @@ const buyerSchema = new mongoose.Schema({
     default: null,
   },
 
+  /**
+   * Whether this address has been confirmed to actually belong to this buyer.
+   *
+   * DOES NOT GATE SIGN-IN OR CHECKOUT — a deliberate choice, consistent with
+   * how this app already treats marketing consent as informational rather
+   * than access-controlling. Blocking a freshly-registered buyer from buying
+   * anything until they click a link in their inbox is a real conversion
+   * cost for a storefront, and nothing here depends on the address being
+   * genuine the way, say, a password-reset link's destination does. This is
+   * a signal shown to the buyer (and, on the CRM side, to staff), not a lock.
+   */
+  emailVerified: {
+    type: Boolean,
+    default: false,
+  },
+
   /** Consecutive failed logins. See User.js for why this lives on the account. */
   failedLoginAttempts: {
     type: Number,

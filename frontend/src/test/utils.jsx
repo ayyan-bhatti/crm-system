@@ -3,6 +3,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { AuthProvider } from '../context/AuthContext';
 import ProtectedRoute from '../components/ProtectedRoute';
 import { ToastProvider } from '../components/Toast';
+import { ConfirmProvider } from '../components/ConfirmDialog';
 
 /**
  * Helpers shared by the component tests.
@@ -51,15 +52,17 @@ export function renderWithProviders(ui, { route = '/', path, guarded = false } =
   const wrapper = (
     <MemoryRouter initialEntries={[route]}>
       <ToastProvider>
-        <AuthProvider>
-          {path ? (
-            <Routes>
-              <Route path={path} element={element} />
-            </Routes>
-          ) : (
-            element
-          )}
-        </AuthProvider>
+        <ConfirmProvider>
+          <AuthProvider>
+            {path ? (
+              <Routes>
+                <Route path={path} element={element} />
+              </Routes>
+            ) : (
+              element
+            )}
+          </AuthProvider>
+        </ConfirmProvider>
       </ToastProvider>
     </MemoryRouter>
   );

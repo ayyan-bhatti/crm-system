@@ -12,6 +12,8 @@ const {
 const { setAuthCookies, clearAuthCookies, REFRESH_COOKIE } = require('../utils/cookies');
 const { assertStrongPassword } = require('../utils/passwordPolicy');
 const passwordResetService = require('../services/passwordResetService');
+const emailVerificationService = require('../services/emailVerificationService');
+const { recordAudit } = require('../services/auditService');
 const env = require('../config/env');
 const mailer = require('../services/mailer');
 const { publicUrl } = require('../utils/publicUrl');
@@ -143,6 +145,9 @@ const register = asyncHandler(async (req, res) => {
     role: isFirstUser ? ROLES.ADMIN : ROLES.SALES_REP,
     status: isFirstUser ? USER_STATUS.ACTIVE : USER_STATUS.PENDING,
     requestedRole: isFirstUser ? null : requestedRole || ROLES.SALES_REP,
+    // The bootstrap admin has nobody to prove their mailbox to — see the
+    // field's own comment on the model.
+    emailVerified: isFirstUser,
   });
 
   // The bootstrap admin signs in immediately; there is nobody to approve them
@@ -158,6 +163,20 @@ const register = asyncHandler(async (req, res) => {
    * the exact thing this flow exists to prevent.
    */
   await notifyAdminsOfRequest(user, req);
+
+  /*
+   * Awaited, not fire-and-forget — same shape as `notifyAdminsOfRequest`
+   * above. "Must not fail registration on a mail outage" means the FAILURE
+   * is swallowed (inside the try/catch below), not that the call is left to
+   * finish on its own time: an un-awaited send could still be in flight when
+   * this response goes out, which made the whole feature racy for no reason
+   * — nothing here needs registration to answer a few milliseconds sooner.
+   */
+  try {
+    await emailVerificationService.sendVerificationEmail('user', user, req);
+  } catch (err) {
+    log.warn({ err }, 'could not send the verification email');
+  }
 
   /*
    * 202 Accepted rather than 201 Created. Something was created, but the thing
@@ -263,7 +282,24 @@ const login = asyncHandler(async (req, res) => {
   if (!user || !(await user.comparePassword(password))) {
     // Only a real account has a counter to advance. An unknown address is
     // handled by the per-IP limiter instead.
-    if (user) await user.registerFailedLogin();
+    if (user) {
+      await user.registerFailedLogin();
+      /*
+       * Same reasoning as the counter: only logged for a REAL account. An
+       * audit entry for an unknown address would need to invent an actor to
+       * attach it to, and the per-IP rate limiter is already the defence
+       * against a stranger guessing at addresses. What this entry answers is
+       * "has somebody been guessing at MY account" — a question about a
+       * specific person, not about traffic in general.
+       */
+      await recordAudit(req, {
+        action: 'login_failed',
+        entity: 'user',
+        entityId: user._id,
+        label: user.name,
+        actor: user,
+      });
+    }
     throw ApiError.unauthorized('Invalid email or password');
   }
 
@@ -294,6 +330,17 @@ const login = asyncHandler(async (req, res) => {
   await user.clearFailedLogins();
 
   const session = await issueSession(user, req);
+
+  // `actor: user` — see the note on recordAudit's `actor` option: `protect`
+  // has not run on this request, so `req.user` does not exist yet.
+  await recordAudit(req, {
+    action: 'login',
+    entity: 'user',
+    entityId: user._id,
+    label: user.name,
+    actor: user,
+  });
+
   return sendSession(res, { user, ...session });
 });
 
@@ -375,8 +422,20 @@ const refresh = asyncHandler(async (req, res) => {
  * tidy up failed.
  */
 const logout = asyncHandler(async (req, res) => {
-  await revokeToken(req.cookies?.[REFRESH_COOKIE], 'logout');
+  const user = await revokeToken(req.cookies?.[REFRESH_COOKIE], 'logout');
   clearAuthCookies(res);
+
+  // `user` is null for a cookie-less or already-expired logout — idempotent,
+  // so there is nothing to record and nothing to complain about either.
+  if (user) {
+    await recordAudit(req, {
+      action: 'logout',
+      entity: 'user',
+      entityId: user._id,
+      label: user.name,
+      actor: user,
+    });
+  }
 
   res.json({ success: true, message: 'Signed out' });
 });
@@ -507,6 +566,55 @@ const resetPassword = asyncHandler(async (req, res) => {
 });
 
 /**
+ * GET /api/auth/verify-email/:token
+ *
+ * Read-only, on purpose — see `emailVerificationService.peek` for why: a mail
+ * client's link-prefetching must not be able to consume the one-time token
+ * before a human clicks it.
+ */
+const checkEmailVerification = asyncHandler(async (req, res) => {
+  const result = await emailVerificationService.peek(req.params.token);
+  res.json({ success: true, data: result });
+});
+
+/**
+ * POST /api/auth/verify-email — body: `{ token }`. The half that actually
+ * flips `emailVerified`.
+ */
+const verifyEmail = asyncHandler(async (req, res) => {
+  const { token } = req.body;
+  if (!token) throw ApiError.badRequest('A token is required');
+
+  const result = await emailVerificationService.verify(token);
+
+  if (!result.ok) {
+    const messages = {
+      expired: 'This verification link has expired. Request a new one from your account.',
+      used: 'This verification link has already been used.',
+      invalid: 'This verification link is not valid.',
+    };
+    throw ApiError.badRequest(messages[result.reason] || messages.invalid);
+  }
+
+  res.json({ success: true, message: 'Email confirmed.' });
+});
+
+/**
+ * POST /api/auth/resend-verification — requires a session, resends for the
+ * signed-in user's own address. There is deliberately no version of this
+ * that takes an arbitrary email in the body: that would be a way to make
+ * this app send mail to any address on demand.
+ */
+const resendVerification = asyncHandler(async (req, res) => {
+  if (req.user.emailVerified) {
+    return res.json({ success: true, message: 'Your email is already confirmed.' });
+  }
+
+  await emailVerificationService.resend('user', req.user, req);
+  res.json({ success: true, message: 'Verification email sent.' });
+});
+
+/**
  * GET /api/auth/invite/:token
  *
  * What the accept-invite page loads before showing its form: who the invite is
@@ -599,4 +707,7 @@ module.exports = {
   getInvite,
   acceptInvite,
   getMe,
+  checkEmailVerification,
+  verifyEmail,
+  resendVerification,
 };

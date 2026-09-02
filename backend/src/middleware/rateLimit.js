@@ -246,6 +246,28 @@ const trackOrderLimiter = createLimiter({
   message: 'Too many tracking attempts from this address. Please wait a few minutes and try again.',
 });
 
+/**
+ * Redeeming or resending an email-verification link: 5 per hour per IP, on
+ * BOTH the staff and buyer routes — but as two separate limiters, not one
+ * shared between them. Same isolation reasoning as `shopLoginLimiter`: an
+ * office where a colleague is testing storefront registration must not
+ * exhaust the budget for someone verifying their own staff account from the
+ * same address, or the reverse.
+ */
+const verificationLimiter = createLimiter({
+  name: 'verify-email',
+  windowMs: 60 * 60 * 1000,
+  max: 5,
+  message: 'Too many attempts. Please try again later.',
+});
+
+const shopVerificationLimiter = createLimiter({
+  name: 'shop-verify-email',
+  windowMs: 60 * 60 * 1000,
+  max: 5,
+  message: 'Too many attempts. Please try again later.',
+});
+
 module.exports = {
   createLimiter,
   newsletterLimiter,
@@ -257,4 +279,6 @@ module.exports = {
   shopLoginLimiter,
   shopRegisterLimiter,
   trackOrderLimiter,
+  verificationLimiter,
+  shopVerificationLimiter,
 };

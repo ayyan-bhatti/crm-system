@@ -210,6 +210,19 @@ customerSchema.index({ status: 1, createdAt: -1, _id: -1 });
 customerSchema.index({ name: 1, _id: 1 });
 
 /*
+ * Looking a customer up by email — the unsubscribe flow, contact merging,
+ * and the Excel import's duplicate check (`Customer.findOne({ email })`) all
+ * do this, and without an index each one is a collection scan.
+ *
+ * NOT UNIQUE, deliberately. Two customers can legitimately share one email —
+ * a shared company inbox, a couple who shops together — and
+ * `services/customerImportService.js` already depends on that being allowed
+ * (a duplicate is skipped by application logic, not refused by the database).
+ * A unique index here would reject a case this app treats as normal.
+ */
+customerSchema.index({ email: 1 });
+
+/*
  * WHAT THESE INDEXES DO NOT FIX, stated plainly.
  *
  * The search box builds a case-insensitive, UNANCHORED regex (`/karachi/i`).

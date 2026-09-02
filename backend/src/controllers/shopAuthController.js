@@ -13,6 +13,10 @@ const {
 } = require('../utils/shopCookies');
 const { assertStrongPassword } = require('../utils/passwordPolicy');
 const { applyConsent, consentFromBody } = require('../models/marketingConsent');
+const emailVerificationService = require('../services/emailVerificationService');
+const { componentLogger } = require('../config/logger');
+
+const log = componentLogger('shop-auth');
 
 /**
  * Buyer auth: `/api/shop/auth/*`.
@@ -85,6 +89,20 @@ const register = asyncHandler(async (req, res) => {
   const consentChanges = consentFromBody(req.body);
   if (Object.keys(consentChanges).length && applyConsent(buyer, consentChanges).length) {
     await buyer.save();
+  }
+
+  /*
+   * Awaited, with the failure swallowed inside the try/catch rather than the
+   * call left un-awaited — see the identical note on the CRM-side
+   * `authController.register` for why: an un-awaited send could still be in
+   * flight when the response goes out, which is racy for no benefit. A mail
+   * outage must not turn registration into an error either way, and this
+   * never gates checkout or sign-in — see the field's own comment on Buyer.
+   */
+  try {
+    await emailVerificationService.sendVerificationEmail('buyer', buyer, req);
+  } catch (err) {
+    log.warn({ err }, 'could not send the verification email');
   }
 
   const session = await issueBuyerSession(buyer, req);
@@ -219,6 +237,44 @@ const deleteAddress = asyncHandler(async (req, res) => {
   res.json({ success: true, data: { addresses: req.buyer.addresses } });
 });
 
+/**
+ * GET /api/shop/verify-email/:token — check only. See the identical CRM-side
+ * note on `authController.checkEmailVerification` for why GET never redeems.
+ */
+const checkEmailVerification = asyncHandler(async (req, res) => {
+  const result = await emailVerificationService.peek(req.params.token);
+  res.json({ success: true, data: result });
+});
+
+/** POST /api/shop/verify-email — body: `{ token }`. Actually redeems it. */
+const verifyEmail = asyncHandler(async (req, res) => {
+  const { token } = req.body;
+  if (!token) throw ApiError.badRequest('A token is required');
+
+  const result = await emailVerificationService.verify(token);
+
+  if (!result.ok) {
+    const messages = {
+      expired: 'This verification link has expired. Request a new one from your account.',
+      used: 'This verification link has already been used.',
+      invalid: 'This verification link is not valid.',
+    };
+    throw ApiError.badRequest(messages[result.reason] || messages.invalid);
+  }
+
+  res.json({ success: true, message: 'Email confirmed.' });
+});
+
+/** POST /api/shop/auth/resend-verification — requires a buyer session. */
+const resendVerification = asyncHandler(async (req, res) => {
+  if (req.buyer.emailVerified) {
+    return res.json({ success: true, message: 'Your email is already confirmed.' });
+  }
+
+  await emailVerificationService.resend('buyer', req.buyer, req);
+  res.json({ success: true, message: 'Verification email sent.' });
+});
+
 module.exports = {
   register,
   login,
@@ -228,4 +284,7 @@ module.exports = {
   addAddress,
   updateAddress,
   deleteAddress,
+  checkEmailVerification,
+  verifyEmail,
+  resendVerification,
 };

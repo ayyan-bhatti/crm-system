@@ -8,6 +8,7 @@ import DashboardLayout from './components/DashboardLayout';
 import ShopLayout from './components/ShopLayout';
 import ErrorBoundary from './components/ErrorBoundary';
 import { ToastProvider } from './components/Toast';
+import { ConfirmProvider } from './components/ConfirmDialog';
 import { Spinner } from './components/common';
 
 import Login from './pages/Login';
@@ -15,6 +16,7 @@ import Register from './pages/Register';
 import ForgotPassword from './pages/ForgotPassword';
 import ResetPassword from './pages/ResetPassword';
 import AcceptInvite from './pages/AcceptInvite';
+import VerifyEmail from './pages/VerifyEmail';
 
 import {
   CAMPAIGN_ROLES,
@@ -92,6 +94,7 @@ const BuyerNotifications = lazy(() => import('./pages/shop/BuyerNotifications'))
 const BuyerOrderDetail = lazy(() => import('./pages/shop/BuyerOrderDetail'));
 const BuyerAccount = lazy(() => import('./pages/shop/BuyerAccount'));
 const Unsubscribe = lazy(() => import('./pages/shop/Unsubscribe'));
+const ShopVerifyEmail = lazy(() => import('./pages/shop/VerifyEmail'));
 const TrackOrder = lazy(() => import('./pages/shop/TrackOrder'));
 
 /**
@@ -122,6 +125,7 @@ export default function App() {
       */}
       <ErrorBoundary>
         <ToastProvider>
+        <ConfirmProvider>
           <AuthProvider>
             {/* One boundary around the routes: a lazy page resolves in
                 milliseconds on a warm connection, so a full-page spinner is all
@@ -179,6 +183,10 @@ export default function App() {
                       authorisation.
                     */}
                     <Route path="unsubscribe" element={<Unsubscribe />} />
+                    {/* Public: a buyer clicking this from a different device,
+                        or with no session at all, still has to be able to
+                        finish — the token in the link is the authorisation. */}
+                    <Route path="verify-email" element={<ShopVerifyEmail />} />
                     {/*
                       Public, no sign-in — a guest checkout never gets a buyer
                       account, and is exactly who most needs to check on a
@@ -202,6 +210,9 @@ export default function App() {
                   {/* Public: the invitee has no account to authenticate with
                       until they have been through this page. */}
                   <Route path="accept-invite" element={<AcceptInvite />} />
+                  {/* Public: a pending self-signup has no session, and a link
+                      opened on a different device would have none either. */}
+                  <Route path="verify-email" element={<VerifyEmail />} />
 
                   <Route
                     element={
@@ -374,6 +385,7 @@ export default function App() {
               </Routes>
             </Suspense>
           </AuthProvider>
+        </ConfirmProvider>
         </ToastProvider>
       </ErrorBoundary>
     </BrowserRouter>

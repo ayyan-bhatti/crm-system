@@ -4,6 +4,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import BuyerOrderDetail from './BuyerOrderDetail';
 import { BuyerAuthProvider } from '../../context/BuyerAuthContext';
 import { ToastProvider } from '../../components/Toast';
+import { ConfirmProvider } from '../../components/ConfirmDialog';
 import { shopAuthApi, shopOrdersApi } from '../../api/shopResources';
 
 /**
@@ -45,12 +46,14 @@ function renderDetail(id = 'order-1') {
   return render(
     <MemoryRouter initialEntries={[`/account/orders/${id}`]}>
       <ToastProvider>
-        <BuyerAuthProvider>
-          <Routes>
-            <Route path="/account/orders/:id" element={<BuyerOrderDetail />} />
-            <Route path="/login" element={<p>LOGIN PAGE</p>} />
-          </Routes>
-        </BuyerAuthProvider>
+        <ConfirmProvider>
+          <BuyerAuthProvider>
+            <Routes>
+              <Route path="/account/orders/:id" element={<BuyerOrderDetail />} />
+              <Route path="/login" element={<p>LOGIN PAGE</p>} />
+            </Routes>
+          </BuyerAuthProvider>
+        </ConfirmProvider>
       </ToastProvider>
     </MemoryRouter>
   );

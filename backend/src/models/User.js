@@ -75,6 +75,22 @@ const userSchema = new mongoose.Schema({
    * ---------------------------------------------------------------------
    */
 
+  /**
+   * Whether this address has been confirmed. See the identical field on
+   * `Buyer` for why it does not gate sign-in.
+   *
+   * A STAFF account already has a stronger proof of mailbox control than
+   * this flag for two of its three creation paths: an INVITED user proved it
+   * by clicking a unique link only their inbox could receive, and the FIRST
+   * account on an empty database has nobody else to prove anything to — both
+   * are seeded `true`. Only open self-signup (`register`, held `pending`
+   * until an admin approves it regardless) starts `false`.
+   */
+  emailVerified: {
+    type: Boolean,
+    default: false,
+  },
+
   /** Consecutive failures. Reset to 0 by any successful sign-in. */
   failedLoginAttempts: {
     type: Number,

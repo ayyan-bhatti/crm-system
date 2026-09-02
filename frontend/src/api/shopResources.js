@@ -24,6 +24,19 @@ export const shopAuthApi = {
       .then((r) => r.data.data.addresses),
   deleteAddress: (addressId) =>
     shopClient.delete(`/shop/auth/addresses/${addressId}`).then((r) => r.data.data.addresses),
+
+  resendVerification: () =>
+    shopClient.post('/shop/auth/resend-verification').then((r) => r.data),
+};
+
+/**
+ * Email verification — public, no buyer session (mirrors `trackingApi`,
+ * `/shop/verify-email` sits outside `/shop/auth` for the same reason
+ * `/shop/track` does: the token in the link is the authorisation).
+ */
+export const shopVerifyEmailApi = {
+  check: (token) => shopClient.get(`/shop/verify-email/${token}`).then((r) => r.data.data),
+  confirm: (token) => shopClient.post('/shop/verify-email', { token }).then((r) => r.data),
 };
 
 export const shopProductsApi = {

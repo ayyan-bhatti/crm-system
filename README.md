@@ -2351,8 +2351,8 @@ it confirms the backend service is routed and whether it reached the database.
 Three layers, each doing a job the others cannot.
 
 ```bash
-cd backend   && npm test          # 1212 tests, 57 suites
-cd frontend  && npm test          # 311 component tests, 32 files
+cd backend   && npm test          # 1231 tests, 58 suites
+cd frontend  && npm test          # 320 component tests, 34 files
 cd frontend  && npm run test:e2e  # 45 end-to-end tests (real stack, real browser)
 ```
 
@@ -2391,7 +2391,7 @@ asserts the harness really is a replica set, for exactly that reason.
 stubbed, so tests are fast, deterministic, and need no API key. What is tested is everything
 around the model - parsing, validation, scoping, and degradation.
 
-### Frontend - Vitest + React Testing Library, 311 tests
+### Frontend - Vitest + React Testing Library, 320 tests
 
 Login, protected routes, customer create/edit, order creation, AI search, the error
 boundary and the toast system.

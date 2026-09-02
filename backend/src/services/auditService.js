@@ -108,25 +108,32 @@ function diff(before, after) {
  * @param {import('express').Request} req the request that caused it — supplies
  *   the actor and the request metadata, so no caller has to assemble them.
  * @param {object} options
- * @param {'create'|'update'|'delete'} options.action
+ * @param {'create'|'update'|'delete'|'login'|'login_failed'|'logout'} options.action
  * @param {string} options.entity  'customer' | 'product' | 'order' | 'user'
  * @param {*} options.entityId
  * @param {string} [options.label]  human-readable name for the record
  * @param {object} [options.before] document state before the write
  * @param {object} [options.after]  document state after the write
+ * @param {object} [options.actor]  explicit actor, overriding `req.user`.
+ *   Needed for `login`: the person authenticating is not yet `req.user` at
+ *   the point the entry is written — `protect` has not run on this request,
+ *   because this request is what establishes the session in the first
+ *   place. Every other action leaves this unset and gets the ordinary
+ *   `req.user` actor.
  */
-async function recordAudit(req, { action, entity, entityId, label, before, after, note }) {
+async function recordAudit(req, { action, entity, entityId, label, before, after, note, actor }) {
   try {
     const beforeSnapshot = snapshot(before);
     const afterSnapshot = snapshot(after);
+    const actingUser = actor || req.user;
 
     await AuditLog.create({
       actor: {
-        user: req.user?._id,
+        user: actingUser?._id,
         // Snapshotted, not referenced — see the note in models/AuditLog.
-        name: req.user?.name,
-        email: req.user?.email,
-        role: req.user?.role,
+        name: actingUser?.name,
+        email: actingUser?.email,
+        role: actingUser?.role,
       },
       action,
       entity,

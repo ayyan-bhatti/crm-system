@@ -74,9 +74,23 @@ const auditLogSchema = new mongoose.Schema({
    * were created versus skipped, and which file — `entityId` stays null, since
    * there is no one record the action is "about".
    */
+  /**
+   * `login`, `login_failed` and `logout` are the sixth, seventh and eighth
+   * actions, and — like `export` — none of them changes a record.
+   *
+   * Before these existed, a sign-in only ever reached the pino request log
+   * and, on success, a `RefreshToken` row. Neither is what an administrator
+   * reviewing "who accessed this system, and when" actually wants to read:
+   * the pino log is not queryable from the app, and a `RefreshToken` row
+   * says nothing about a WRONG password. `login_failed` closes that gap
+   * specifically — a run of failed attempts against one account is exactly
+   * the pattern an audit trail exists to make visible.
+   *
+   * `entityId` is the user's own id for all three; `entity` is `'user'`.
+   */
   action: {
     type: String,
-    enum: ['create', 'update', 'delete', 'export', 'import'],
+    enum: ['create', 'update', 'delete', 'export', 'import', 'login', 'login_failed', 'logout'],
     required: true,
   },
   /** Which collection was written to: customer, product, order, user. */

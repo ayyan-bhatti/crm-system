@@ -4,6 +4,7 @@ import { useBuyerAuth } from '../../context/BuyerAuthContext';
 import { shopOrdersApi } from '../../api/shopResources';
 import { errorMessage } from '../../api/client';
 import { useToast } from '../../components/Toast';
+import { useConfirm } from '../../components/ConfirmDialog';
 import useFetch from '../../hooks/useFetch';
 import { Card, ErrorBanner, PageHeader, Spinner, StatusBadge } from '../../components/common';
 import DeliveryTimeline from '../../components/DeliveryTimeline';
@@ -14,6 +15,7 @@ export default function BuyerOrderDetail() {
   const { id } = useParams();
   const { isSignedIn, loading: authLoading } = useBuyerAuth();
   const toast = useToast();
+  const confirm = useConfirm();
 
   const { data: order, loading, error, reload } = useFetch(
     () => (isSignedIn ? shopOrdersApi.get(id) : Promise.resolve(null)),
@@ -44,7 +46,8 @@ export default function BuyerOrderDetail() {
   const isPending = order.status === 'pending';
 
   async function handleRequestCancel() {
-    if (!window.confirm('Request cancellation of this order?')) return;
+    const ok = await confirm('Request cancellation of this order?', { confirmLabel: 'Request cancellation' });
+    if (!ok) return;
 
     setBusy(true);
     try {

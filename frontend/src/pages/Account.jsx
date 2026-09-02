@@ -35,6 +35,19 @@ export default function Account() {
   });
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [resending, setResending] = useState(false);
+
+  async function handleResend() {
+    setResending(true);
+    try {
+      const result = await authApi.resendVerification();
+      toast.success(result.message || 'Verification email sent.');
+    } catch (err) {
+      toast.error(errorMessage(err, 'Could not send the verification email'));
+    } finally {
+      setResending(false);
+    }
+  }
 
   /*
    * Checked here and nowhere else. The server has no opinion about the
@@ -82,9 +95,27 @@ export default function Account() {
           <Detail label="Email">{user.email}</Detail>
           <Detail label="Role">{humanize(user.role)}</Detail>
           <Detail label="Member since">{formatDate(user.createdAt)}</Detail>
+          <Detail label="Email confirmed">
+            {user.emailVerified ? (
+              'Yes'
+            ) : (
+              <span className="inline-flex items-center gap-2">
+                Not yet
+                <button
+                  type="button"
+                  onClick={handleResend}
+                  disabled={resending}
+                  className="text-xs font-medium text-brand hover:underline disabled:opacity-50"
+                >
+                  {resending ? 'Sending…' : 'Resend'}
+                </button>
+              </span>
+            )}
+          </Detail>
         </dl>
         <p className="mt-4 border-t border-hairline pt-3 text-xs text-muted">
-          Your name, email and role are managed by an administrator.
+          Your name, email and role are managed by an administrator. Confirming your email is
+          optional — nothing here depends on it.
         </p>
       </Card>
 

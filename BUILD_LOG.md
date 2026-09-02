@@ -4876,3 +4876,82 @@ Campaigns can now also be edited from the UI (`/crm/campaigns/:id/edit`,
 reusing `CampaignForm`), matching the PATCH the backend already supported
 but the UI never called. Same draft-only rule the existing delete button
 already enforced.
+
+## Round 6 — Closing the gaps from the Digitalsofts evaluation
+
+An 88/100 "Strong Pass" review came back with a long checklist of what to
+verify and what to improve. Rather than take the list at face value, every
+item was independently audited against the actual code first — and 23 of
+25 concrete recommendations turned out to already be built and tested,
+which says more about how much this project had grown since the review
+than about the review being wrong. Four genuine gaps remained, closed in
+this round; a full point-by-point response, a test-coverage map, and
+prepared answers to every "be prepared to explain" question the email
+asked for now live in `SimpleCRM - Response to Evaluation Feedback.docx`
+at the repo root.
+
+### Styled confirmation dialogs, replacing `window.confirm`
+
+Every destructive action already asked for confirmation before this round
+— through the browser's own dialog, which works but is styled by the OS
+rather than this app and blocks the tab synchronously. `ConfirmDialog.jsx`
+keeps the exact call shape `window.confirm` had (`await confirm(message)`
+resolves true/false) specifically so the nine call sites across seven
+files needed no restructuring, only a different function to call. One
+`ConfirmProvider`, mounted once next to the existing `ToastProvider`,
+holds at most one pending confirmation as a stashed Promise resolver — the
+same pattern the toast system already used, so this added no new
+architectural idea to the codebase, just a second instance of one it
+already trusted.
+
+### Authentication events on the audit trail
+
+A sign-in used to reach only the plain-text pino log and, on success, a
+`RefreshToken` row — neither answers "has somebody been guessing at this
+account" from inside the app itself. Three actions were added to the
+existing `AuditLog` schema: `login`, `login_failed`, `logout`.
+`login_failed` is only ever recorded against a real account, never a
+fabricated one, for the same enumeration-safety reason the login endpoint
+already returns an identical error either way. `logout` needed one real
+change: the route deliberately runs before session-checking middleware (a
+client with an expired access token still has to be able to log out), so
+there is no `req.user` to attribute the entry to — `revokeToken()` in
+`sessionService.js` now looks up and returns the token's owner before
+revoking it, since it is the one place that still knows who was signed
+in. `recordAudit()` gained an optional `actor` override for this, kept
+backward compatible with its ~36 existing call sites.
+
+### An index on `Customer.email`
+
+Had a format validator and no index at all — the unsubscribe flow,
+contact merging, and the Excel import's duplicate check all look a
+customer up by email, and every one of those was a full collection scan.
+Deliberately not unique: two customers can legitimately share one address
+(a shared company inbox), and the customer-import feature already depends
+on that being allowed — a duplicate is skipped by application logic, not
+refused by the database.
+
+### Email verification, for staff and buyer accounts
+
+The one item on the whole list that was genuinely absent. One model
+(`EmailVerificationToken`) and one service serve both account kinds
+(`User` and `Buyer`) rather than duplicating the logic per track, since a
+token behaves identically for either. **It gates nothing** — the same
+choice this app already made for marketing consent — because two of three
+account-creation paths already prove mailbox control by construction
+(the bootstrap admin has nobody to prove anything to; an invited user
+proved it by clicking a unique link only their inbox could receive), and
+blocking a storefront buyer's checkout on a mail click is a real
+conversion cost for no matching security benefit. GET checks a token's
+validity without consuming it, POST redeems it — the same split the
+existing unsubscribe flow uses, so a mail client's link-prefetching can
+never silently burn a real user's one-time token.
+
+A genuine bug was caught during testing, not shipped: the first version
+fired the verification email without awaiting it, on the instinct that
+"must not fail registration on a mail outage" meant "don't wait for it."
+That raced the HTTP response against the send and made both the test
+suite and, in principle, production unreliable — fixed to match the
+pattern the admin sign-up notification already used: awaited, with the
+failure swallowed *inside* the function rather than left to finish on its
+own schedule.

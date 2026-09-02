@@ -9,7 +9,8 @@ const shopNewsletterRoutes = require('./shopNewsletterRoutes');
 const shopMessageRoutes = require('./shopMessageRoutes');
 const { getStorefrontConfig } = require('../controllers/shopConfigController');
 const { trackOrder } = require('../controllers/trackingController');
-const { trackOrderLimiter } = require('../middleware/rateLimit');
+const { checkEmailVerification, verifyEmail } = require('../controllers/shopAuthController');
+const { trackOrderLimiter, shopVerificationLimiter } = require('../middleware/rateLimit');
 
 /**
  * The storefront's route tree, mounted once at `/api/shop` in app.js.
@@ -44,6 +45,17 @@ router.get('/config', getStorefrontConfig);
  * which of the two was wrong.
  */
 router.post('/track', trackOrderLimiter, trackOrder);
+
+/*
+ * Public, no buyer session — same reasoning as `/track` above and the CRM's
+ * `/api/auth/verify-email/:token`: the token in the link IS the
+ * authorisation, and a buyer clicking it from a fresh browser or a different
+ * device has no session to authenticate with anyway. GET only checks
+ * validity; POST redeems it — see checkEmailVerification's own note on why
+ * a mail client's link-prefetching must not be able to consume it first.
+ */
+router.get('/verify-email/:token', shopVerificationLimiter, checkEmailVerification);
+router.post('/verify-email', shopVerificationLimiter, verifyEmail);
 
 router.use('/auth', shopAuthRoutes);
 router.use('/products', shopProductRoutes);

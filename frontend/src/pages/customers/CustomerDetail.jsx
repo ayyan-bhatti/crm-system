@@ -5,6 +5,7 @@ import { errorMessage } from '../../api/client';
 import useFetch from '../../hooks/useFetch';
 import usePermissions from '../../hooks/usePermissions';
 import { useToast } from '../../components/Toast';
+import { useConfirm } from '../../components/ConfirmDialog';
 import {
   Card,
   EmptyState,
@@ -35,6 +36,7 @@ export default function CustomerDetail() {
   // Deleting navigates back to the list, so the confirmation has to outlive
   // this component — see the note in components/Toast.
   const toast = useToast();
+  const confirm = useConfirm();
   const [deleting, setDeleting] = useState(false);
 
   const { data: customer, loading, error } = useFetch(() => customersApi.get(id), [id]);
@@ -44,9 +46,11 @@ export default function CustomerDetail() {
   const { data: orders } = useFetch(() => ordersApi.list({ customer: id, limit: 50 }), [id]);
 
   async function handleDelete() {
-    // A native confirm is enough here — a custom modal would be more polish
-    // than this screen needs.
-    if (!window.confirm('Delete this customer? This cannot be undone.')) return;
+    const ok = await confirm('Delete this customer? This cannot be undone.', {
+      confirmLabel: 'Delete',
+      tone: 'danger',
+    });
+    if (!ok) return;
 
     setDeleting(true);
 

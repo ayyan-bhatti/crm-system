@@ -10,12 +10,16 @@ const {
   getInvite,
   acceptInvite,
   getMe,
+  checkEmailVerification,
+  verifyEmail,
+  resendVerification,
 } = require('../controllers/authController');
 const { protect } = require('../middleware/auth');
 const {
   loginLimiter,
   registerLimiter,
   passwordResetLimiter,
+  verificationLimiter,
 } = require('../middleware/rateLimit');
 
 const router = express.Router();
@@ -65,6 +69,17 @@ router.post('/reset-password', passwordResetLimiter, resetPassword);
 router.get('/invite/:token', passwordResetLimiter, getInvite);
 router.post('/accept-invite', passwordResetLimiter, acceptInvite);
 
+/*
+ * Email verification. Public for the same reason password reset and invite
+ * acceptance are — the token in the link IS the authorisation, and a pending
+ * self-signup has no session to authenticate with anyway. GET only checks
+ * validity (see checkEmailVerification's own note on mail-client prefetch);
+ * POST is what actually redeems it. Rate limited for the same reason the
+ * other token-redeeming routes are — a limit on guessing costs nothing.
+ */
+router.get('/verify-email/:token', verificationLimiter, checkEmailVerification);
+router.post('/verify-email', verificationLimiter, verifyEmail);
+
 // Authenticated
 router.get('/me', protect, getMe);
 
@@ -74,5 +89,13 @@ router.get('/me', protect, getMe);
  * can guess one. Endpoints behind a login are the easy ones to forget.
  */
 router.post('/change-password', protect, passwordResetLimiter, changePassword);
+
+/*
+ * Resending the verification email. Authenticated rather than taking an
+ * email in the body — see the handler's own note on why: an anonymous
+ * "resend to this address" endpoint is a way to make this server spam
+ * anyone's inbox on demand.
+ */
+router.post('/resend-verification', protect, verificationLimiter, resendVerification);
 
 module.exports = router;

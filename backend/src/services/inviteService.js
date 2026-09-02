@@ -185,6 +185,10 @@ async function acceptInvite(token, password) {
   const user = record.user;
   user.password = password; // The pre-save hook hashes it.
   user.status = USER_STATUS.ACTIVE;
+  // Clicking a unique link only this mailbox could have received IS proof of
+  // control — see the field's own comment on the model for why this is one
+  // of the two account paths that skip the separate verification email.
+  user.emailVerified = true;
   await user.save();
 
   return { ok: true, user };

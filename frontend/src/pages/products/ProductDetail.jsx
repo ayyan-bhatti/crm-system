@@ -5,6 +5,7 @@ import { errorMessage } from '../../api/client';
 import useFetch from '../../hooks/useFetch';
 import { Card, ErrorBanner, PageHeader, Spinner } from '../../components/common';
 import { useToast } from '../../components/Toast';
+import { useConfirm } from '../../components/ConfirmDialog';
 import Can from '../../components/Can';
 import { btnDanger, btnPrimary, formatDate, money } from '../../ui';
 
@@ -14,12 +15,17 @@ export default function ProductDetail() {
   // Deleting navigates back to the list, so a banner rendered here would vanish
   // with the component and the user would arrive with no confirmation at all.
   const toast = useToast();
+  const confirm = useConfirm();
   const [deleting, setDeleting] = useState(false);
 
   const { data: product, loading, error } = useFetch(() => productsApi.get(id), [id]);
 
   async function handleDelete() {
-    if (!window.confirm('Delete this product? This cannot be undone.')) return;
+    const ok = await confirm('Delete this product? This cannot be undone.', {
+      confirmLabel: 'Delete',
+      tone: 'danger',
+    });
+    if (!ok) return;
 
     setDeleting(true);
 

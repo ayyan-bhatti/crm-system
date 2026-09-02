@@ -3,6 +3,7 @@ import { usersApi } from '../../api/resources';
 import { errorMessage } from '../../api/client';
 import useFetch from '../../hooks/useFetch';
 import { useToast } from '../../components/Toast';
+import { useConfirm } from '../../components/ConfirmDialog';
 import { Card, Spinner } from '../../components/common';
 import { REQUESTABLE_ROLES } from '../../constants';
 import { btnPrimary, formatDate, humanize, input, td, th } from '../../ui';
@@ -30,6 +31,7 @@ import { btnPrimary, formatDate, humanize, input, td, th } from '../../ui';
  */
 export default function PendingApprovals({ onDecided }) {
   const toast = useToast();
+  const confirm = useConfirm();
   const { data, loading, error, reload } = useFetch(() => usersApi.pending(), []);
 
   // The row currently being acted on, so both its buttons can be disabled
@@ -138,15 +140,13 @@ export default function PendingApprovals({ onDecided }) {
                         type="button"
                         className="text-sm font-medium text-ink-2 hover:text-critical-ink hover:underline disabled:opacity-40"
                         disabled={busy}
-                        onClick={() => {
-                          if (
-                            window.confirm(
-                              `Reject ${user.name}'s request? They will not be able to sign in ` +
-                                'or apply again with this email address.'
-                            )
-                          ) {
-                            decide(user, false);
-                          }
+                        onClick={async () => {
+                          const ok = await confirm(
+                            `Reject ${user.name}'s request? They will not be able to sign in ` +
+                              'or apply again with this email address.',
+                            { confirmLabel: 'Reject', tone: 'danger' }
+                          );
+                          if (ok) decide(user, false);
                         }}
                       >
                         Reject

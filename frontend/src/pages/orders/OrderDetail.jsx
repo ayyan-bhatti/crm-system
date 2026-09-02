@@ -4,6 +4,7 @@ import { ordersApi, usersApi } from '../../api/resources';
 import { errorMessage } from '../../api/client';
 import useFetch from '../../hooks/useFetch';
 import { useToast } from '../../components/Toast';
+import { useConfirm } from '../../components/ConfirmDialog';
 import {
   Card,
   ErrorBanner,
@@ -59,6 +60,7 @@ export default function OrderDetail() {
    * survives the navigation that caused it.
    */
   const toast = useToast();
+  const confirm = useConfirm();
   const { can } = usePermissions();
   const [busy, setBusy] = useState(false);
 
@@ -70,7 +72,11 @@ export default function OrderDetail() {
       cancelled: 'Cancel this order? Any deducted stock will be returned.',
     };
 
-    if (!window.confirm(messages[status])) return;
+    const ok = await confirm(messages[status], {
+      confirmLabel: status === 'completed' ? 'Complete order' : 'Cancel order',
+      tone: status === 'cancelled' ? 'danger' : 'default',
+    });
+    if (!ok) return;
 
     setBusy(true);
 
@@ -88,7 +94,11 @@ export default function OrderDetail() {
   }
 
   async function handleDelete() {
-    if (!window.confirm('Delete this order? This cannot be undone.')) return;
+    const ok = await confirm('Delete this order? This cannot be undone.', {
+      confirmLabel: 'Delete',
+      tone: 'danger',
+    });
+    if (!ok) return;
 
     setBusy(true);
 
