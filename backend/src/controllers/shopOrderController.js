@@ -126,7 +126,11 @@ const askAboutOrders = asyncHandler(async (req, res) => {
   const { answer } = require('../services/orderAssistantService');
   const result = await answer(question.trim(), req.buyer._id);
 
-  res.json({ success: true, mode: result.mode, data: { answer: result.answer } });
+  res.json({
+    success: true,
+    mode: result.mode,
+    data: { answer: result.answer, references: result.references },
+  });
 });
 
 module.exports = { listMyOrders, getMyOrder, requestCancel, requestEdit, askAboutOrders };

@@ -2,6 +2,7 @@ const { api, createAdmin, createRep, createCustomer, createProduct } = require('
 const Order = require('../src/models/Order');
 const AuditLog = require('../src/models/AuditLog');
 const courierService = require('../src/services/courierService');
+const env = require('../src/config/env');
 
 /**
  * Courier tracking: recording who a parcel went out with, and the two
@@ -173,20 +174,34 @@ describe('GET /api/orders/:id/tracking', () => {
   });
 
   it('reports DHL as not live when DHL_TRACKING_API_KEY is unset — the honest default', async () => {
-    const admin = await createAdmin();
-    const { order } = await placedOrder(admin);
+    /*
+     * Forced empty rather than left to the absence of DHL_TRACKING_API_KEY:
+     * this deployment's backend/.env carries a real (currently unapproved)
+     * DHL key for manual testing — see aiFeatures.test.js's identical note
+     * about GEMINI_API_KEY for why a test asserting "unconfigured" cannot
+     * rely on chance here.
+     */
+    const realDhlKey = env.dhlTrackingApiKey;
+    env.dhlTrackingApiKey = '';
 
-    await api()
-      .patch(`/api/orders/${order._id}/fulfilment`)
-      .set(admin.headers)
-      .send({ fulfilment: 'shipped', estimatedDeliveryAt: TOMORROW, courier: 'dhl', trackingNumber: 'JD0141' });
+    try {
+      const admin = await createAdmin();
+      const { order } = await placedOrder(admin);
 
-    const res = await api().get(`/api/orders/${order._id}/tracking`).set(admin.headers);
+      await api()
+        .patch(`/api/orders/${order._id}/fulfilment`)
+        .set(admin.headers)
+        .send({ fulfilment: 'shipped', estimatedDeliveryAt: TOMORROW, courier: 'dhl', trackingNumber: 'JD0141' });
 
-    expect(res.status).toBe(200);
-    expect(res.body.data.trackingUrl).toContain('tracking-id=JD0141');
-    expect(res.body.data.live).toBe(false);
-    expect(res.body.data.reason).toMatch(/DHL_TRACKING_API_KEY/);
+      const res = await api().get(`/api/orders/${order._id}/tracking`).set(admin.headers);
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.trackingUrl).toContain('tracking-id=JD0141');
+      expect(res.body.data.live).toBe(false);
+      expect(res.body.data.reason).toMatch(/DHL_TRACKING_API_KEY/);
+    } finally {
+      env.dhlTrackingApiKey = realDhlKey;
+    }
   });
 
   it('is scoped exactly like the fulfilment update — refuses a rep who does not hold the order', async () => {

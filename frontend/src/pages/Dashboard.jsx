@@ -72,18 +72,23 @@ export default function Dashboard() {
 function AdminDashboard({ data, user, can }) {
   return (
     <div className="space-y-6">
-      <Greeting user={user} subtitle="The whole business at a glance." />
+      <div className="crm-glow rounded-2xl">
+        <Greeting user={user} subtitle="The whole business at a glance." />
+      </div>
 
-      {/* Org-wide money and volume. The densest of the three screens, because
-          the admin is the only role that sees every figure in it. */}
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatTile
-          label="Revenue"
-          value={money(data.totalRevenue)}
-          hint={`${data.completedOrders} completed orders`}
-          spark={data.monthly}
-          sparkKey="revenue"
-        />
+      {/* Org-wide money and volume, as a bento grid: revenue is the figure
+          everything else here is downstream of, so it gets the wide tile
+          rather than sitting the same size as a headcount. */}
+      <div className="bento-grid">
+        <div className="bento-lg">
+          <StatTile
+            label="Revenue"
+            value={money(data.totalRevenue)}
+            hint={`${data.completedOrders} completed orders`}
+            spark={data.monthly}
+            sparkKey="revenue"
+          />
+        </div>
         <StatTile
           label="Customers"
           value={data.totalCustomers}
@@ -242,7 +247,9 @@ function AdminDashboard({ data, user, can }) {
 function ManagerDashboard({ data, user }) {
   return (
     <div className="space-y-6">
-      <Greeting user={user} subtitle="What the floor needs from you today." />
+      <div className="crm-glow rounded-2xl">
+        <Greeting user={user} subtitle="What the floor needs from you today." />
+      </div>
 
       {/* Three tiles, not four. Operations, not org administration. */}
       <div className="grid gap-4 sm:grid-cols-3">

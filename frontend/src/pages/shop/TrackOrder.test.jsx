@@ -3,21 +3,25 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import TrackOrder from './TrackOrder';
-import { trackingApi } from '../../api/shopResources';
+import { BuyerAuthProvider } from '../../context/BuyerAuthContext';
+import { trackingApi, shopAuthApi } from '../../api/shopResources';
 
 /**
- * The public tracking page needs no session of any kind — no BuyerAuthProvider,
- * no ToastProvider, just the router. That absence is itself part of what this
- * page is for: a guest checkout has no account to sign into.
+ * The public tracking page works for a GUEST with no session at all — but it
+ * now also has to behave differently for a signed-in buyer (see TrackOrder.jsx),
+ * so it needs `BuyerAuthProvider` in the tree to know which case it is in.
  */
 vi.mock('../../api/shopResources', () => ({
   trackingApi: { track: vi.fn() },
+  shopAuthApi: { me: vi.fn(), login: vi.fn(), register: vi.fn(), logout: vi.fn() },
 }));
 
 function renderPage() {
   return render(
     <MemoryRouter>
-      <TrackOrder />
+      <BuyerAuthProvider>
+        <TrackOrder />
+      </BuyerAuthProvider>
     </MemoryRouter>
   );
 }
@@ -25,6 +29,9 @@ function renderPage() {
 describe('TrackOrder', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Guest by default — most of this suite is about the unauthenticated
+    // lookup form, which is the case that exists today.
+    shopAuthApi.me.mockRejectedValue({ response: { status: 401, data: {} } });
   });
 
   it('looks up the order by number and email, and shows the result', async () => {
@@ -43,7 +50,7 @@ describe('TrackOrder', () => {
 
     renderPage();
 
-    await user.type(screen.getByLabelText(/order number/i), 'ORD-000142');
+    await user.type(await screen.findByLabelText(/order number/i), 'ORD-000142');
     await user.type(screen.getByLabelText(/email/i), 'reader@karachitraders.example');
     await user.click(screen.getByRole('button', { name: /track order/i }));
 
@@ -64,10 +71,20 @@ describe('TrackOrder', () => {
 
     renderPage();
 
-    await user.type(screen.getByLabelText(/order number/i), 'ORD-999999');
+    await user.type(await screen.findByLabelText(/order number/i), 'ORD-999999');
     await user.type(screen.getByLabelText(/email/i), 'nobody@example.com');
     await user.click(screen.getByRole('button', { name: /track order/i }));
 
     expect(await screen.findByText(/no order matches/i)).toBeInTheDocument();
+  });
+
+  it('points a signed-in buyer at their own order history instead of asking for their email', async () => {
+    shopAuthApi.me.mockResolvedValue({ _id: 'b1', name: 'Amina Raza' });
+
+    renderPage();
+
+    expect(await screen.findByText(/go to your orders/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/email/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/order number/i)).not.toBeInTheDocument();
   });
 });

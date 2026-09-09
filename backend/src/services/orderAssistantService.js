@@ -34,10 +34,46 @@ function orderFacts(order) {
   };
 }
 
-function validateAnswer(raw) {
+/**
+ * The structured shape a reply may point back at.
+ *
+ * This is what makes the answer renderable as an actual order row instead of
+ * an id flattened into a sentence — the frontend gets a real order to link
+ * to and a real status to colour, not text to parse back out.
+ */
+function referenceFromOrder(order) {
+  return {
+    orderId: String(order._id),
+    orderNumber: order.orderNumber || String(order._id),
+    status: order.status,
+    fulfilment: order.fulfilment,
+    total: order.total,
+    createdAt: order.createdAt,
+    estimatedDeliveryAt: order.estimatedDeliveryAt || null,
+  };
+}
+
+/**
+ * `orders` is the SAME list already fetched for this buyer, so `references`
+ * is an allow-list check rather than a lookup — a reply naming an order
+ * number outside that list is not "an order we don't have handy", it is the
+ * model inventing one, and it is dropped rather than trusted. Capped at the
+ * same size as the context itself; there is no way for a real answer to cite
+ * more orders than it was shown.
+ */
+function validateAnswer(raw, orders) {
   if (!raw || typeof raw !== 'object') return null;
   const answer = string(raw.answer, MAX_ANSWER);
-  return answer ? { answer } : null;
+  if (!answer) return null;
+
+  const byNumber = new Map(orders.map((o) => [o.orderNumber || String(o._id), o]));
+  const rawRefs = Array.isArray(raw.references) ? raw.references : [];
+  const references = rawRefs
+    .filter((ref) => typeof ref === 'string' && byNumber.has(ref))
+    .slice(0, MAX_ORDERS_IN_CONTEXT)
+    .map((ref) => referenceFromOrder(byNumber.get(ref)));
+
+  return { answer, references };
 }
 
 function buildSystemPrompt() {
@@ -46,7 +82,11 @@ storefront. You are given a list of their orders as facts that are already corre
 never invent an order, a status, or a date that is not in the list. If the list does
 not answer the question, say so plainly rather than guessing. Be brief and direct.
 
-Respond with a JSON object only: {"answer": "<your answer, at most a few sentences>"}`;
+Respond with a JSON object only:
+{"answer": "<your answer, at most a few sentences>", "references": ["<orderNumber>", ...]}
+
+"references" is the orderNumber of every order from the list your answer is actually
+about — empty if none, never a number that is not in the list.`;
 }
 
 function callModel(question, orders) {
@@ -58,10 +98,15 @@ function callModel(question, orders) {
   });
 }
 
-/** A plain-rule answer when the AI path is unavailable. */
+/**
+ * A plain-rule answer when the AI path is unavailable.
+ *
+ * Returns the same `{ answer, references }` shape the AI path does, so the
+ * frontend never has to know which mode produced a reply to render it.
+ */
 function fallbackAnswer(question, orders) {
   if (!orders.length) {
-    return "You don't have any orders yet.";
+    return { answer: "You don't have any orders yet.", references: [] };
   }
 
   const numbered = String(question).match(/ord-?\s*0*(\d+)/i);
@@ -69,15 +114,21 @@ function fallbackAnswer(question, orders) {
     const match = orders.find((o) => (o.orderNumber || '').replace(/\D/g, '') === numbered[1]);
     if (match) {
       const facts = orderFacts(match);
-      return `Order ${facts.orderNumber} is ${facts.status}.`;
+      return {
+        answer: `Order ${facts.orderNumber} is ${facts.status}.`,
+        references: [referenceFromOrder(match)],
+      };
     }
   }
 
-  const latest = orderFacts(orders[0]);
-  return (
-    `Your most recent order (${latest.orderNumber}) is ${latest.status}, ` +
-    `placed on ${new Date(latest.placedOn).toISOString().slice(0, 10)}.`
-  );
+  const latest = orders[0];
+  const facts = orderFacts(latest);
+  return {
+    answer:
+      `Your most recent order (${facts.orderNumber}) is ${facts.status}, ` +
+      `placed on ${new Date(facts.placedOn).toISOString().slice(0, 10)}.`,
+    references: [referenceFromOrder(latest)],
+  };
 }
 
 /**
@@ -85,7 +136,8 @@ function fallbackAnswer(question, orders) {
  *
  * @param {string} question
  * @param {string} buyerId
- * @returns {Promise<{mode: 'ai'|'fallback', answer: string}>} never throws.
+ * @returns {Promise<{mode: 'ai'|'fallback', answer: string, references: object[]}>}
+ *   never throws.
  */
 async function answer(question, buyerId) {
   const orders = await Order.find({ buyerId })
@@ -93,7 +145,7 @@ async function answer(question, buyerId) {
     .limit(MAX_ORDERS_IN_CONTEXT);
 
   if (!aiClient.isConfigured()) {
-    return { mode: 'fallback', answer: fallbackAnswer(question, orders) };
+    return { mode: 'fallback', ...fallbackAnswer(question, orders) };
   }
 
   let text;
@@ -101,13 +153,13 @@ async function answer(question, buyerId) {
     text = await callModel(question, orders);
   } catch (err) {
     log.warn({ err }, 'model call failed — using the rule-based answer');
-    return { mode: 'fallback', answer: fallbackAnswer(question, orders) };
+    return { mode: 'fallback', ...fallbackAnswer(question, orders) };
   }
 
-  const result = parseAndValidate(text, validateAnswer);
-  if (!result.ok) return { mode: 'fallback', answer: fallbackAnswer(question, orders) };
+  const result = parseAndValidate(text, (raw) => validateAnswer(raw, orders));
+  if (!result.ok) return { mode: 'fallback', ...fallbackAnswer(question, orders) };
 
-  return { mode: 'ai', answer: result.value.answer };
+  return { mode: 'ai', ...result.value };
 }
 
-module.exports = { answer, orderFacts, validateAnswer };
+module.exports = { answer, orderFacts, referenceFromOrder, validateAnswer };

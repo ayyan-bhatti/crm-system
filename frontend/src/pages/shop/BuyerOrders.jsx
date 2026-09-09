@@ -133,6 +133,7 @@ function AskAboutOrders() {
   const [question, setQuestion] = useState('');
   const [asking, setAsking] = useState(false);
   const [answer, setAnswer] = useState('');
+  const [references, setReferences] = useState([]);
   const [askError, setAskError] = useState('');
 
   async function handleAsk(event) {
@@ -142,10 +143,12 @@ function AskAboutOrders() {
     setAsking(true);
     setAskError('');
     setAnswer('');
+    setReferences([]);
 
     try {
       const result = await shopOrdersApi.ask(question.trim());
       setAnswer(result.answer);
+      setReferences(result.references || []);
     } catch (err) {
       setAskError(errorMessage(err, 'Could not get an answer'));
     } finally {
@@ -177,6 +180,35 @@ function AskAboutOrders() {
       <ErrorBanner message={askError} />
 
       {answer && <p className="mt-3 text-sm text-ink-2">{answer}</p>}
+
+      {/*
+        The order(s) the answer is actually about, as real rows rather than
+        an id flattened into the sentence above — code decided which orders
+        these are (see orderAssistantService's allow-list), the model only
+        chose which of them the question was about.
+      */}
+      {references.length > 0 && (
+        <ul className="mt-3 space-y-2">
+          {references.map((ref) => (
+            <li key={ref.orderId}>
+              <Link
+                to={`/account/orders/${ref.orderId}`}
+                className="flex items-center justify-between gap-3 rounded-lg border border-hairline p-3 hover:bg-plane"
+              >
+                <div>
+                  <span className="text-sm font-medium text-ink">{orderLabel(ref)}</span>
+                  <span className="ml-2 text-xs text-muted">{formatDate(ref.createdAt)}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <StatusBadge value={ref.fulfilment || 'processing'} />
+                  <UrgencyBadge order={ref} />
+                  <span className="text-sm font-medium text-ink tabular">{money(ref.total)}</span>
+                </div>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
     </Card>
   );
 }

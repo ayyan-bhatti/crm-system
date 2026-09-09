@@ -216,11 +216,38 @@ describe('3. Order-status assistant', () => {
     expect(res.body.mode).toBe('fallback');
     expect(res.body.data.answer).toContain(order.body.data.orderNumber);
     expect(res.body.data.answer).toMatch(/pending/);
+
+    // The order the answer is about comes back as a structured reference,
+    // not only baked into the sentence — that's what lets the frontend
+    // render a real, clickable order row instead of plain text.
+    expect(res.body.data.references).toHaveLength(1);
+    expect(res.body.data.references[0]).toMatchObject({
+      orderId: order.body.data._id,
+      orderNumber: order.body.data.orderNumber,
+      status: 'pending',
+    });
   });
 
   it('never sees another buyer\'s orders', async () => {
     const result = await orderAssistantService.answer('anything', '64b7f1c2e4b0a1a2b3c4d5e6');
     expect(result.answer).toMatch(/don't have any orders/i);
+    expect(result.references).toEqual([]);
+  });
+
+  it('drops a reference to an order number the model was not actually shown', () => {
+    const shown = [
+      { _id: '64b7f1c2e4b0a1a2b3c4d5e6', orderNumber: 'ORD-000001', status: 'pending', total: 20 },
+    ];
+
+    const validated = orderAssistantService.validateAnswer(
+      { answer: 'Both are on the way.', references: ['ORD-000001', 'ORD-999999'] },
+      shown
+    );
+
+    // The real order comes through as a full reference object; the
+    // invented one is silently dropped rather than trusted.
+    expect(validated.references).toHaveLength(1);
+    expect(validated.references[0].orderNumber).toBe('ORD-000001');
   });
 });
 

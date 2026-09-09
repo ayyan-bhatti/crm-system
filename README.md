@@ -2210,6 +2210,7 @@ without setting any of them. Add them when you want the behaviour they describe.
 | `AUDIT_RETENTION_DAYS` | You want audit entries to become eligible for pruning. Unset means keep forever |
 | `BREACH_CHECK_DISABLED` | Outbound HTTPS is firewalled and the Have I Been Pwned lookup cannot reach the internet |
 | `AI_CACHE_DISABLED` / `AI_MAX_PROMPT_CHARS` | You want to turn off search caching or change the 8000-character prompt ceiling |
+| `DHL_TRACKING_API_KEY` | You want live courier status for DHL shipments — see [Courier tracking](#courier-tracking) |
 
 `JWT_EXPIRES_IN` is **no longer read** — `ACCESS_TOKEN_TTL` replaced it. Leaving it set is
 harmless; it simply does nothing.

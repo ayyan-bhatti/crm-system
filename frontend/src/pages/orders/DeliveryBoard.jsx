@@ -102,8 +102,12 @@ export default function DeliveryBoard() {
         day say "2 overdue" above three red rows.
       */}
       {summary && (
-        <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <Tile label="Overdue" value={summary.overdue} tone="critical" />
+        <div className="bento-grid mb-5">
+          {/* Overdue gets the wide tile — it is the one number on this board
+              that means something already went wrong, not just "coming up". */}
+          <div className="bento-lg">
+            <Tile label="Overdue" value={summary.overdue} tone="critical" />
+          </div>
           <Tile label="Out for delivery" value={summary.outForDelivery} tone="warning" />
           <Tile label="Due today or tomorrow" value={summary.dueSoon} tone="warning" />
           <Tile label="Express" value={summary.express} tone="brand" />

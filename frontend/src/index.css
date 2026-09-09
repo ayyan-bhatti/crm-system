@@ -239,3 +239,137 @@ h3 {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ===========================================================================
+ * The CRM shell — a dark, high-contrast re-theme, scoped to `/crm/*` only.
+ *
+ * WHY A TOKEN OVERRIDE RATHER THAN A SECOND SET OF COMPONENT CLASSES.
+ *
+ * Every CRM screen already reads colour through the semantic tokens above
+ * (bg-plane, text-ink, border-hairline, bg-brand-wash, …) rather than a
+ * hardcoded hex — that discipline is what makes a whole-app palette change a
+ * token edit here instead of a sweep through forty component files. Redefining
+ * the same CSS custom properties inside `.crm-shell` re-themes every screen
+ * that mounts inside `DashboardLayout` for free, through the ordinary CSS
+ * cascade, with not one component's class list touched. The storefront is
+ * outside this selector entirely and keeps the light, warm palette above
+ * unchanged — this is additive, not a replacement of it.
+ *
+ * The status/brand "wash" colours are pastel tints designed to sit on a white
+ * surface; naively reusing them here would be nearly invisible on near-black,
+ * so every wash/ink pair below is re-balanced for a dark surface rather than
+ * copied — same hue family, inverted contrast direction.
+ * ======================================================================== */
+.crm-shell {
+  /* --- Surfaces & ink ------------------------------------------------- */
+  --color-plane: #0a0a0c;
+  --color-surface: #0e0e11;
+  --color-raised: #17171b;
+
+  --color-ink: #f4f3ef;
+  --color-ink-2: #b2afa7;
+  --color-muted: #7c7a72;
+
+  --color-hairline: rgba(255, 255, 255, 0.08);
+  --color-rule: rgba(255, 255, 255, 0.16);
+
+  /* --- Brand — brightened for legibility against near-black ------------ */
+  --color-brand: #2bd39a;
+  --color-brand-strong: #1fae7f;
+  --color-brand-ink: #7ce8bd;
+  --color-brand-soft: rgba(43, 211, 154, 0.22);
+  --color-brand-wash: rgba(43, 211, 154, 0.12);
+
+  /* --- Status: same hues, wash/ink inverted for a dark surface --------- */
+  --color-good: #34d374;
+  --color-warning: #f2b84b;
+  --color-serious: #f5915f;
+  --color-critical: #f66565;
+
+  --color-good-wash: rgba(52, 211, 116, 0.14);
+  --color-good-ink: #5fe08f;
+  --color-warning-wash: rgba(242, 184, 75, 0.14);
+  --color-warning-ink: #f6c86e;
+  --color-critical-wash: rgba(246, 101, 101, 0.14);
+  --color-critical-ink: #f89494;
+  --color-neutral-wash: rgba(255, 255, 255, 0.06);
+  --color-neutral-ink: #cbc8c0;
+
+  /* --- Elevation: shadows do nothing on near-black, so depth comes from a
+     faint light border instead, plus a real drop for true overlays (the
+     command palette, a popover) that need to visually separate from a dark
+     page rather than a dark card. --------------------------------------- */
+  --shadow-card: 0 0 0 1px rgba(255, 255, 255, 0.05);
+  --shadow-lift: 0 0 0 1px rgba(255, 255, 255, 0.07), 0 8px 24px rgba(0, 0, 0, 0.45);
+  --shadow-pop: 0 0 0 1px rgba(255, 255, 255, 0.09), 0 20px 48px rgba(0, 0, 0, 0.6);
+
+  color-scheme: dark;
+  background-color: var(--color-plane);
+}
+
+/*
+ * A single soft radial glow behind a surface — the one visual signature
+ * borrowed from the reference direction. Used sparingly and deliberately: a
+ * hero stat tile, an empty state, the command palette's backdrop — never more
+ * than one or two per screen, per the design brief's own restraint rule.
+ * `::before` rather than a background-image so it never intercepts clicks and
+ * never needs `overflow` changed on the element carrying it.
+ */
+.crm-glow {
+  position: relative;
+  isolation: isolate;
+}
+.crm-glow::before {
+  content: '';
+  position: absolute;
+  inset: -40% -20% auto -20%;
+  height: 220px;
+  background: radial-gradient(closest-side, var(--color-brand-soft), transparent 70%);
+  filter: blur(32px);
+  opacity: 0.6;
+  pointer-events: none;
+  z-index: -1;
+}
+
+/*
+ * Bento grid: mixed tile sizes in one grid rather than a uniform N-up.
+ * `.bento-lg` spans two columns on wide screens; everything else is one cell.
+ * Deliberately just two size classes — a grid with five different span rules
+ * stops reading as organised and starts reading as random.
+ */
+.bento-grid {
+  display: grid;
+  grid-template-columns: repeat(1, minmax(0, 1fr));
+  gap: 1rem;
+}
+@media (min-width: 640px) {
+  .bento-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (min-width: 1024px) {
+  .bento-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+  .bento-lg {
+    grid-column: span 2 / span 2;
+  }
+  .bento-xl {
+    grid-column: span 4 / span 4;
+  }
+}
+
+/* A keyboard-shortcut hint chip — "⌘K" next to an action that has one. */
+.kbd-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.125rem;
+  border-radius: 0.375rem;
+  border: 1px solid var(--color-hairline);
+  background: var(--color-raised);
+  padding: 0.0625rem 0.375rem;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--color-muted);
+  font-family: var(--font-sans);
+}

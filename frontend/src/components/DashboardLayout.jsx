@@ -2,6 +2,7 @@ import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import usePermissions from '../hooks/usePermissions';
 import { humanize } from '../ui';
+import CommandPalette, { openCommandPalette } from './CommandPalette';
 
 /**
  * The shell every authenticated page renders inside: sidebar, header, content.
@@ -34,7 +35,7 @@ const icons = {
     'M12 2a10 10 0 100 20 10 10 0 000-20zm0 2a8 8 0 110 16 8 8 0 010-16zm-1 3v6l5 2.9 1-1.7-4-2.3V7h-2z',
 };
 
-const NAV_ITEMS = [
+export const NAV_ITEMS = [
   { to: '/crm', label: 'Dashboard', icon: 'dashboard', end: true },
   // Hidden from a sales rep entirely — they have no customer book. Nav is
   // where an absence is least confusing: a missing section reads as "not my
@@ -115,7 +116,9 @@ export default function DashboardLayout() {
     .toUpperCase();
 
   return (
-    <div className="flex min-h-full">
+    <div className="crm-shell flex min-h-full">
+      <CommandPalette />
+
       {/* --- Sidebar ----------------------------------------------------- */}
       <aside className="hidden w-60 shrink-0 border-r border-hairline bg-surface sm:flex sm:flex-col">
         <div className="flex h-16 items-center gap-2.5 px-5">
@@ -126,6 +129,27 @@ export default function DashboardLayout() {
             SimpleCRM
           </span>
         </div>
+
+        {/*
+          The command palette's trigger. Styled like a disabled search field
+          rather than a button, because that's the affordance people already
+          recognise from every app that has one of these — pressing it should
+          feel like the same thing typing Cmd/Ctrl+K does, so it opens the
+          identical palette instance rather than a second search UI.
+        */}
+        <button
+          type="button"
+          onClick={openCommandPalette}
+          className="mx-3 mb-2 flex items-center justify-between gap-2 rounded-lg border border-hairline bg-raised px-3 py-1.5 text-left text-sm text-muted transition-colors hover:text-ink-2"
+        >
+          <span className="flex items-center gap-2">
+            <svg viewBox="0 0 20 20" className="h-3.5 w-3.5 shrink-0 fill-current" aria-hidden="true">
+              <path d="M13 8a5 5 0 11-10 0 5 5 0 0110 0zm-1.6 4.6L15 16.2l-1.4 1.4-3.6-3.6 1.4-1.4z" />
+            </svg>
+            Search…
+          </span>
+          <kbd className="kbd-chip">⌘K</kbd>
+        </button>
 
         {/*
           The storefront's one entry point from the CRM — mirrors the small
