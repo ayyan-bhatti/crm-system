@@ -23,7 +23,8 @@ const { containsRegex, getPagination } = require('../utils/queryHelpers');
  * shipping to the public the day someone adds it and forgets this file.
  */
 const PUBLIC_PRODUCT_FIELDS =
-  'name price description imageUrl images category stockQty lowStockThreshold variants createdAt';
+  'name price description imageUrl images category stockQty lowStockThreshold variants ' +
+  'createdAt brand tags featured salePrice rating';
 
 /**
  * `in stock` as a boolean is the public fact; the exact count is not.
@@ -120,6 +121,23 @@ function toPublicShape(product) {
       : null,
     variants,
     createdAt: product.createdAt,
+    brand: product.brand || '',
+    tags: product.tags || [],
+    featured: Boolean(product.featured),
+    /*
+     * `salePrice` is only ever sent when it is genuinely lower than `price`
+     * — the model validates that at write time, but a public response is the
+     * one place a strikethrough-and-lower-number gets shown to a shopper, so
+     * it is worth re-checking rather than trusting a stored value blindly.
+     */
+    salePrice:
+      typeof product.salePrice === 'number' && product.salePrice < product.price
+        ? product.salePrice
+        : null,
+    rating: {
+      average: product.rating?.average || 0,
+      count: product.rating?.count || 0,
+    },
   };
 }
 
@@ -153,12 +171,13 @@ const PUBLIC_SORTS = {
  * Paging:  ?page= ?limit=
  */
 const listPublicProducts = asyncHandler(async (req, res) => {
-  const { category, search, minPrice, maxPrice, color, inStock, sort } = req.query;
+  const { category, search, minPrice, maxPrice, color, inStock, sort, featured } = req.query;
   const { page, limit, skip } = getPagination(req.query);
 
   const filter = {};
   if (category) filter.category = category;
   if (search) filter.name = containsRegex(search);
+  if (featured === 'true') filter.featured = true;
 
   /*
    * Price range. Each bound is applied only if it parses as a number, so a

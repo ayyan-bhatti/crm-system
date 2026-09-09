@@ -35,48 +35,79 @@ const icons = {
     'M12 2a10 10 0 100 20 10 10 0 000-20zm0 2a8 8 0 110 16 8 8 0 010-16zm-1 3v6l5 2.9 1-1.7-4-2.3V7h-2z',
 };
 
-export const NAV_ITEMS = [
-  { to: '/crm', label: 'Dashboard', icon: 'dashboard', end: true },
-  // Hidden from a sales rep entirely — they have no customer book. Nav is
-  // where an absence is least confusing: a missing section reads as "not my
-  // job", where a section that 403s reads as broken.
-  { to: '/crm/customers', label: 'Customers', icon: 'customers', requires: 'viewCustomers' },
-  { to: '/crm/products', label: 'Products', icon: 'products' },
-  { to: '/crm/orders', label: 'Orders', icon: 'orders' },
-  /*
-   * No `requires`: every staff role reaches this, and the ENDPOINT scopes it.
-   * A rep sees the parcels on their own orders, which is exactly the list they
-   * work from — gating it to manager-or-admin would hide the queue from the
-   * person actually holding the parcel.
-   */
-  { to: '/crm/deliveries', label: 'Deliveries', icon: 'deliveries' },
-  /*
-   * MARKETING.
-   *
-   * `Contacts` has no `requires` for the same reason `Deliveries` has none:
-   * every role reaches it and the endpoint scopes it. A rep sees the people
-   * whose orders they are fulfilling, which is contact detail they already
-   * receive with each order — and it is the one screen from which they can
-   * message that customer.
-   *
-   * `Campaigns` does, because a bulk send is not a rep's decision.
-   *
-   * `Automation` has none either, deliberately: a scheduled job that stops
-   * firing produces no error and no complaint, and the only visible symptom is
-   * a last-run date that stopped moving. The more people who can notice that,
-   * the shorter the silence — so reading it is open and only CHANGING it is
-   * gated, inside the page.
-   */
-  { to: '/crm/contacts', label: 'Contacts', icon: 'customers', requires: 'viewContacts' },
-  { to: '/crm/campaigns', label: 'Campaigns', icon: 'campaigns', requires: 'launchCampaigns' },
-  { to: '/crm/automation', label: 'Automation', icon: 'automation' },
-  // `requires` names an ACTION, not a role. See hooks/usePermissions for why:
-  // the role list is an implementation detail of the permission, and repeating
-  // it here is how the app ended up with the same policy spelled three ways.
-  { to: '/crm/approvals', label: 'Approvals', icon: 'users', requires: 'approveChanges' },
-  { to: '/crm/users', label: 'Users', icon: 'users', requires: 'manageUsers' },
-  { to: '/crm/audit', label: 'Audit log', icon: 'audit', requires: 'viewAuditLog' },
+/**
+ * The nav is grouped into sections rather than one flat list — the same
+ * information, organised so a reader can find "the commerce stuff" or "the
+ * marketing stuff" without scanning every label. Every entry below is a route
+ * that genuinely exists and renders real data; nothing here is a placeholder
+ * for a screen that isn't built, because a link to nothing reads as broken,
+ * not as ambitious. `NAV_ITEMS` (the flattened form) stays exported for the
+ * command palette, which does not want section headers, just results.
+ */
+export const NAV_SECTIONS = [
+  {
+    label: 'Overview',
+    items: [{ to: '/crm', label: 'Dashboard', icon: 'dashboard', end: true }],
+  },
+  {
+    label: 'Commerce',
+    items: [
+      { to: '/crm/products', label: 'Products', icon: 'products' },
+      { to: '/crm/orders', label: 'Orders', icon: 'orders' },
+      // No `requires`: every staff role reaches this, and the ENDPOINT scopes
+      // it. A rep sees the parcels on their own orders, which is exactly the
+      // list they work from — gating it to manager-or-admin would hide the
+      // queue from the person actually holding the parcel.
+      { to: '/crm/deliveries', label: 'Deliveries', icon: 'deliveries' },
+    ],
+  },
+  {
+    label: 'Customers',
+    items: [
+      // Hidden from a sales rep entirely — they have no customer book. Nav is
+      // where an absence is least confusing: a missing section reads as "not
+      // my job", where a section that 403s reads as broken.
+      { to: '/crm/customers', label: 'Customers', icon: 'customers', requires: 'viewCustomers' },
+    ],
+  },
+  {
+    label: 'Marketing',
+    items: [
+      /*
+       * `Contacts` has no `requires` for the same reason `Deliveries` has
+       * none: every role reaches it and the endpoint scopes it. A rep sees
+       * the people whose orders they are fulfilling, which is contact detail
+       * they already receive with each order — and it is the one screen from
+       * which they can message that customer.
+       *
+       * `Campaigns` does, because a bulk send is not a rep's decision.
+       *
+       * `Automation` has none either, deliberately: a scheduled job that
+       * stops firing produces no error and no complaint, and the only
+       * visible symptom is a last-run date that stopped moving. The more
+       * people who can notice that, the shorter the silence — so reading it
+       * is open and only CHANGING it is gated, inside the page.
+       */
+      { to: '/crm/contacts', label: 'Contacts', icon: 'customers', requires: 'viewContacts' },
+      { to: '/crm/campaigns', label: 'Campaigns', icon: 'campaigns', requires: 'launchCampaigns' },
+      { to: '/crm/automation', label: 'Automation', icon: 'automation' },
+    ],
+  },
+  {
+    label: 'System',
+    items: [
+      // `requires` names an ACTION, not a role. See hooks/usePermissions for
+      // why: the role list is an implementation detail of the permission,
+      // and repeating it here is how the app ended up with the same policy
+      // spelled three ways.
+      { to: '/crm/approvals', label: 'Approvals', icon: 'users', requires: 'approveChanges' },
+      { to: '/crm/users', label: 'Users', icon: 'users', requires: 'manageUsers' },
+      { to: '/crm/audit', label: 'Audit log', icon: 'audit', requires: 'viewAuditLog' },
+    ],
+  },
 ];
+
+export const NAV_ITEMS = NAV_SECTIONS.flatMap((section) => section.items);
 
 function NavIcon({ name }) {
   return (
@@ -98,12 +129,16 @@ export default function DashboardLayout() {
     navigate('/crm/login', { replace: true });
   }
 
+  const visibleSections = NAV_SECTIONS.map((section) => ({
+    ...section,
+    items: section.items.filter((item) => !item.requires || can[item.requires]),
+  })).filter((section) => section.items.length > 0);
   const visibleItems = NAV_ITEMS.filter((item) => !item.requires || can[item.requires]);
 
   const navClass = ({ isActive }) =>
     `flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-all duration-200 ${
       isActive
-        ? 'bg-brand bg-brand-gradient text-white shadow-card'
+        ? 'bg-brand text-ink shadow-card'
         : 'text-ink-2 hover:translate-x-0.5 hover:bg-neutral-wash hover:text-ink'
     }`;
 
@@ -122,7 +157,7 @@ export default function DashboardLayout() {
       {/* --- Sidebar ----------------------------------------------------- */}
       <aside className="hidden w-60 shrink-0 border-r border-hairline bg-surface sm:flex sm:flex-col">
         <div className="flex h-16 items-center gap-2.5 px-5">
-          <span className="bg-brand-gradient flex h-8 w-8 items-center justify-center rounded-lg bg-brand text-sm font-bold text-white shadow-lift">
+          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-ink text-sm font-bold text-brand shadow-lift">
             S
           </span>
           <span className="font-display text-[16px] font-semibold tracking-tight text-ink">
@@ -167,12 +202,19 @@ export default function DashboardLayout() {
           Back to store
         </Link>
 
-        <nav className="flex-1 space-y-1 px-3 py-2">
-          {visibleItems.map((item) => (
-            <NavLink key={item.to} to={item.to} end={item.end} className={navClass}>
-              <NavIcon name={item.icon} />
-              {item.label}
-            </NavLink>
+        <nav className="flex-1 space-y-4 overflow-y-auto px-3 py-2">
+          {visibleSections.map((section) => (
+            <div key={section.label}>
+              <p className="label-mono px-3 pb-1.5">{section.label}</p>
+              <div className="space-y-1">
+                {section.items.map((item) => (
+                  <NavLink key={item.to} to={item.to} end={item.end} className={navClass}>
+                    <NavIcon name={item.icon} />
+                    {item.label}
+                  </NavLink>
+                ))}
+              </div>
+            </div>
           ))}
         </nav>
 
@@ -244,7 +286,7 @@ export default function DashboardLayout() {
               end={item.end}
               className={({ isActive }) =>
                 `whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-medium transition-all duration-200 ${
-                  isActive ? 'bg-brand bg-brand-gradient text-white' : 'text-ink-2'
+                  isActive ? 'bg-brand text-ink' : 'text-ink-2'
                 }`
               }
             >

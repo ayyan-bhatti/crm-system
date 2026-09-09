@@ -186,7 +186,13 @@ export function DataTable({ columns, rows }) {
  * actually came for.
  */
 export function RevenueTrend({ data }) {
-  const brand = token('--color-brand');
+  /*
+   * `--color-series-1`, not `--color-brand` — the brand token is a pale lime
+   * meant to sit BEHIND near-black text on a button, and a line or fill drawn
+   * in it directly on the white chart surface all but disappears. Series 1 is
+   * the same hue's darkened chart-safe step (see the note on it in index.css).
+   */
+  const brand = token('--color-series-1');
   const surface = token('--color-surface');
   const lastIndex = data.length - 1;
 
@@ -336,7 +342,9 @@ export function StatusDonut({ data, total, totalLabel }) {
  * spending the only free channel on information the bar already shows.
  */
 export function CategoryBar({ data }) {
-  const brand = token('--color-brand');
+  // See the note in RevenueTrend above — chart fills use the darkened
+  // chart-safe step of the brand hue, not the pale button-fill token.
+  const brand = token('--color-series-1');
 
   return (
     <ResponsiveContainer width="100%" height={Math.max(180, data.length * 46)}>
@@ -377,7 +385,7 @@ export function CategoryBar({ data }) {
  * number is the value; this only says which way it has been going.
  */
 export function Sparkline({ data, dataKey, color }) {
-  const stroke = color || token('--color-brand');
+  const stroke = color || token('--color-series-1');
 
   return (
     <ResponsiveContainer width="100%" height={36}>

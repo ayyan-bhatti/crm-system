@@ -154,6 +154,83 @@ const productSchema = new mongoose.Schema({
   },
 
   /**
+   * The maker's name, shown on the storefront card and product page. Purely
+   * merchandising copy — nothing elsewhere in the app groups or filters by it
+   * — so it is optional and untyped rather than a second taxonomy to keep in
+   * sync with `category`.
+   */
+  brand: {
+    type: String,
+    trim: true,
+    default: '',
+    maxlength: [60, 'Brand cannot exceed 60 characters'],
+  },
+
+  /**
+   * Free-text labels for the storefront's search and "you might also like"
+   * matching — "wireless", "gift", "waterproof". Not a second category: a
+   * product has exactly one category but can carry several of these.
+   */
+  tags: {
+    type: [String],
+    default: [],
+    validate: {
+      validator: (list) => list.length <= 12,
+      message: 'A product can have at most 12 tags',
+    },
+  },
+
+  /**
+   * Hand-picked for the homepage's "Featured" rail and the category page's
+   * sort order — not derived from sales or stock, because a merchandiser
+   * choosing what leads the shop is a real, deliberate decision, not a
+   * statistic.
+   */
+  featured: {
+    type: Boolean,
+    default: false,
+  },
+
+  /**
+   * A discounted price, shown alongside the crossed-out full price. `null`
+   * means "not on sale" — the common case — rather than a copy of `price`,
+   * for the same reason `priceOverride` on a variant is nullable: a copy
+   * would silently stop tracking `price` the moment it changed.
+   */
+  salePrice: {
+    type: Number,
+    min: [0, 'Sale price cannot be negative'],
+    default: null,
+    validate: {
+      validator: function isBelowPrice(value) {
+        return value === null || value === undefined || value < this.price;
+      },
+      message: 'Sale price must be lower than the regular price',
+    },
+  },
+
+  /**
+   * A rating summary — average and how many reviews it is built from. Stored
+   * as a rollup rather than individual review documents: this app has no
+   * review-writing flow, so the two numbers are seeded/curated merchandising
+   * data, the same honest category as `featured`. `count: 0` renders as "no
+   * reviews yet" rather than a fabricated average.
+   */
+  rating: {
+    average: {
+      type: Number,
+      min: 0,
+      max: 5,
+      default: 0,
+    },
+    count: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
+  },
+
+  /**
    * Colour (and optionally size) combinations, each with its own stock.
    *
    * EMPTY IS A FIRST-CLASS STATE, NOT A MISSING ONE. A product with no variants

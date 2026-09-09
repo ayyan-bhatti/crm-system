@@ -12,66 +12,56 @@
  * It had been warning for some time, buried in dev-server output nobody reads.
  * Swapping the two lines is the entire fix.
  */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Space+Grotesk:wght@500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
 @import 'tailwindcss';
 
 /* ===========================================================================
  * Design tokens
  *
- * One palette for the whole app — UI chrome and charts drawn from the same set,
- * so a status pill and a donut segment can never disagree about what "pending"
- * looks like.
+ * ONE PALETTE FOR THE WHOLE APP — the internal CRM and the public storefront
+ * both read colour through these same semantic tokens (bg-plane, text-ink,
+ * border-hairline, …), rather than each screen carrying its own hardcoded
+ * hex. A previous round gave the CRM its own dark, violet-tinted theme with a
+ * glowing accent and a gradient brand fill; that has been removed in favour of
+ * a single, restrained, monochrome-plus-one-accent language across both —
+ * warm off-white, near-black type, and a lime accent used sparingly, for
+ * primary actions and active/selected state only. Two competing design
+ * systems in one product read as unfinished, however good either one is on
+ * its own.
  *
- * The categorical slots are a validated set: every adjacent pair clears the
- * colour-vision-deficiency separation threshold (ΔE ≥ 8 in OKLab ×100) and the
- * normal-vision floor (≥ 15) against this surface. The slot ORDER is the safety
- * mechanism, not decoration — reordering them breaks the guarantee, so add new
- * series at the end rather than inserting.
- *
- * Three slots (aqua, yellow, magenta) sit below 3:1 contrast on this light
- * surface. That is allowed only because every chart using them ships visible
- * labels and a table view, so colour never carries meaning alone.
+ * The categorical chart slots are a validated set: every adjacent pair clears
+ * the colour-vision-deficiency separation threshold (ΔE ≥ 8 in OKLab ×100) and
+ * the normal-vision floor (≥ 15) against this surface. The slot ORDER is the
+ * safety mechanism, not decoration — reordering them breaks the guarantee, so
+ * add new series at the end rather than inserting.
  * ======================================================================== */
 
 @theme {
-  /*
-   * --- Surfaces & ink -----------------------------------------------------
-   * A near-black ink and a warm off-white, rather than the cooler
-   * blue-tinted neutrals this used to run — see the storefront design-round
-   * entry in BUILD_LOG.md for why: one palette across the internal CRM and
-   * the storefront, calmer here (accent used only on primary actions, per
-   * the existing btnPrimary/etc. convention below) and pushed harder there.
-   * Every component already reads these through a semantic Tailwind class
-   * (bg-plane, text-ink, …) rather than a hardcoded hex, which is what makes
-   * changing the whole app's palette a token edit here rather than a sweep
-   * through every component file.
-   */
-  --color-plane: #faf9f6; /* page background */
-  --color-surface: #ffffff; /* cards, chart surface */
-  --color-raised: #ffffff; /* inputs, popovers */
+  /* --- Surfaces & ink ----------------------------------------------------
+     A near-black ink on a warm off-white plane — deliberately not a cool,
+     bluish neutral, and not pure white either: paper, not a screen. */
+  --color-plane: #f7f5ef;
+  --color-surface: #ffffff;
+  --color-raised: #ffffff;
 
-  --color-ink: #0b0b0e; /* primary text */
-  --color-ink-2: #55534e; /* secondary text */
-  --color-muted: #8c887f; /* axis labels, captions */
+  --color-ink: #0a0a0a;
+  --color-ink-2: #4a4740;
+  --color-muted: #8c887c;
 
-  --color-hairline: #e6e3da; /* gridlines, card borders */
-  --color-rule: #c8c4b7; /* axis baselines, dividers */
+  --color-hairline: #e6e2d5;
+  --color-rule: #c7c2b2;
 
-  /* --- Brand ------------------------------------------------------------- */
-  /*
-   * Deep emerald, deliberately the one accent in the app rather than a
-   * gradient or a second colour "for variety" — chosen over the amber/copper
-   * alternative because it reads as trustworthy on the CRM side and still
-   * has real personality on the storefront's imagery-heavy surfaces.
-   *
-   * Categorical slot 1 doubles as the action colour, so the interface and the
-   * charts share one accent instead of competing.
-   */
-  --color-brand: #1b7a5a;
-  --color-brand-strong: #145f45;
-  --color-brand-ink: #0e4632;
-  --color-brand-soft: #cfe9dd;
-  --color-brand-wash: #eaf5f0;
+  /* --- Brand: one accent, used sparingly --------------------------------
+     A lime-green, not a gradient and not a second colour "for variety". It
+     is light, so anything set IN it (a filled button, an active pill) reads
+     with near-black text, never white — `--color-brand-ink` is the
+     text-safe, darkened step of the same hue for links, icons and text on a
+     light surface. */
+  --color-brand: #cdf95c;
+  --color-brand-strong: #aad928;
+  --color-brand-ink: #3c6b12;
+  --color-brand-soft: #e4f7ab;
+  --color-brand-wash: #f2fadb;
 
   /* --- Status (reserved: never reused as a series colour) ---------------- */
   --color-good: #0ca30c;
@@ -87,51 +77,56 @@
   --color-warning-ink: #7a5300;
   --color-critical-wash: #fbe7e7;
   --color-critical-ink: #96201f;
-  --color-neutral-wash: #f0efec;
-  --color-neutral-ink: #52514e;
+  --color-neutral-wash: #efeee9;
+  --color-neutral-ink: #52504a;
 
   /*
    * --- Categorical series (fixed order — see note above) -----------------
-   * Slot 1 follows the brand colour above. NOT independently re-validated
-   * for CVD-safe adjacency against slot 2 after this swap — the original
-   * ΔE check was run against the old blue, and a proper re-check needs a
-   * colour-vision simulation this round didn't have time for. Flagged here
-   * rather than silently assumed still valid; re-run the check before this
-   * chart palette is trusted again for someone with deuteranopia/protanopia.
+   * Slot 1 is the brand hue's dark, readable step rather than the light fill
+   * — a filled chart area in the pale button-lime would all but disappear on
+   * this surface, so charts use the deep olive-green step of the same hue.
    */
-  --color-series-1: #1b7a5a; /* emerald (brand) */
+  --color-series-1: #4d7c0f; /* brand, darkened for chart fills */
   --color-series-2: #eb6834; /* orange */
-  --color-series-3: #1baf7a; /* aqua */
-  --color-series-4: #eda100; /* yellow */
-  --color-series-5: #e87ba4; /* magenta */
-  --color-series-6: #008300; /* green */
-  --color-series-7: #4a3aa7; /* violet */
-  --color-series-8: #e34948; /* red */
+  --color-series-3: #1b7a5a; /* teal-green */
+  --color-series-4: #c99400; /* amber */
+  --color-series-5: #b23a63; /* berry */
+  --color-series-6: #2a6ea8; /* blue */
+  --color-series-7: #6b5b3f; /* umber */
+  --color-series-8: #96201f; /* brick */
 
   /*
-   * --- Type -----------------------------------------------------------
-   * Inter for running text everywhere — body copy, table cells, form labels,
-   * in both the CRM and the storefront. Fraunces is the storefront's own
-   * display face (hero, product headline, category headers) and stays exactly
-   * that restricted.
+   * --- Type ---------------------------------------------------------------
+   * Inter carries running text everywhere — body copy, table cells, form
+   * labels, in both the CRM and the storefront.
    *
-   * `--font-crm-display` is new: Space Grotesk, used ONLY for page headings
-   * and the large numeric figures on the CRM's own screens (stat tiles, the
-   * command palette's wordmark echo). A geometric, slightly technical face is
-   * what actually reads as "designed" on a data-dense dark screen — Inter set
-   * at 28px looks like a bigger paragraph, not a headline. Never used for body
-   * text or table cells, so nothing anyone has to read at length is set in it.
+   * Fraunces is the storefront's own editorial display face: the hero,
+   * product headlines, category headers. Kept restricted to those — an
+   * accent, not the everyday voice.
+   *
+   * `--font-crm-display` (Space Grotesk) is the CRM's equivalent for page
+   * headings and the large numeric figures on its own screens (stat tiles).
+   * A geometric, slightly technical face is what reads as "designed" set
+   * large on a data-dense screen — Inter at 28px looks like a bigger
+   * paragraph, not a headline. Never used for body text or table cells.
+   *
+   * `--font-mono` is the SECOND type treatment the brief asks for: metadata,
+   * IDs, SKUs, timestamps, status codes, small nav labels — anywhere a value
+   * is more "data" than "prose". Tailwind reads this token directly, so
+   * `font-mono` is available as a plain utility class.
    */
   --font-sans: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
   --font-display: 'Fraunces', Georgia, 'Times New Roman', serif;
   --font-crm-display: 'Space Grotesk', 'Inter', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, monospace;
 
-  /* --- Elevation --------------------------------------------------------- */
-  /* Deliberately shallow. Depth comes from the hairline border; the shadow is
-     only there to lift a card off the plane. */
-  --shadow-card: 0 1px 2px rgba(11, 11, 11, 0.04), 0 1px 3px rgba(11, 11, 11, 0.03);
-  --shadow-lift: 0 2px 4px rgba(11, 11, 11, 0.05), 0 4px 12px rgba(11, 11, 11, 0.05);
-  --shadow-pop: 0 4px 12px rgba(11, 11, 11, 0.08), 0 12px 28px rgba(11, 11, 11, 0.08);
+  /* --- Elevation ----------------------------------------------------------
+     Deliberately shallow, everywhere. Depth comes from the hairline border;
+     the shadow only lifts a card off the plane a fraction — no glow, no
+     multi-layer drop shadow doing the same job three times over. */
+  --shadow-card: 0 1px 2px rgba(10, 10, 10, 0.04), 0 1px 3px rgba(10, 10, 10, 0.03);
+  --shadow-lift: 0 2px 4px rgba(10, 10, 10, 0.05), 0 4px 12px rgba(10, 10, 10, 0.05);
+  --shadow-pop: 0 4px 12px rgba(10, 10, 10, 0.08), 0 12px 28px rgba(10, 10, 10, 0.08);
 
   /*
    * --- Motion --------------------------------------------------------
@@ -174,6 +169,33 @@ h3 {
 
 .font-display {
   font-family: var(--font-display);
+}
+
+/*
+ * The CRM's own heading face — Space Grotesk, restricted to h1/h2 and the
+ * large stat-tile figures on screens inside DashboardLayout. Purely a
+ * typography selector now; it used to also carry a dark colour theme, which
+ * has been removed (see the long note above the token block).
+ */
+.crm-shell h1,
+.crm-shell h2,
+.crm-shell [data-stat] {
+  font-family: var(--font-crm-display);
+  letter-spacing: -0.01em;
+}
+
+/*
+ * A small, mono, tracked-out label — metadata, IDs, SKUs, section headers in
+ * the sidebar, timestamps. The one place typography itself carries hierarchy
+ * instead of another box or colour.
+ */
+.label-mono {
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-muted);
 }
 
 /*
@@ -273,130 +295,6 @@ h3 {
   }
 }
 
-/* ===========================================================================
- * The CRM shell — a dark, high-contrast re-theme, scoped to `/crm/*` only.
- *
- * WHY A TOKEN OVERRIDE RATHER THAN A SECOND SET OF COMPONENT CLASSES.
- *
- * Every CRM screen already reads colour through the semantic tokens above
- * (bg-plane, text-ink, border-hairline, bg-brand-wash, …) rather than a
- * hardcoded hex — that discipline is what makes a whole-app palette change a
- * token edit here instead of a sweep through forty component files. Redefining
- * the same CSS custom properties inside `.crm-shell` re-themes every screen
- * that mounts inside `DashboardLayout` for free, through the ordinary CSS
- * cascade, with not one component's class list touched. The storefront is
- * outside this selector entirely and keeps the light, warm palette above
- * unchanged — this is additive, not a replacement of it.
- *
- * The status/brand "wash" colours are pastel tints designed to sit on a white
- * surface; naively reusing them here would be nearly invisible on near-black,
- * so every wash/ink pair below is re-balanced for a dark surface rather than
- * copied — same hue family, inverted contrast direction.
- * ======================================================================== */
-.crm-shell {
-  /* --- Surfaces & ink -------------------------------------------------
-     A true neutral black/grey reads flat and generic under real light —
-     every surface below carries a faint cool violet undertone (the hue
-     angle stays constant, only lightness moves), which is what actually
-     gives a dark UI depth instead of looking like an inverted light theme. */
-  --color-plane: #08080d;
-  --color-surface: #0e0e16;
-  --color-raised: #17161f;
-
-  --color-ink: #f5f3f7;
-  --color-ink-2: #b6b2c0;
-  --color-muted: #7d7a8c;
-
-  --color-hairline: rgba(255, 255, 255, 0.08);
-  --color-rule: rgba(255, 255, 255, 0.17);
-
-  /* --- Brand — the one accent, given real range rather than a single flat
-     fill. `--gradient-brand` is what buttons and the active nav pill use
-     instead of a flat swatch: a small shift in lightness across the same
-     hue, which is what makes an emerald button look considered rather than
-     like a colour swap on a Bootstrap default. -------------------------- */
-  --color-brand: #22d3a5;
-  --color-brand-strong: #16b085;
-  --color-brand-ink: #7bf0c9;
-  --color-brand-soft: rgba(34, 211, 165, 0.22);
-  --color-brand-wash: rgba(34, 211, 165, 0.12);
-  --gradient-brand: linear-gradient(135deg, #22d3a5 0%, #1a9dd9 100%);
-
-  /* --- Status: same hues, wash/ink inverted for a dark surface --------- */
-  --color-good: #34d374;
-  --color-warning: #f2b84b;
-  --color-serious: #f5915f;
-  --color-critical: #f66565;
-
-  --color-good-wash: rgba(52, 211, 116, 0.14);
-  --color-good-ink: #5fe08f;
-  --color-warning-wash: rgba(242, 184, 75, 0.14);
-  --color-warning-ink: #f6c86e;
-  --color-critical-wash: rgba(246, 101, 101, 0.14);
-  --color-critical-ink: #f89494;
-  --color-neutral-wash: rgba(255, 255, 255, 0.06);
-  --color-neutral-ink: #cbc8c0;
-
-  /* --- Elevation: shadows do nothing on near-black, so depth comes from a
-     faint light border instead, plus a real drop for true overlays (the
-     command palette, a popover) that need to visually separate from a dark
-     page rather than a dark card. --------------------------------------- */
-  --shadow-card: 0 0 0 1px rgba(255, 255, 255, 0.05);
-  --shadow-lift: 0 0 0 1px rgba(255, 255, 255, 0.07), 0 8px 24px rgba(0, 0, 0, 0.45);
-  --shadow-pop: 0 0 0 1px rgba(255, 255, 255, 0.09), 0 20px 48px rgba(0, 0, 0, 0.6);
-
-  color-scheme: dark;
-  background-color: var(--color-plane);
-  background-image: radial-gradient(
-    ellipse 900px 500px at 15% -10%,
-    rgba(34, 211, 165, 0.07),
-    transparent 60%
-  );
-  background-repeat: no-repeat;
-}
-
-/* Page headings and the large numeric figures on CRM screens — see the
-   note on `--font-crm-display` above. Scoped through the cascade rather
-   than a class on every heading, same reasoning as the palette override. */
-.crm-shell h1,
-.crm-shell h2,
-.crm-shell [data-stat] {
-  font-family: var(--font-crm-display);
-  letter-spacing: -0.01em;
-}
-
-/* The one place a flat brand fill becomes a gradient: primary buttons and
-   the active nav item. Applied as a utility rather than folded into every
-   existing `bg-brand` usage, so the choice of where it appears stays
-   deliberate rather than automatic. */
-.crm-shell .bg-brand-gradient {
-  background-image: var(--gradient-brand);
-}
-
-/*
- * A single soft radial glow behind a surface — the one visual signature
- * borrowed from the reference direction. Used sparingly and deliberately: a
- * hero stat tile, an empty state, the command palette's backdrop — never more
- * than one or two per screen, per the design brief's own restraint rule.
- * `::before` rather than a background-image so it never intercepts clicks and
- * never needs `overflow` changed on the element carrying it.
- */
-.crm-glow {
-  position: relative;
-  isolation: isolate;
-}
-.crm-glow::before {
-  content: '';
-  position: absolute;
-  inset: -40% -20% auto -20%;
-  height: 220px;
-  background: radial-gradient(closest-side, var(--color-brand-soft), transparent 70%);
-  filter: blur(32px);
-  opacity: 0.6;
-  pointer-events: none;
-  z-index: -1;
-}
-
 /*
  * Bento grid: mixed tile sizes in one grid rather than a uniform N-up.
  * `.bento-lg` spans two columns on wide screens; everything else is one cell.
@@ -465,5 +363,5 @@ h3 {
   font-size: 11px;
   font-weight: 500;
   color: var(--color-muted);
-  font-family: var(--font-sans);
+  font-family: var(--font-mono);
 }

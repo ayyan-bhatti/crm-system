@@ -21,11 +21,31 @@ export default function ShopHome() {
     () => shopProductsApi.list({ limit: 8, sort: 'newest' }),
     []
   );
+  const { data: featured } = useFetch(
+    () => shopProductsApi.list({ limit: 4, featured: 'true' }),
+    []
+  );
   const [quickView, setQuickView] = useState(null);
 
   return (
     <div>
       <Hero />
+
+      {featured && featured.data.length > 0 && (
+        <section className="mx-auto max-w-7xl px-4 pt-14 sm:px-6">
+          <div className="mb-6">
+            <p className="label-mono">Featured</p>
+            <h2 className="font-display mt-1 text-2xl font-semibold text-ink">
+              Chosen by the buying team
+            </h2>
+          </div>
+          <div className="grid grid-cols-2 gap-5 sm:grid-cols-4">
+            {featured.data.map((product) => (
+              <ProductCard key={product._id} product={product} onQuickView={setQuickView} />
+            ))}
+          </div>
+        </section>
+      )}
 
       <section className="mx-auto max-w-7xl px-4 py-14 sm:px-6">
         <div className="mb-6 flex items-end justify-between gap-4">
@@ -84,7 +104,7 @@ function Hero() {
         style={{
           background:
             'radial-gradient(60rem 30rem at 15% -10%, var(--color-brand), transparent 60%), ' +
-            'radial-gradient(40rem 24rem at 90% 110%, var(--color-series-2, #1f9d78), transparent 55%)',
+            'radial-gradient(40rem 24rem at 90% 110%, var(--color-series-2, #eb6834), transparent 55%)',
         }}
       />
 

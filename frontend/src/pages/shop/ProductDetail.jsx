@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import useFetch from '../../hooks/useFetch';
+import useRecentlyViewed from '../../hooks/useRecentlyViewed';
 import { shopProductsApi } from '../../api/shopResources';
 import { useCart } from '../../context/CartContext';
 import { useBuyerAuth } from '../../context/BuyerAuthContext';
@@ -9,6 +10,7 @@ import { errorMessage } from '../../api/client';
 import { Spinner, ErrorBanner } from '../../components/common';
 import ProductCard from '../../components/shop/ProductCard';
 import ProductImage from '../../components/shop/ProductImage';
+import RatingStars from '../../components/shop/RatingStars';
 import VariantPicker from '../../components/shop/VariantPicker';
 import QuantityStepper from '../../components/shop/QuantityStepper';
 import { money, btnPrimary, btnSecondary, galleryFor, priceRange } from '../../ui';
@@ -39,6 +41,7 @@ export default function ShopProductDetail() {
   const { id } = useParams();
   const { data: product, loading, error } = useFetch(() => shopProductsApi.get(id), [id]);
   const { data: recs } = useFetch(() => shopProductsApi.recommendations(id), [id]);
+  const recentlyViewed = useRecentlyViewed(product);
   const { addItem } = useCart();
   const { isSignedIn } = useBuyerAuth();
   const navigate = useNavigate();
@@ -182,15 +185,39 @@ export default function ShopProductDetail() {
 
         {/* --- Buy box ------------------------------------------------------ */}
         <div className="animate-fade-rise">
-          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted">
-            {product.category}
-          </p>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted">
+              {product.category}
+            </p>
+            {product.brand && (
+              <>
+                <span className="h-3 w-px bg-hairline" aria-hidden="true" />
+                <p className="label-mono">{product.brand}</p>
+              </>
+            )}
+          </div>
           <h1 className="font-display mt-1.5 text-3xl font-semibold leading-tight text-ink sm:text-4xl">
             {product.name}
           </h1>
 
+          {product.rating?.count > 0 && <RatingStars rating={product.rating} className="mt-2" />}
+
           <div className="mt-4 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-            <span className="text-3xl font-semibold text-ink tabular">{money(price)}</span>
+            {product.salePrice ? (
+              <>
+                <span className="text-3xl font-semibold text-brand-ink tabular">
+                  {money(product.salePrice)}
+                </span>
+                <span className="text-lg font-medium text-muted line-through tabular">
+                  {money(product.price)}
+                </span>
+                <span className="rounded-full bg-brand-wash px-2 py-0.5 text-xs font-semibold text-brand-ink">
+                  Save {money(product.price - product.salePrice)}
+                </span>
+              </>
+            ) : (
+              <span className="text-3xl font-semibold text-ink tabular">{money(price)}</span>
+            )}
             {/* "from" only until a variant fixes the price. */}
             {range && !variant && (
               <span className="text-sm text-muted">
@@ -222,6 +249,19 @@ export default function ShopProductDetail() {
           </p>
 
           <p className="mt-5 text-sm leading-relaxed text-ink-2">{descriptionFor(product)}</p>
+
+          {product.tags?.length > 0 && (
+            <ul className="mt-3 flex flex-wrap gap-1.5">
+              {product.tags.map((tag) => (
+                <li
+                  key={tag}
+                  className="rounded-full border border-hairline px-2 py-0.5 text-xs text-ink-2"
+                >
+                  {tag}
+                </li>
+              ))}
+            </ul>
+          )}
 
           {hasVariants && (
             <div className="mt-7 border-t border-hairline pt-6">
@@ -305,6 +345,31 @@ export default function ShopProductDetail() {
           <div className="grid grid-cols-2 gap-5 sm:grid-cols-4">
             {recs.data.map((p) => (
               <ProductCard key={p._id} product={p} />
+            ))}
+          </div>
+        </section>
+      )}
+
+      {recentlyViewed.length > 0 && (
+        <section className="mt-16 border-t border-hairline pt-10">
+          <h2 className="font-display mb-5 text-xl font-semibold text-ink">Recently viewed</h2>
+          <div className="flex gap-4 overflow-x-auto pb-1">
+            {recentlyViewed.map((item) => (
+              <Link
+                key={item._id}
+                to={`/products/${item._id}`}
+                className="hover-lift w-32 shrink-0 overflow-hidden rounded-xl border border-hairline bg-surface"
+              >
+                <div className="aspect-square overflow-hidden bg-neutral-wash">
+                  {item.imageUrl && (
+                    <img src={item.imageUrl} alt="" className="h-full w-full object-cover" />
+                  )}
+                </div>
+                <div className="p-2">
+                  <p className="truncate text-xs font-medium text-ink">{item.name}</p>
+                  <p className="text-xs text-muted tabular">{money(item.price)}</p>
+                </div>
+              </Link>
             ))}
           </div>
         </section>

@@ -201,7 +201,7 @@ export default function CommandPalette() {
         role="dialog"
         aria-modal="true"
         aria-label="Command palette"
-        className="crm-glow animate-palette-in w-full max-w-lg overflow-hidden rounded-xl border border-hairline bg-surface"
+        className="animate-palette-in w-full max-w-lg overflow-hidden rounded-xl border border-hairline bg-surface"
         style={{ boxShadow: 'var(--shadow-pop)' }}
         onClick={(e) => e.stopPropagation()}
       >

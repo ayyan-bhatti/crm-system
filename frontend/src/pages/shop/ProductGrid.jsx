@@ -351,7 +351,7 @@ function FilterPill({ label, active, onClick }) {
       onClick={onClick}
       aria-pressed={active}
       className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-        active ? 'bg-brand text-white' : 'bg-neutral-wash text-ink-2 hover:bg-rule/40'
+        active ? 'bg-brand text-ink' : 'bg-neutral-wash text-ink-2 hover:bg-rule/40'
       }`}
     >
       {label}

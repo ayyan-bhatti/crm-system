@@ -50,9 +50,9 @@ export default function Login() {
     <div className="crm-shell flex min-h-full">
       {/* --- Brand panel — hidden below lg, where there is no room for two
           columns and the form is the only thing that matters anyway. ----- */}
-      <div className="crm-glow relative hidden w-[42%] shrink-0 flex-col justify-between overflow-hidden border-r border-hairline bg-surface px-12 py-14 lg:flex">
+      <div className="relative hidden w-[42%] shrink-0 flex-col justify-between overflow-hidden border-r border-hairline bg-surface px-12 py-14 lg:flex">
         <div className="flex items-center gap-2.5">
-          <span className="bg-brand-gradient flex h-9 w-9 items-center justify-center rounded-lg text-sm font-bold text-white shadow-lift">
+          <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-ink text-sm font-bold text-brand shadow-lift">
             S
           </span>
           <span className="font-display text-lg font-semibold tracking-tight text-ink">
@@ -87,7 +87,7 @@ export default function Login() {
       <div className="flex flex-1 items-center justify-center px-4 py-12">
         <div className="animate-fade-rise w-full max-w-sm">
           <div className="mb-7 text-center lg:hidden">
-            <span className="bg-brand-gradient mx-auto mb-4 flex h-11 w-11 items-center justify-center rounded-xl text-lg font-bold text-white shadow-lift">
+            <span className="mx-auto mb-4 flex h-11 w-11 items-center justify-center rounded-xl bg-ink text-lg font-bold text-brand shadow-lift">
               S
             </span>
           </div>

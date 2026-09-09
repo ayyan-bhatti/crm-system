@@ -233,8 +233,21 @@ function normaliseImages(raw) {
 }
 
 const createProduct = asyncHandler(async (req, res) => {
-  const { name, sku, price, stockQty, category, lowStockThreshold, imageUrl, description } =
-    req.body;
+  const {
+    name,
+    sku,
+    price,
+    stockQty,
+    category,
+    lowStockThreshold,
+    imageUrl,
+    description,
+    brand,
+    tags,
+    featured,
+    salePrice,
+    rating,
+  } = req.body;
 
   // Required on CREATE only, not on the schema itself — every product seeded
   // or created before this rule existed keeps its empty `imageUrl` and still
@@ -264,6 +277,11 @@ const createProduct = asyncHandler(async (req, res) => {
     lowStockThreshold,
     imageUrl,
     description,
+    brand,
+    tags,
+    featured,
+    salePrice,
+    rating,
     ...(variants ? { variants } : {}),
     ...(images ? { images } : {}),
   });
@@ -295,6 +313,11 @@ const updateProduct = asyncHandler(async (req, res) => {
     'lowStockThreshold',
     'imageUrl',
     'description',
+    'brand',
+    'tags',
+    'featured',
+    'salePrice',
+    'rating',
   ];
   editable.forEach((field) => {
     if (req.body[field] !== undefined) product[field] = req.body[field];

@@ -24,13 +24,14 @@ const btnBase =
 export const btn = btnBase;
 
 /*
- * `bg-brand-gradient` is a no-op outside the CRM (see index.css) — the
- * storefront keeps its flat `bg-brand` fill, which is the plainer, calmer
- * treatment that suits its lighter surface.
+ * The one accent, used as a flat fill — no gradient. `--color-brand` is a
+ * light lime, so the label sits in near-black ink rather than white: white
+ * text on a pale fill fails contrast outright, which is why every "brand"
+ * button and badge in this app takes `text-ink`, never `text-white`.
  */
 export const btnPrimary =
-  `${btnBase} bg-brand bg-brand-gradient text-white shadow-card hover:brightness-110 ` +
-  'hover:shadow-lift active:brightness-95 hover:-translate-y-px active:translate-y-0';
+  `${btnBase} bg-brand text-ink shadow-card hover:bg-brand-strong ` +
+  'hover:shadow-lift active:translate-y-0 hover:-translate-y-px';
 
 export const btnSecondary =
   `${btnBase} border border-hairline bg-raised text-ink-2 hover:border-rule hover:bg-plane ` +
@@ -591,7 +592,7 @@ export const SEGMENT_STYLES = {
   healthy: 'bg-emerald-50 text-emerald-700 ring-emerald-600/20',
   at_risk: 'bg-red-50 text-red-700 ring-red-600/20',
   dormant: 'bg-amber-50 text-amber-800 ring-amber-600/20',
-  high_value: 'bg-violet-50 text-violet-700 ring-violet-600/20',
+  high_value: 'bg-brand-wash text-brand-ink ring-brand-strong/20',
 };
 
 export const CAMPAIGN_STATUS_LABELS = {

@@ -187,10 +187,10 @@ export default function CartDrawer({ open, onClose }) {
             to="/checkout"
             onClick={onClose}
             aria-disabled={items.length === 0}
-            className={`block w-full rounded-lg py-2.5 text-center text-sm font-semibold text-white transition-colors ${
+            className={`block w-full rounded-lg py-2.5 text-center text-sm font-semibold transition-colors ${
               items.length === 0
                 ? 'pointer-events-none bg-neutral-wash text-muted'
-                : 'bg-brand hover:bg-brand-strong'
+                : 'bg-brand text-ink hover:bg-brand-strong'
             }`}
           >
             Checkout

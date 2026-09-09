@@ -70,7 +70,7 @@ export default function DeliveryTimeline({ order, compact = false }) {
               <div className="flex flex-col items-center">
                 <span
                   className={`mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold ${
-                    done ? 'bg-brand text-white' : 'bg-neutral-wash text-muted'
+                    done ? 'bg-brand text-ink' : 'bg-neutral-wash text-muted'
                   } ${isCurrent ? 'ring-4 ring-brand/20' : ''}`}
                   aria-hidden="true"
                 >

@@ -73,7 +73,7 @@ export default function Dashboard() {
 function AdminDashboard({ data, user, can }) {
   return (
     <div className="space-y-6">
-      <div className="crm-glow rounded-2xl">
+      <div>
         <Greeting user={user} subtitle="The whole business at a glance." />
       </div>
 
@@ -248,7 +248,7 @@ function AdminDashboard({ data, user, can }) {
 function ManagerDashboard({ data, user }) {
   return (
     <div className="space-y-6">
-      <div className="crm-glow rounded-2xl">
+      <div>
         <Greeting user={user} subtitle="What the floor needs from you today." />
       </div>
 

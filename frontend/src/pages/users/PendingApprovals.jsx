@@ -73,7 +73,7 @@ export default function PendingApprovals({ onDecided }) {
       <div className="border-b border-hairline p-4">
         <h2 className="text-base font-semibold text-ink">
           Pending approvals
-          <span className="ml-2 rounded-full bg-brand px-2 py-0.5 text-xs font-medium text-white">
+          <span className="ml-2 rounded-full bg-brand px-2 py-0.5 text-xs font-medium text-ink">
             {data.length}
           </span>
         </h2>

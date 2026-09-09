@@ -123,7 +123,7 @@ export default function ShopLayout() {
                   Hey, {buyer.name.split(' ')[0]}
                   {messageCount > 0 && (
                     <span
-                      className="ml-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-brand px-1 text-[10px] font-semibold text-white"
+                      className="ml-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-brand px-1 text-[10px] font-semibold text-ink"
                       aria-label={`${messageCount} new message${messageCount === 1 ? '' : 's'}`}
                     >
                       {messageCount > 9 ? '9+' : messageCount}
@@ -151,7 +151,7 @@ export default function ShopLayout() {
               </svg>
               <span className="hidden sm:inline">Cart</span>
               {count > 0 && (
-                <span className="rounded-full bg-brand px-1.5 text-xs font-semibold text-white">
+                <span className="rounded-full bg-brand px-1.5 text-xs font-semibold text-ink">
                   {count}
                 </span>
               )}

@@ -153,7 +153,15 @@ export default function ProductList() {
                         <Link to={`/crm/products/${product._id}`} className={link}>
                           {product.name}
                         </Link>
-                        <p className="text-xs text-muted">{product.sku}</p>
+                        {product.featured && (
+                          <span className="ml-2 rounded-full bg-brand-wash px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-brand-ink">
+                            Featured
+                          </span>
+                        )}
+                        <p className="label-mono mt-0.5">
+                          {product.sku}
+                          {product.brand ? ` · ${product.brand}` : ''}
+                        </p>
                       </td>
                       <td className={td}>{product.category}</td>
                       <td className={`${td} text-right`}>{money(product.price)}</td>

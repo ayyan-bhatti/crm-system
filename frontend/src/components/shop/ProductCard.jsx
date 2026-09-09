@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import ColourSwatches from './ColourSwatches';
+import RatingStars from './RatingStars';
 import { money, galleryFor, priceRange } from '../../ui';
 import ProductImage from './ProductImage';
 
@@ -68,16 +69,28 @@ export default function ProductCard({ product, onQuickView }) {
         </div>
 
         <div className="p-3">
-          <p className="truncate text-sm font-medium text-ink">{product.name}</p>
+          {product.brand && <p className="label-mono truncate">{product.brand}</p>}
+          <p className="mt-0.5 truncate text-sm font-medium text-ink">{product.name}</p>
+
+          {product.rating?.count > 0 && <RatingStars rating={product.rating} className="mt-1" />}
 
           <div className="mt-1.5 flex items-center justify-between gap-2">
-            <span className="text-sm font-semibold text-ink tabular">
-              {/*
-               * "from $95" only where colours genuinely differ in price. On a
-               * product with one price it would be a hedge that makes the shop
-               * look like it is hiding something.
-               */}
-              {range ? `from ${money(range.min)}` : money(product.price)}
+            <span className="flex items-baseline gap-1.5 text-sm font-semibold text-ink tabular">
+              {product.salePrice ? (
+                <>
+                  <span className="text-brand-ink">{money(product.salePrice)}</span>
+                  <span className="text-xs font-medium text-muted line-through">
+                    {money(product.price)}
+                  </span>
+                </>
+              ) : (
+                /*
+                 * "from $95" only where colours genuinely differ in price. On a
+                 * product with one price it would be a hedge that makes the shop
+                 * look like it is hiding something.
+                 */
+                <span>{range ? `from ${money(range.min)}` : money(product.price)}</span>
+              )}
             </span>
             <ColourSwatches variants={product.variants} />
           </div>
@@ -123,6 +136,7 @@ function ProductBadge({ product }) {
 
   let badge = null;
   if (product.lowStock) badge = { label: 'Low stock', className: 'bg-warning-wash text-warning-ink' };
+  else if (product.salePrice) badge = { label: 'Sale', className: 'bg-brand text-ink' };
   else if (isNew) badge = { label: 'New', className: 'bg-ink text-plane' };
 
   if (!badge) return null;

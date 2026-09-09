@@ -35,6 +35,10 @@ export default function ProductForm() {
     lowStockThreshold: '10',
     imageUrl: '',
     description: '',
+    brand: '',
+    tags: '',
+    featured: false,
+    salePrice: '',
   });
   const [variants, setVariants] = useState([]);
   const [images, setImages] = useState('');
@@ -67,6 +71,10 @@ export default function ProductForm() {
       lowStockThreshold: String(existing.lowStockThreshold ?? '10'),
       imageUrl: existing.imageUrl || '',
       description: existing.description || '',
+      brand: existing.brand || '',
+      tags: (existing.tags || []).join(', '),
+      featured: Boolean(existing.featured),
+      salePrice: existing.salePrice == null ? '' : String(existing.salePrice),
     });
 
     /*
@@ -120,6 +128,11 @@ export default function ProductForm() {
       price: Number(form.price),
       stockQty: hasVariants ? variantStockTotal : Number(form.stockQty),
       lowStockThreshold: Number(form.lowStockThreshold),
+      tags: form.tags
+        .split(',')
+        .map((tag) => tag.trim())
+        .filter(Boolean),
+      salePrice: form.salePrice === '' ? null : Number(form.salePrice),
       images: images
         .split('\n')
         .map((url) => url.trim())
@@ -231,6 +244,44 @@ export default function ProductForm() {
               />
             </div>
           </div>
+
+          <fieldset className="rounded-lg border border-hairline bg-plane p-4">
+            <legend className="px-1 text-sm font-semibold text-ink">Merchandising</legend>
+            <div className="mt-2 grid gap-4 sm:grid-cols-2">
+              <Field
+                label="Brand"
+                hint="Shown on the storefront card and product page."
+                value={form.brand}
+                onChange={(e) => update('brand', e.target.value)}
+              />
+              <Field
+                label="Sale price"
+                type="number"
+                step="0.01"
+                min="0"
+                hint="Optional. Leave blank to sell at the regular price above."
+                value={form.salePrice}
+                onChange={(e) => update('salePrice', e.target.value)}
+              />
+              <div className="sm:col-span-2">
+                <Field
+                  label="Tags"
+                  hint="Comma-separated — used by search and 'you might also like'."
+                  value={form.tags}
+                  onChange={(e) => update('tags', e.target.value)}
+                />
+              </div>
+              <label className="flex items-center gap-2 text-sm text-ink-2 sm:col-span-2">
+                <input
+                  type="checkbox"
+                  checked={form.featured}
+                  onChange={(e) => update('featured', e.target.checked)}
+                  className="h-4 w-4 rounded border-hairline"
+                />
+                Feature on the storefront homepage
+              </label>
+            </div>
+          </fieldset>
 
           <Field
             label="More images"

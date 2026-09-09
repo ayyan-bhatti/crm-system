@@ -44,7 +44,7 @@ export default function ForgotPassword() {
   }
 
   return (
-    <div className="crm-shell crm-glow flex min-h-full items-center justify-center px-4 py-12">
+    <div className="crm-shell flex min-h-full items-center justify-center px-4 py-12">
       <div className="animate-fade-rise w-full max-w-sm">
         <div className="mb-7 text-center">
           <h1 className="text-2xl font-semibold tracking-tight text-ink">Reset your password</h1>

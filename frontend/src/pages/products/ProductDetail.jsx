@@ -76,27 +76,52 @@ export default function ProductDetail() {
 
       <Card className="p-5">
         <dl className="grid gap-4 sm:grid-cols-2">
-          <Detail label="Price" value={money(product.price)} />
+          <Detail
+            label="Price"
+            value={product.salePrice ? `${money(product.salePrice)} (was ${money(product.price)})` : money(product.price)}
+          />
           <Detail
             label="In stock"
             value={product.stockQty}
             emphasis={product.isLowStock ? 'text-critical-ink' : undefined}
           />
           <Detail label="Category" value={product.category} />
+          <Detail label="Brand" value={product.brand || '—'} />
           <Detail label="Low stock threshold" value={product.lowStockThreshold} />
-          <Detail label="SKU" value={product.sku} />
+          <Detail label="SKU" value={product.sku} mono />
+          <Detail label="Featured" value={product.featured ? 'Yes' : 'No'} />
           <Detail label="Added" value={formatDate(product.createdAt)} />
         </dl>
+
+        {product.tags?.length > 0 && (
+          <div className="mt-4 border-t border-hairline pt-4">
+            <p className="label-mono">Tags</p>
+            <ul className="mt-1.5 flex flex-wrap gap-1.5">
+              {product.tags.map((tag) => (
+                <li
+                  key={tag}
+                  className="rounded-full border border-hairline px-2 py-0.5 text-xs text-ink-2"
+                >
+                  {tag}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
       </Card>
     </div>
   );
 }
 
-function Detail({ label, value, emphasis }) {
+function Detail({ label, value, emphasis, mono = false }) {
   return (
     <div>
-      <dt className="text-xs font-medium uppercase tracking-wide text-muted">{label}</dt>
-      <dd className={`mt-1 text-sm font-medium ${emphasis || 'text-ink'}`}>{value}</dd>
+      <dt className="label-mono">{label}</dt>
+      <dd
+        className={`mt-1 text-sm font-medium ${emphasis || 'text-ink'} ${mono ? 'font-mono' : ''}`}
+      >
+        {value}
+      </dd>
     </div>
   );
 }
