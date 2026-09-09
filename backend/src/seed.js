@@ -56,13 +56,20 @@ const USERS = [
  * Still a stand-in, not real product photography. The generated tile in
  * `ui.js` remains the guaranteed floor for when this host is unreachable too.
  */
-function demoImage(sku, index = 0, keywords = 'product') {
-  const lock = `${sku.toLowerCase()}${index ? `-${index}` : ''}`
-    .split('')
-    .reduce((hash, char) => (hash * 31 + char.charCodeAt(0)) >>> 0, 7)
-    % 100000;
-
-  return `https://loremflickr.com/640/640/${encodeURIComponent(keywords)}?lock=${lock}`;
+/**
+ * A specific, real, verified-reachable Unsplash photo id — not a random-photo
+ * lottery keyed off the SKU.
+ *
+ * `loremflickr.com`'s keyword search used to sit here, and it never actually
+ * matched what it was asked for: a search for "desk" is as likely to return a
+ * photo of a park bench, because the service matches loosely and returns
+ * WHATEVER it has tagged with that word. Every id below was picked by hand for
+ * the specific product it illustrates and curl-verified (`200`, real
+ * `image/jpeg`) before being committed here — see the response format Unsplash
+ * documents at https://images.unsplash.com/photo-<id>.
+ */
+function curatedImage(id, { w = 800 } = {}) {
+  return `https://images.unsplash.com/photo-${id}?w=${w}&q=80&auto=format&fit=crop`;
 }
 
 /**
@@ -87,7 +94,7 @@ const VARIANTS = {
     // Sold out, so the storefront's disabled-swatch state has something to show.
     { color: { name: 'Forest', hex: '#2f4f3a' }, size: 'Standard', stockQty: 0 },
   ],
-  'TECH-002': [
+  'TECH-001': [
     { color: { name: 'Midnight', hex: '#111827' }, size: 'Full', stockQty: 18 },
     { color: { name: 'Midnight', hex: '#111827' }, size: 'Compact', stockQty: 22 },
     { color: { name: 'Sand', hex: '#d6c7a1' }, size: 'Compact', stockQty: 12 },
@@ -100,14 +107,22 @@ const VARIANTS = {
     },
   ],
   'TECH-003': [
-    { color: { name: 'Midnight', hex: '#111827' }, stockQty: 2 },
-    { color: { name: 'Cloud', hex: '#eef1f5' }, stockQty: 2 },
+    { color: { name: 'Midnight', hex: '#111827' }, stockQty: 9 },
+    { color: { name: 'Cloud', hex: '#eef1f5' }, stockQty: 7 },
   ],
-  'SUPP-002': [
-    { color: { name: 'Assorted', hex: '#7c5cd6' }, stockQty: 6 },
+  'APP-001': [
+    { color: { name: 'Crimson', hex: '#b5292f' }, size: '9', stockQty: 6 },
+    { color: { name: 'Crimson', hex: '#b5292f' }, size: '10', stockQty: 4 },
+    { color: { name: 'Forest', hex: '#2f4f3a' }, size: '9', stockQty: 0 },
+    { color: { name: 'Forest', hex: '#2f4f3a' }, size: '10', stockQty: 5 },
   ],
 };
 
+/**
+ * Sixteen products across six categories, each with a real, hand-picked photo
+ * — not the office-supplies-closet catalogue this used to be. See
+ * `curatedImage`'s own note for how the ids were chosen and verified.
+ */
 const PRODUCTS = [
   {
     name: 'Standing Desk',
@@ -116,6 +131,7 @@ const PRODUCTS = [
     stockQty: 24,
     category: 'Furniture',
     description: 'A height-adjustable desk that goes from sitting to standing in seconds.',
+    photo: '1683582411325-b87240c5b530',
   },
   {
     name: 'Ergonomic Chair',
@@ -124,101 +140,160 @@ const PRODUCTS = [
     stockQty: 8,
     category: 'Furniture',
     description: 'Full lumbar support and adjustable armrests for a full day at the desk.',
-  },
-  {
-    name: 'Filing Cabinet',
-    sku: 'FURN-003',
-    price: 180,
-    stockQty: 40,
-    category: 'Furniture',
-    description: 'A lockable three-drawer cabinet built for A4 and letter-size folders.',
-  },
-  {
-    name: '27" Monitor',
-    sku: 'TECH-001',
-    price: 290,
-    stockQty: 15,
-    category: 'Electronics',
-    description: 'A crisp 27-inch QHD display with a thin bezel and adjustable stand.',
+    photo: '1518455027359-f3f8164ba6bd',
+    photoAlt: '1598300042247-d088f8ab3a91',
   },
   {
     name: 'Mechanical Keyboard',
-    sku: 'TECH-002',
+    sku: 'TECH-001',
     price: 95,
     stockQty: 60,
     category: 'Electronics',
     description: 'Hot-swappable switches and a compact layout for all-day typing.',
+    photo: '1618384887929-16ec33fab9ef',
+    photoAlt: '1547394765-185e1e68f34e',
   },
   {
-    name: 'Wireless Mouse',
+    name: 'Wireless Headphones',
+    sku: 'TECH-002',
+    price: 180,
+    stockQty: 34,
+    category: 'Electronics',
+    description: 'Active noise cancelling over-ears with a battery that lasts the whole flight.',
+    photo: '1609081219090-a6d81d3085bf',
+  },
+  {
+    name: 'Smart Watch',
     sku: 'TECH-003',
-    price: 35,
-    stockQty: 4,
+    price: 220,
+    stockQty: 16,
     category: 'Electronics',
-    description: 'A lightweight wireless mouse with a battery that lasts months, not days.',
+    description: 'Tracks your day and your workouts, and still looks right with a shirt and tie.',
+    photo: '1579586337278-3befd40fd17a',
+    photoAlt: '1546868871-7041f2a55e12',
   },
   {
-    name: 'USB-C Dock',
+    name: 'Bluetooth Speaker',
     sku: 'TECH-004',
-    price: 145,
-    stockQty: 22,
+    price: 85,
+    stockQty: 27,
     category: 'Electronics',
-    description: 'One cable to your laptop, everything else plugged into the dock.',
+    description: 'Pocket-sized and genuinely loud, with ten hours on a single charge.',
+    photo: '1608043152269-423dbba4e7e1',
+    photoAlt: '1589003077984-894e133dabab',
   },
   {
-    name: 'Laser Printer',
-    sku: 'TECH-005',
-    price: 410,
-    stockQty: 3,
-    category: 'Electronics',
-    description: 'A reliable mono laser printer built for a busy shared office.',
+    name: 'Desk Lamp',
+    sku: 'HOME-001',
+    price: 60,
+    stockQty: 45,
+    category: 'Home',
+    description: 'A balanced-arm reading lamp that stays exactly where you put it.',
+    photo: '1519219788971-8d9797e0928e',
+    photoAlt: '1582356630861-61bb9b41f541',
   },
   {
-    name: 'A4 Paper (5 reams)',
+    name: 'Potted Plant',
+    sku: 'HOME-002',
+    price: 35,
+    stockQty: 18,
+    category: 'Home',
+    description: 'A low-maintenance houseplant in a ceramic pot, delivered already thriving.',
+    photo: '1592150621744-aca64f48394a',
+    photoAlt: '1603436326446-74e2d65f3168',
+  },
+  {
+    name: 'Ceramic Mug Set',
+    sku: 'HOME-003',
+    price: 28,
+    stockQty: 52,
+    category: 'Home',
+    description: 'A set of two hand-glazed mugs, dishwasher and microwave safe.',
+    photo: '1616241673111-508b4662c707',
+    photoAlt: '1570784332176-fdd73da66f03',
+  },
+  {
+    name: 'Leather Journal',
+    sku: 'HOME-004',
+    price: 32,
+    stockQty: 40,
+    category: 'Home',
+    description: 'A refillable leather-bound notebook with 200 pages of unlined paper.',
+    photo: '1677064061401-f77f966ff8a1',
+    photoAlt: '1639371040157-55b642d03f4f',
+  },
+  {
+    name: 'Desk Organizer',
     sku: 'SUPP-001',
-    price: 22,
-    stockQty: 200,
+    price: 18,
+    stockQty: 65,
     category: 'Supplies',
-    description: 'Five reams of standard 80gsm A4, enough for a month of printing.',
+    description: 'Keeps cables, pens and a phone stand off the desk and within reach.',
+    photo: '1644463589256-02679b9c0767',
+    photoAlt: '1760348213270-7cd00b8c3405',
   },
   {
-    name: 'Whiteboard Markers',
-    sku: 'SUPP-002',
-    price: 12,
-    stockQty: 6,
-    category: 'Supplies',
-    description: 'A pack of eight low-odour dry-erase markers in assorted colours.',
+    name: 'Leather Backpack',
+    sku: 'ACC-001',
+    price: 140,
+    stockQty: 21,
+    category: 'Accessories',
+    description: 'Full-grain leather with a padded 15" laptop sleeve, ages better every year.',
+    photo: '1547949003-9792a18a2601',
   },
-].map((product) => {
+  {
+    name: 'Leather Wallet',
+    sku: 'ACC-002',
+    price: 65,
+    stockQty: 38,
+    category: 'Accessories',
+    description: 'A slim bifold with six card slots, cut from a single piece of hide.',
+    photo: '1601592996763-f05c9c80a7f1',
+    photoAlt: '1620109176813-e91290f6c795',
+  },
+  {
+    name: 'Sunglasses',
+    sku: 'ACC-003',
+    price: 75,
+    stockQty: 29,
+    category: 'Accessories',
+    description: 'Polarised lenses in a classic frame that does not go out of style.',
+    photo: '1511499767150-a48a237f0083',
+    photoAlt: '1572635196237-14b3f281503f',
+  },
+  {
+    name: 'Running Shoes',
+    sku: 'APP-001',
+    price: 110,
+    stockQty: 15,
+    category: 'Footwear',
+    description: 'A cushioned daily trainer built for the miles that add up over a year.',
+    photo: '1542291026-7eec264c27ff',
+    photoAlt: '1606107557195-0e29a4b5b4aa',
+  },
+  {
+    name: 'Water Bottle',
+    sku: 'OUT-001',
+    price: 25,
+    stockQty: 70,
+    category: 'Outdoors',
+    description: 'Double-walled steel that keeps cold drinks cold for a full day outside.',
+    photo: '1625708458528-802ec79b1ed8',
+    photoAlt: '1544003484-3cd181d17917',
+  },
+].map(({ photo, photoAlt, ...product }) => {
   const variants = VARIANTS[product.sku];
-
-  /*
-   * ONE keyword for the stand-in photo, taken from the product's own name, so
-   * "Standing Desk" asks for a picture of a desk rather than for whatever a
-   * random-photo endpoint felt like returning. Bracketed pack sizes are dropped
-   * ("A4 Paper (5 reams)" wants *paper*).
-   *
-   * SINGLE, not several, because the host 500s on comma-separated keywords —
-   * `/laptop` returns a photo, `/gaming,laptop` returns an error. The LAST word
-   * is the head noun in English, so it is the one that describes the thing.
-   */
-  const words = product.name
-    .replace(/\([^)]*\)/g, ' ')
-    .toLowerCase()
-    .split(/\s+/)
-    .filter((word) => word.length > 2);
-  const keywords = words[words.length - 1] || product.category.toLowerCase();
 
   return {
     ...product,
-    imageUrl: demoImage(product.sku, 0, keywords),
+    imageUrl: curatedImage(photo),
     /*
      * A second image on every product, so the storefront card's hover-swap has
-     * something to swap TO. A card whose hover state does nothing looks broken
-     * rather than restrained, and with one seeded image that is what every card
-     * would do.
+     * something to swap TO. Where a distinct second angle was not hand-picked,
+     * the same photo repeats at a different crop width rather than showing an
+     * unrelated product on hover — that would be worse than no swap at all.
      */
-    images: [demoImage(product.sku, 2, keywords), demoImage(product.sku, 3, keywords)],
+    images: [curatedImage(photoAlt || photo, { w: 900 }), curatedImage(photo, { w: 700 })],
     ...(variants ? { variants } : {}),
     /*
      * Where a product has variants, its own `stockQty` is the SUM of them. The

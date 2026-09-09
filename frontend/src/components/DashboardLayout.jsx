@@ -101,10 +101,10 @@ export default function DashboardLayout() {
   const visibleItems = NAV_ITEMS.filter((item) => !item.requires || can[item.requires]);
 
   const navClass = ({ isActive }) =>
-    `flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+    `flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-all duration-200 ${
       isActive
-        ? 'bg-brand text-white shadow-card'
-        : 'text-ink-2 hover:bg-neutral-wash hover:text-ink'
+        ? 'bg-brand bg-brand-gradient text-white shadow-card'
+        : 'text-ink-2 hover:translate-x-0.5 hover:bg-neutral-wash hover:text-ink'
     }`;
 
   // Initials avatar — cheaper and more reliable than an image, and it never 404s.
@@ -122,7 +122,7 @@ export default function DashboardLayout() {
       {/* --- Sidebar ----------------------------------------------------- */}
       <aside className="hidden w-60 shrink-0 border-r border-hairline bg-surface sm:flex sm:flex-col">
         <div className="flex h-16 items-center gap-2.5 px-5">
-          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand text-sm font-bold text-white">
+          <span className="bg-brand-gradient flex h-8 w-8 items-center justify-center rounded-lg bg-brand text-sm font-bold text-white shadow-lift">
             S
           </span>
           <span className="font-display text-[16px] font-semibold tracking-tight text-ink">
@@ -243,8 +243,8 @@ export default function DashboardLayout() {
               to={item.to}
               end={item.end}
               className={({ isActive }) =>
-                `whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-medium ${
-                  isActive ? 'bg-brand text-white' : 'text-ink-2'
+                `whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-medium transition-all duration-200 ${
+                  isActive ? 'bg-brand bg-brand-gradient text-white' : 'text-ink-2'
                 }`
               }
             >

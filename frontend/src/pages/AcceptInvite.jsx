@@ -79,10 +79,10 @@ export default function AcceptInvite() {
   if (!invite) return null;
 
   return (
-    <div className="flex min-h-full items-center justify-center px-4 py-12">
-      <div className="w-full max-w-sm">
+    <div className="crm-shell crm-glow flex min-h-full items-center justify-center px-4 py-12">
+      <div className="animate-fade-rise w-full max-w-sm">
         <div className="mb-7 text-center">
-          <span className="mx-auto mb-4 flex h-11 w-11 items-center justify-center rounded-xl bg-brand text-lg font-bold text-white shadow-lift">
+          <span className="bg-brand-gradient mx-auto mb-4 flex h-11 w-11 items-center justify-center rounded-xl text-lg font-bold text-white shadow-lift">
             S
           </span>
           <h1 className="text-2xl font-semibold tracking-tight text-ink">
@@ -151,8 +151,8 @@ export default function AcceptInvite() {
  */
 function InviteProblem({ message }) {
   return (
-    <div className="flex min-h-full items-center justify-center px-4 py-12">
-      <Card className="w-full max-w-sm p-6 text-center shadow-lift">
+    <div className="crm-shell crm-glow flex min-h-full items-center justify-center px-4 py-12">
+      <Card className="animate-fade-rise w-full max-w-sm p-6 text-center shadow-lift">
         <p className="text-sm font-medium text-ink">This invitation cannot be used</p>
         <p className="mt-2 text-sm text-ink-2">{message}</p>
         <p className="mt-4 text-xs text-muted">

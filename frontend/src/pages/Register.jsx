@@ -60,8 +60,8 @@ export default function Register() {
 
   if (submitted) {
     return (
-      <div className="flex min-h-full items-center justify-center px-4 py-12">
-        <div className="w-full max-w-sm">
+      <div className="crm-shell crm-glow flex min-h-full items-center justify-center px-4 py-12">
+        <div className="animate-fade-rise w-full max-w-sm">
           <div className="mb-6 text-center">
             <h1 className="text-2xl font-semibold tracking-tight text-ink">Request sent</h1>
           </div>
@@ -94,9 +94,12 @@ export default function Register() {
   }
 
   return (
-    <div className="flex min-h-full items-center justify-center px-4 py-12">
-      <div className="w-full max-w-sm">
+    <div className="crm-shell crm-glow flex min-h-full items-center justify-center px-4 py-12">
+      <div className="animate-fade-rise w-full max-w-sm">
         <div className="mb-6 text-center">
+          <span className="bg-brand-gradient mx-auto mb-4 flex h-11 w-11 items-center justify-center rounded-xl text-lg font-bold text-white shadow-lift">
+            S
+          </span>
           <h1 className="text-2xl font-semibold tracking-tight text-ink">SimpleCRM</h1>
           <p className="mt-1 text-sm text-muted">Request an account</p>
         </div>

@@ -64,7 +64,7 @@ export default function ResetPassword() {
   /* A link with no token at all — someone pasted a truncated URL. */
   if (!token) {
     return (
-      <div className="flex min-h-full items-center justify-center px-4 py-12">
+      <div className="crm-shell crm-glow flex min-h-full items-center justify-center px-4 py-12">
         <Card className="w-full max-w-sm p-6 text-center shadow-lift">
           <p className="text-sm font-medium text-ink">This link is incomplete</p>
           <p className="mt-2 text-sm text-ink-2">
@@ -79,8 +79,8 @@ export default function ResetPassword() {
   }
 
   return (
-    <div className="flex min-h-full items-center justify-center px-4 py-12">
-      <div className="w-full max-w-sm">
+    <div className="crm-shell crm-glow flex min-h-full items-center justify-center px-4 py-12">
+      <div className="animate-fade-rise w-full max-w-sm">
         <div className="mb-7 text-center">
           <h1 className="text-2xl font-semibold tracking-tight text-ink">Choose a new password</h1>
           <p className="mt-1.5 text-sm text-ink-2">

@@ -23,9 +23,14 @@ const btnBase =
 
 export const btn = btnBase;
 
+/*
+ * `bg-brand-gradient` is a no-op outside the CRM (see index.css) — the
+ * storefront keeps its flat `bg-brand` fill, which is the plainer, calmer
+ * treatment that suits its lighter surface.
+ */
 export const btnPrimary =
-  `${btnBase} bg-brand text-white shadow-card hover:bg-brand-strong hover:shadow-lift ` +
-  'active:bg-brand-ink';
+  `${btnBase} bg-brand bg-brand-gradient text-white shadow-card hover:brightness-110 ` +
+  'hover:shadow-lift active:brightness-95 hover:-translate-y-px active:translate-y-0';
 
 export const btnSecondary =
   `${btnBase} border border-hairline bg-raised text-ink-2 hover:border-rule hover:bg-plane ` +

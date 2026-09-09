@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom';
 import { customersApi, dashboardApi, productsApi } from '../api/resources';
 import useFetch from '../hooks/useFetch';
 import usePermissions from '../hooks/usePermissions';
+import useCountUp from '../hooks/useCountUp';
 import AiSearchBar from '../components/AiSearchBar';
 import {
   ChartCard,
@@ -79,7 +80,7 @@ function AdminDashboard({ data, user, can }) {
       {/* Org-wide money and volume, as a bento grid: revenue is the figure
           everything else here is downstream of, so it gets the wide tile
           rather than sitting the same size as a headcount. */}
-      <div className="bento-grid">
+      <div className="bento-grid stagger-children">
         <div className="bento-lg">
           <StatTile
             label="Revenue"
@@ -116,7 +117,7 @@ function AdminDashboard({ data, user, can }) {
 
       {/* The admin's authority row: the two queues only they can clear, and
           the shortcut to the account management that is theirs alone. */}
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className="stagger-children grid gap-4 sm:grid-cols-3">
         <ActionTile
           label="Approvals waiting"
           value={data.pendingApprovals ?? 0}
@@ -252,7 +253,7 @@ function ManagerDashboard({ data, user }) {
       </div>
 
       {/* Three tiles, not four. Operations, not org administration. */}
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className="stagger-children grid gap-4 sm:grid-cols-3">
         <StatTile
           label="Revenue"
           value={money(data.totalRevenue)}
@@ -658,6 +659,11 @@ function customerStatusData(data) {
  * Tabular figures are for columns that align vertically, not for this.
  */
 function StatTile({ label, value, hint, to, tone = 'default', spark, sparkKey }) {
+  // Only a plain number animates — a pre-formatted string (money(), a date)
+  // has no numeric value to interpolate towards and passes through as-is.
+  const animated = useCountUp(value);
+  const display = typeof value === 'number' ? animated : value;
+
   const body = (
     <Card
       className={`group h-full p-5 transition-all duration-150 ${
@@ -684,7 +690,7 @@ function StatTile({ label, value, hint, to, tone = 'default', spark, sparkKey })
           tone === 'critical' ? 'text-critical' : 'text-ink'
         }`}
       >
-        {value}
+        {display}
       </p>
 
       {hint && <p className="mt-2 text-xs text-muted">{hint}</p>}
@@ -715,6 +721,8 @@ function StatTile({ label, value, hint, to, tone = 'default', spark, sparkKey })
  * past, and its absence at zero is what stops the screen crying wolf.
  */
 function ActionTile({ label, value, hint, to, urgent = false }) {
+  const display = useCountUp(value);
+
   return (
     <Link to={to} className="block">
       <Card
@@ -729,7 +737,7 @@ function ActionTile({ label, value, hint, to, urgent = false }) {
             urgent ? 'text-brand-ink' : 'text-ink'
           }`}
         >
-          {value}
+          {display}
         </p>
         {hint && <p className="mt-2 text-xs text-muted">{hint}</p>}
       </Card>

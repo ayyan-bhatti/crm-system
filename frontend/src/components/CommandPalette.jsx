@@ -193,12 +193,15 @@ export default function CommandPalette() {
   let lastKind = null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 pt-[12vh]" onClick={close}>
+    <div
+      className="animate-backdrop-in fixed inset-0 z-50 flex items-start justify-center bg-black/60 pt-[12vh]"
+      onClick={close}
+    >
       <div
         role="dialog"
         aria-modal="true"
         aria-label="Command palette"
-        className="crm-glow w-full max-w-lg overflow-hidden rounded-xl border border-hairline bg-surface"
+        className="crm-glow animate-palette-in w-full max-w-lg overflow-hidden rounded-xl border border-hairline bg-surface"
         style={{ boxShadow: 'var(--shadow-pop)' }}
         onClick={(e) => e.stopPropagation()}
       >

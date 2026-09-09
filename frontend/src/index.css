@@ -12,7 +12,7 @@
  * It had been warning for some time, buried in dev-server output nobody reads.
  * Swapping the two lines is the entire fix.
  */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Space+Grotesk:wght@500;600;700&display=swap');
 @import 'tailwindcss';
 
 /* ===========================================================================
@@ -110,22 +110,21 @@
 
   /*
    * --- Type -----------------------------------------------------------
-   * Inter for everything — body text, UI chrome, and the entire internal
-   * dashboard end to end. Fraunces is a SECOND, deliberately restricted
-   * face: only the storefront's marketing-feeling surfaces (hero, product
-   * headline, category headers) reach for `--font-display`, so the CRM's
-   * typography stays exactly as quiet as its layout.
+   * Inter for running text everywhere — body copy, table cells, form labels,
+   * in both the CRM and the storefront. Fraunces is the storefront's own
+   * display face (hero, product headline, category headers) and stays exactly
+   * that restricted.
    *
-   * ONE EXCEPTION, ADDED DELIBERATELY IN ROUND 3: the SimpleCRM wordmark in
-   * the CRM sidebar and mobile header. Round 3 asked for the internal side to
-   * read as part of the same product as the storefront rather than as an admin
-   * panel bolted on afterwards, and a shared wordmark is the cheapest honest
-   * way to say that — it is a brand mark rather than body typography, so it
-   * carries the family resemblance without loosening the rule above. Every
-   * heading, label and table cell in the CRM remains Inter.
+   * `--font-crm-display` is new: Space Grotesk, used ONLY for page headings
+   * and the large numeric figures on the CRM's own screens (stat tiles, the
+   * command palette's wordmark echo). A geometric, slightly technical face is
+   * what actually reads as "designed" on a data-dense dark screen — Inter set
+   * at 28px looks like a bigger paragraph, not a headline. Never used for body
+   * text or table cells, so nothing anyone has to read at length is set in it.
    */
   --font-sans: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
   --font-display: 'Fraunces', Georgia, 'Times New Roman', serif;
+  --font-crm-display: 'Space Grotesk', 'Inter', system-ui, sans-serif;
 
   /* --- Elevation --------------------------------------------------------- */
   /* Deliberately shallow. Depth comes from the hairline border; the shadow is
@@ -207,6 +206,40 @@ h3 {
 }
 
 /*
+ * A grid or row of tiles entering in a quick cascade rather than all at once
+ * — used on the dashboard's bento grid and the delivery board's summary row.
+ * Capped at 8 explicit steps (nth-child(9) onward gets no extra delay) so a
+ * long list does not take a visibly long time to finish appearing.
+ */
+.stagger-children > * {
+  animation: fade-rise var(--motion-base) var(--motion-ease) both;
+}
+.stagger-children > *:nth-child(1) {
+  animation-delay: 0ms;
+}
+.stagger-children > *:nth-child(2) {
+  animation-delay: 40ms;
+}
+.stagger-children > *:nth-child(3) {
+  animation-delay: 80ms;
+}
+.stagger-children > *:nth-child(4) {
+  animation-delay: 120ms;
+}
+.stagger-children > *:nth-child(5) {
+  animation-delay: 160ms;
+}
+.stagger-children > *:nth-child(6) {
+  animation-delay: 200ms;
+}
+.stagger-children > *:nth-child(7) {
+  animation-delay: 240ms;
+}
+.stagger-children > *:nth-child(n + 8) {
+  animation-delay: 280ms;
+}
+
+/*
  * Tabular figures for columns of numbers that must align vertically: table
  * cells and chart axis ticks. Deliberately NOT applied to stat-tile values —
  * equal-width digits make a large "121" look gappy, so big standalone numbers
@@ -261,24 +294,33 @@ h3 {
  * copied — same hue family, inverted contrast direction.
  * ======================================================================== */
 .crm-shell {
-  /* --- Surfaces & ink ------------------------------------------------- */
-  --color-plane: #0a0a0c;
-  --color-surface: #0e0e11;
-  --color-raised: #17171b;
+  /* --- Surfaces & ink -------------------------------------------------
+     A true neutral black/grey reads flat and generic under real light —
+     every surface below carries a faint cool violet undertone (the hue
+     angle stays constant, only lightness moves), which is what actually
+     gives a dark UI depth instead of looking like an inverted light theme. */
+  --color-plane: #08080d;
+  --color-surface: #0e0e16;
+  --color-raised: #17161f;
 
-  --color-ink: #f4f3ef;
-  --color-ink-2: #b2afa7;
-  --color-muted: #7c7a72;
+  --color-ink: #f5f3f7;
+  --color-ink-2: #b6b2c0;
+  --color-muted: #7d7a8c;
 
   --color-hairline: rgba(255, 255, 255, 0.08);
-  --color-rule: rgba(255, 255, 255, 0.16);
+  --color-rule: rgba(255, 255, 255, 0.17);
 
-  /* --- Brand — brightened for legibility against near-black ------------ */
-  --color-brand: #2bd39a;
-  --color-brand-strong: #1fae7f;
-  --color-brand-ink: #7ce8bd;
-  --color-brand-soft: rgba(43, 211, 154, 0.22);
-  --color-brand-wash: rgba(43, 211, 154, 0.12);
+  /* --- Brand — the one accent, given real range rather than a single flat
+     fill. `--gradient-brand` is what buttons and the active nav pill use
+     instead of a flat swatch: a small shift in lightness across the same
+     hue, which is what makes an emerald button look considered rather than
+     like a colour swap on a Bootstrap default. -------------------------- */
+  --color-brand: #22d3a5;
+  --color-brand-strong: #16b085;
+  --color-brand-ink: #7bf0c9;
+  --color-brand-soft: rgba(34, 211, 165, 0.22);
+  --color-brand-wash: rgba(34, 211, 165, 0.12);
+  --gradient-brand: linear-gradient(135deg, #22d3a5 0%, #1a9dd9 100%);
 
   /* --- Status: same hues, wash/ink inverted for a dark surface --------- */
   --color-good: #34d374;
@@ -305,6 +347,30 @@ h3 {
 
   color-scheme: dark;
   background-color: var(--color-plane);
+  background-image: radial-gradient(
+    ellipse 900px 500px at 15% -10%,
+    rgba(34, 211, 165, 0.07),
+    transparent 60%
+  );
+  background-repeat: no-repeat;
+}
+
+/* Page headings and the large numeric figures on CRM screens — see the
+   note on `--font-crm-display` above. Scoped through the cascade rather
+   than a class on every heading, same reasoning as the palette override. */
+.crm-shell h1,
+.crm-shell h2,
+.crm-shell [data-stat] {
+  font-family: var(--font-crm-display);
+  letter-spacing: -0.01em;
+}
+
+/* The one place a flat brand fill becomes a gradient: primary buttons and
+   the active nav item. Applied as a utility rather than folded into every
+   existing `bg-brand` usage, so the choice of where it appears stays
+   deliberate rather than automatic. */
+.crm-shell .bg-brand-gradient {
+  background-image: var(--gradient-brand);
 }
 
 /*
@@ -357,6 +423,34 @@ h3 {
   .bento-xl {
     grid-column: span 4 / span 4;
   }
+}
+
+/* The command palette's entrance — a quick scale+fade rather than an instant
+   pop, and the backdrop fades in slightly slower so the panel reads as
+   arriving ON TOP of it rather than both snapping in together. */
+@keyframes palette-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+@keyframes backdrop-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.animate-palette-in {
+  animation: palette-in 180ms var(--motion-ease) both;
+}
+.animate-backdrop-in {
+  animation: backdrop-in 220ms var(--motion-ease) both;
 }
 
 /* A keyboard-shortcut hint chip — "⌘K" next to an action that has one. */

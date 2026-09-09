@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { ordersApi } from '../../api/resources';
 import { errorMessage } from '../../api/client';
 import useFetch from '../../hooks/useFetch';
+import useCountUp from '../../hooks/useCountUp';
 import {
   Card,
   EmptyState,
@@ -102,7 +103,7 @@ export default function DeliveryBoard() {
         day say "2 overdue" above three red rows.
       */}
       {summary && (
-        <div className="bento-grid mb-5">
+        <div className="bento-grid stagger-children mb-5">
           {/* Overdue gets the wide tile — it is the one number on this board
               that means something already went wrong, not just "coming up". */}
           <div className="bento-lg">
@@ -195,6 +196,7 @@ export default function DeliveryBoard() {
 }
 
 function Tile({ label, value, tone }) {
+  const display = useCountUp(value);
   const tones = {
     critical: 'border-critical/25 bg-critical-wash text-critical-ink',
     warning: 'border-warning/30 bg-warning-wash text-warning-ink',
@@ -203,13 +205,13 @@ function Tile({ label, value, tone }) {
 
   return (
     <div
-      className={`rounded-xl border px-4 py-3 ${
+      className={`rounded-xl border px-4 py-3 transition-colors duration-300 ${
         // A zero is deliberately NOT coloured. A red tile reading "0 overdue"
         // is an alarm for something that is not happening.
         value > 0 ? tones[tone] : 'border-hairline bg-surface text-ink-2'
       }`}
     >
-      <p className="text-2xl font-semibold tabular">{value}</p>
+      <p className="text-2xl font-semibold tabular">{display}</p>
       <p className="mt-0.5 text-xs font-medium">{label}</p>
     </div>
   );
