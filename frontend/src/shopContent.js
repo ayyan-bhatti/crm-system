@@ -28,12 +28,12 @@ export const ANNOUNCEMENT = 'Free delivery on orders over $75 · Estimated arriv
 /** The full-bleed hero on the home page. */
 export const HERO = {
   eyebrow: 'New season',
-  headline: 'Made to be worn, not just bought.',
+  headline: 'Furniture made to be lived with.',
   body:
-    'A small catalogue, chosen carefully. Search it in plain language — ' +
-    '"something for a rainy weekend under $50" works.',
+    'A small, carefully chosen catalogue — solid materials, considered proportions, ' +
+    'nothing built to be replaced in two years.',
   primaryCta: { label: 'Shop everything', to: '/products' },
-  secondaryCta: { label: 'Browse by category', to: '/products?view=categories' },
+  secondaryCta: { label: 'Shop by room', to: '/rooms' },
 };
 
 /**
@@ -46,20 +46,69 @@ export const HERO = {
  */
 export const PROMOS = [
   {
-    eyebrow: 'The workspace edit',
-    headline: 'Everything for the desk you actually sit at',
-    body: 'Chairs, desks and the small things that make eight hours bearable.',
-    cta: 'Shop furniture',
-    category: 'Furniture',
+    eyebrow: 'The living room edit',
+    headline: 'Everything for the room you actually sit in',
+    body: 'Sofas, armchairs and the coffee tables that hold the coffee.',
+    cta: 'Shop sofas',
+    category: 'Sofas',
     tone: 'ink',
   },
   {
     eyebrow: 'Restock',
-    headline: 'The bits that always run out',
-    body: 'Paper, markers, and the rest of the drawer nobody thinks about until it is empty.',
-    cta: 'Shop supplies',
-    category: 'Supplies',
+    headline: 'The small pieces that finish a room',
+    body: 'Vases, throws and the cushions nobody thinks about until the sofa looks bare.',
+    cta: 'Shop accessories',
+    category: 'Accessories',
     tone: 'wash',
+  },
+];
+
+/**
+ * The "What are you looking for?" category grid on the homepage. Each image
+ * is the same hand-picked, verified Unsplash photo used for that category's
+ * own products in the seed catalogue (see backend/src/seed.js) — reusing it
+ * here rather than sourcing a separate "category hero" image keeps every
+ * photo on the site traceable to a real, checked source instead of doubling
+ * the surface area of things that could go stale or 404.
+ */
+export const CATEGORY_DISCOVERY = [
+  { name: 'Sofas', image: '1600210491369-e753d80a41f3' },
+  { name: 'Armchairs', image: '1759722666941-a90d5a15b1d7' },
+  { name: 'Dining Tables', image: '1758977404607-9d6217cad08a' },
+  { name: 'Beds', image: '1616594039964-ae9021a400a0' },
+  { name: 'Storage', image: '1541123603104-512919d6a96c' },
+  { name: 'Rugs', image: '1736580602768-3e06e97d7288' },
+  { name: 'Lighting', image: '1494438639946-1ebd1d20bf85' },
+  { name: 'Outdoor', image: '1777052854737-7893f50de539' },
+];
+
+/**
+ * Furniture categories grouped by the room they furnish, for the storefront's
+ * "Shop by room" page and the header's "Rooms" link. Not a schema field —
+ * `Product.category` stays the one real taxonomy the API filters by, and a
+ * room is just a named set of those categories, so this list is the only
+ * place a new room needs to be taught which categories belong to it.
+ */
+export const ROOMS = [
+  {
+    slug: 'living-room',
+    name: 'Living Room',
+    categories: ['Sofas', 'Armchairs', 'Coffee Tables', 'Rugs', 'Side Tables'],
+  },
+  {
+    slug: 'dining-room',
+    name: 'Dining Room',
+    categories: ['Dining Tables', 'Dining Chairs', 'Storage', 'Lighting'],
+  },
+  {
+    slug: 'bedroom',
+    name: 'Bedroom',
+    categories: ['Beds', 'Storage', 'Side Tables', 'Textiles'],
+  },
+  {
+    slug: 'outdoor',
+    name: 'Outdoor',
+    categories: ['Outdoor'],
   },
 ];
 

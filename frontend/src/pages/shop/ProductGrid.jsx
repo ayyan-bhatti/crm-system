@@ -30,10 +30,12 @@ export default function ProductGrid() {
   const [quickView, setQuickView] = useState(null);
 
   const category = params.get('category') || '';
+  const brand = params.get('brand') || '';
   const colour = params.get('color') || '';
   const minPrice = params.get('minPrice') || '';
   const maxPrice = params.get('maxPrice') || '';
   const inStockOnly = params.get('inStock') === 'true';
+  const newArrivalOnly = params.get('newArrival') === 'true';
   const sort = params.get('sort') || 'name';
   const page = Number(params.get('page')) || 1;
   const activeQuery = params.get('q') || '';
@@ -57,13 +59,26 @@ export default function ProductGrid() {
       page,
       limit: 12,
       category: category || undefined,
+      brand: brand || undefined,
       color: colour || undefined,
       minPrice: minPrice || undefined,
       maxPrice: maxPrice || undefined,
       inStock: inStockOnly ? 'true' : undefined,
+      newArrival: newArrivalOnly ? 'true' : undefined,
       sort,
     });
-  }, [activeQuery, page, category, colour, minPrice, maxPrice, inStockOnly, sort]);
+  }, [
+    activeQuery,
+    page,
+    category,
+    brand,
+    colour,
+    minPrice,
+    maxPrice,
+    inStockOnly,
+    newArrivalOnly,
+    sort,
+  ]);
 
   /**
    * Write one filter into the URL, dropping the page.
@@ -95,12 +110,26 @@ export default function ProductGrid() {
   const products = data?.data || [];
   const pagination = data?.pagination;
   const filtersApplied = Boolean(
-    category || colour || minPrice || maxPrice || inStockOnly || activeQuery
+    category || brand || colour || minPrice || maxPrice || inStockOnly || newArrivalOnly || activeQuery
   );
+
+  /*
+   * A page title that says what's actually being shown, rather than always
+   * "Shop" — a designer's page and the new-arrivals link both route through
+   * this same grid, and a heading that never changes makes either look like
+   * it landed somewhere generic rather than on the thing that was clicked.
+   */
+  const heading = brand
+    ? brand
+    : newArrivalOnly
+      ? 'New Arrivals'
+      : category && !category.includes(',')
+        ? category
+        : 'Shop';
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6">
-      <h1 className="font-display mb-6 text-3xl font-semibold text-ink">Shop</h1>
+      <h1 className="font-display mb-6 text-3xl font-semibold text-ink">{heading}</h1>
 
       <form onSubmit={submitSearch} className="mb-6 flex gap-2">
         <input

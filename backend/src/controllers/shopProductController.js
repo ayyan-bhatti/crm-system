@@ -24,7 +24,17 @@ const { containsRegex, getPagination } = require('../utils/queryHelpers');
  */
 const PUBLIC_PRODUCT_FIELDS =
   'name price description imageUrl images category stockQty lowStockThreshold variants ' +
-  'createdAt brand tags featured salePrice rating';
+  'createdAt brand tags featured salePrice rating subcategory materials dimensions newArrival';
+
+/**
+ * Every public query is scoped to this. `{ $ne: false }` rather than
+ * `{ $eq: true }` on purpose: it matches both an explicit `true` and a
+ * document that predates the field entirely (which has no `isActive` at
+ * all), and only excludes one that has been explicitly archived. See the
+ * long note on `Product.isActive` for why the field itself defaults the
+ * same way.
+ */
+const ACTIVE_FILTER = { isActive: { $ne: false } };
 
 /**
  * `in stock` as a boolean is the public fact; the exact count is not.
@@ -138,6 +148,10 @@ function toPublicShape(product) {
       average: product.rating?.average || 0,
       count: product.rating?.count || 0,
     },
+    subcategory: product.subcategory || '',
+    materials: product.materials || [],
+    dimensions: product.dimensions || null,
+    newArrival: Boolean(product.newArrival),
   };
 }
 
@@ -171,13 +185,27 @@ const PUBLIC_SORTS = {
  * Paging:  ?page= ?limit=
  */
 const listPublicProducts = asyncHandler(async (req, res) => {
-  const { category, search, minPrice, maxPrice, color, inStock, sort, featured } = req.query;
+  const { category, subcategory, brand, search, minPrice, maxPrice, color, inStock, sort } =
+    req.query;
+  const { featured, newArrival } = req.query;
   const { page, limit, skip } = getPagination(req.query);
 
-  const filter = {};
-  if (category) filter.category = category;
+  const filter = { ...ACTIVE_FILTER };
+  /*
+   * The "shop by room" page asks for several categories at once (a living
+   * room is Sofas AND Armchairs AND Coffee Tables, not just one) — a comma
+   * list is the whole of that support, rather than a second query parameter
+   * a room page would have to build differently from every other caller.
+   */
+  if (category) {
+    const categories = category.split(',').map((c) => c.trim()).filter(Boolean);
+    filter.category = categories.length > 1 ? { $in: categories } : categories[0];
+  }
+  if (subcategory) filter.subcategory = subcategory;
+  if (brand) filter.brand = brand;
   if (search) filter.name = containsRegex(search);
   if (featured === 'true') filter.featured = true;
+  if (newArrival === 'true') filter.newArrival = true;
 
   /*
    * Price range. Each bound is applied only if it parses as a number, so a
@@ -241,8 +269,29 @@ const listPublicProducts = asyncHandler(async (req, res) => {
  * public counterpart, returning distinct category names and nothing else.
  */
 const listPublicCategories = asyncHandler(async (req, res) => {
-  const categories = await Product.distinct('category');
+  const categories = await Product.distinct('category', ACTIVE_FILTER);
   res.json({ success: true, data: categories.filter(Boolean).sort() });
+});
+
+/**
+ * GET /api/shop/products/brands — public.
+ *
+ * Every designer/brand with at least one active product, and how many —
+ * the storefront's "Designers" page and header link. A count rather than a
+ * bare name list because "12 pieces" is what makes a designer page feel like
+ * a real catalogue rather than a directory of names nobody can act on.
+ */
+const listPublicBrands = asyncHandler(async (req, res) => {
+  const brands = await Product.aggregate([
+    { $match: { ...ACTIVE_FILTER, brand: { $nin: [null, ''] } } },
+    { $group: { _id: '$brand', count: { $sum: 1 } } },
+    { $sort: { _id: 1 } },
+  ]);
+
+  res.json({
+    success: true,
+    data: brands.map((b) => ({ name: b._id, count: b.count })),
+  });
 });
 
 /**
@@ -254,7 +303,7 @@ const listPublicCategories = asyncHandler(async (req, res) => {
  * differently.
  */
 const listPublicColours = asyncHandler(async (req, res) => {
-  const products = await Product.find({ 'variants.0': { $exists: true } })
+  const products = await Product.find({ ...ACTIVE_FILTER, 'variants.0': { $exists: true } })
     .select('variants.color')
     .lean();
 
@@ -277,7 +326,9 @@ const listPublicColours = asyncHandler(async (req, res) => {
 
 /** GET /api/shop/products/:id */
 const getPublicProduct = asyncHandler(async (req, res) => {
-  const product = await Product.findById(req.params.id).select(PUBLIC_PRODUCT_FIELDS).lean();
+  const product = await Product.findOne({ _id: req.params.id, ...ACTIVE_FILTER })
+    .select(PUBLIC_PRODUCT_FIELDS)
+    .lean();
 
   if (!product) throw ApiError.notFound('Product not found');
 
@@ -330,6 +381,7 @@ const getRecommendations = asyncHandler(async (req, res) => {
 module.exports = {
   listPublicProducts,
   listPublicCategories,
+  listPublicBrands,
   listPublicColours,
   getPublicProduct,
   searchProducts,

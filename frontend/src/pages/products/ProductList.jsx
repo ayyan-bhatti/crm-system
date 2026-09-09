@@ -158,6 +158,11 @@ export default function ProductList() {
                             Featured
                           </span>
                         )}
+                        {product.isActive === false && (
+                          <span className="ml-2 rounded-full bg-neutral-wash px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-neutral-ink">
+                            Inactive
+                          </span>
+                        )}
                         <p className="label-mono mt-0.5">
                           {product.sku}
                           {product.brand ? ` · ${product.brand}` : ''}

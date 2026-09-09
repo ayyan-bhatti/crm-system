@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, Outlet, useLocation } from 'react-router-dom';
 import { useBuyerAuth } from '../context/BuyerAuthContext';
 import { useCart } from '../context/CartContext';
+import { useWishlist } from '../context/WishlistContext';
 import { shopProductsApi, shopNewsletterApi, shopMessagesApi } from '../api/shopResources';
 import { errorMessage } from '../api/client';
 import CartDrawer from './CartDrawer';
@@ -20,6 +21,7 @@ import { input } from '../ui';
 export default function ShopLayout() {
   const { buyer, isSignedIn, logout } = useBuyerAuth();
   const { count } = useCart();
+  const { count: wishlistCount } = useWishlist();
   const [cartOpen, setCartOpen] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [categories, setCategories] = useState([]);
@@ -99,6 +101,18 @@ export default function ShopLayout() {
 
           <MegaMenu categories={categories} />
 
+          <nav className="hidden items-center gap-5 lg:flex">
+            <Link to="/rooms" className="text-sm text-ink-2 hover:text-ink">
+              Rooms
+            </Link>
+            <Link to="/designers" className="text-sm text-ink-2 hover:text-ink">
+              Designers
+            </Link>
+            <Link to="/products?newArrival=true" className="text-sm text-ink-2 hover:text-ink">
+              New Arrivals
+            </Link>
+          </nav>
+
           <nav className="ml-auto flex items-center gap-4 text-sm">
             {/* No sign-in required — a guest checkout has no account to sign into. */}
             <Link to="/track" className="hidden text-ink-2 hover:text-ink sm:inline">
@@ -140,6 +154,21 @@ export default function ShopLayout() {
               </Link>
             )}
 
+            <Link
+              to="/wishlist"
+              className="relative hidden items-center gap-1.5 text-ink-2 hover:text-ink sm:inline-flex"
+              aria-label={`Wishlist, ${wishlistCount} saved item${wishlistCount === 1 ? '' : 's'}`}
+            >
+              <svg viewBox="0 0 20 20" className="h-4 w-4 fill-current" aria-hidden="true">
+                <path d="M10 17.3l-1.1-1C4.9 12.9 2.5 10.8 2.5 7.9 2.5 5.6 4.3 4 6.5 4c1.3 0 2.5.6 3.5 1.7C11 4.6 12.2 4 13.5 4c2.2 0 4 1.6 4 3.9 0 2.9-2.4 5-6.4 8.4l-1.1 1z" />
+              </svg>
+              {wishlistCount > 0 && (
+                <span className="rounded-full bg-brand px-1.5 text-xs font-semibold text-ink">
+                  {wishlistCount}
+                </span>
+              )}
+            </Link>
+
             <button
               type="button"
               onClick={() => setCartOpen(true)}
@@ -178,6 +207,15 @@ export default function ShopLayout() {
             <Link to="/products" className="block py-2 text-sm font-medium text-ink">
               All products
             </Link>
+            <Link to="/rooms" className="block py-2 text-sm font-medium text-ink">
+              Rooms
+            </Link>
+            <Link to="/designers" className="block py-2 text-sm font-medium text-ink">
+              Designers
+            </Link>
+            <Link to="/products?newArrival=true" className="block py-2 text-sm font-medium text-ink">
+              New Arrivals
+            </Link>
             {categories.map((category) => (
               <Link
                 key={category}
@@ -198,6 +236,9 @@ export default function ShopLayout() {
                   </Link>
                 </>
               )}
+              <Link to="/wishlist" className="block py-2 text-sm text-ink-2">
+                Wishlist{wishlistCount > 0 ? ` (${wishlistCount})` : ''}
+              </Link>
               <Link to="/track" className="block py-2 text-sm text-ink-2">
                 Track order
               </Link>

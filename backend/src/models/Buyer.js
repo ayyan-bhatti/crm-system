@@ -101,6 +101,18 @@ const buyerSchema = new mongoose.Schema({
   },
 
   /**
+   * Saved-for-later products. A plain array of references rather than a
+   * separate collection like `Cart` — there is no quantity, no variant, and
+   * no checkout-time price to resolve, so the extra document buys nothing a
+   * `Cart` needs it for. A guest's wishlist lives in `localStorage`, exactly
+   * like a guest's cart, and is merged in here the first time they sign in.
+   */
+  wishlist: {
+    type: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Product' }],
+    default: [],
+  },
+
+  /**
    * The CRM `Customer` record this buyer's orders roll up under, set the
    * first time they check out. A sales rep follows up with the `Customer`,
    * not the `Buyer` — this is what lets that happen.

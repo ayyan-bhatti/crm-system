@@ -10,7 +10,17 @@ import ProductCard from './ProductCard';
  * The badge rule is the part worth pinning: AT MOST ONE badge, chosen by
  * urgency. Stacking "New" and "Low stock" is how a grid becomes unreadable, and
  * once every card has a badge none of them means anything.
+ *
+ * `WishlistContext` is mocked rather than rendered through a real
+ * `WishlistProvider` — this file is testing the card's own badge/swatch/
+ * quick-view logic, not the wishlist, and a real provider would need a
+ * `BuyerAuthProvider` above it and a mocked auth API just to mount, the same
+ * reasoning `CartContext.test.jsx` gives for mocking `BuyerAuthContext`
+ * directly instead.
  */
+vi.mock('../../context/WishlistContext', () => ({
+  useWishlist: () => ({ has: () => false, toggle: () => {} }),
+}));
 
 function product(overrides = {}) {
   return {

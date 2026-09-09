@@ -54,6 +54,7 @@ export const shopProductsApi = {
    * like a category filter that was never built.
    */
   categories: () => shopClient.get('/shop/products/categories').then((r) => r.data.data),
+  brands: () => shopClient.get('/shop/products/brands').then((r) => r.data.data),
   colours: () => shopClient.get('/shop/products/colours').then((r) => r.data.data),
 };
 
@@ -85,6 +86,15 @@ export const shopCartApi = {
       .delete(`/shop/cart/items/${product}`, { params: variantId ? { variantId } : {} })
       .then((r) => r.data.data),
   merge: (items) => shopClient.post('/shop/cart/merge', { items }).then((r) => r.data.data),
+};
+
+export const shopWishlistApi = {
+  get: () => shopClient.get('/shop/wishlist').then((r) => r.data.data),
+  add: (productId) => shopClient.post('/shop/wishlist', { productId }).then((r) => r.data.data),
+  remove: (productId) =>
+    shopClient.delete(`/shop/wishlist/${productId}`).then((r) => r.data.data),
+  merge: (productIds) =>
+    shopClient.post('/shop/wishlist/merge', { productIds }).then((r) => r.data.data),
 };
 
 export const shopCheckoutApi = {

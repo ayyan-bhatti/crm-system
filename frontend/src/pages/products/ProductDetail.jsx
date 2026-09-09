@@ -85,12 +85,36 @@ export default function ProductDetail() {
             value={product.stockQty}
             emphasis={product.isLowStock ? 'text-critical-ink' : undefined}
           />
-          <Detail label="Category" value={product.category} />
-          <Detail label="Brand" value={product.brand || '—'} />
+          <Detail
+            label="Category"
+            value={product.subcategory ? `${product.category} · ${product.subcategory}` : product.category}
+          />
+          <Detail label="Brand / designer" value={product.brand || '—'} />
           <Detail label="Low stock threshold" value={product.lowStockThreshold} />
           <Detail label="SKU" value={product.sku} mono />
           <Detail label="Featured" value={product.featured ? 'Yes' : 'No'} />
+          <Detail label="New arrival" value={product.newArrival ? 'Yes' : 'No'} />
+          <Detail
+            label="Status"
+            value={product.isActive === false ? 'Inactive (hidden from store)' : 'Active'}
+            emphasis={product.isActive === false ? 'text-critical-ink' : undefined}
+          />
           <Detail label="Added" value={formatDate(product.createdAt)} />
+          {product.dimensions && (product.dimensions.width || product.dimensions.height || product.dimensions.depth) && (
+            <Detail
+              label="Dimensions"
+              value={[
+                product.dimensions.width && `W ${product.dimensions.width}`,
+                product.dimensions.height && `H ${product.dimensions.height}`,
+                product.dimensions.depth && `D ${product.dimensions.depth}`,
+              ]
+                .filter(Boolean)
+                .join(' × ') + ` ${product.dimensions.unit || 'cm'}`}
+            />
+          )}
+          {product.materials?.length > 0 && (
+            <Detail label="Materials" value={product.materials.join(', ')} />
+          )}
         </dl>
 
         {product.tags?.length > 0 && (

@@ -2,6 +2,7 @@ const express = require('express');
 const {
   listPublicProducts,
   listPublicCategories,
+  listPublicBrands,
   listPublicColours,
   getPublicProduct,
   searchProducts,
@@ -17,6 +18,7 @@ const router = express.Router();
 // "categories" and "colours" as product ids and answer 404 for all three.
 router.get('/search', searchProducts);
 router.get('/categories', listPublicCategories);
+router.get('/brands', listPublicBrands);
 router.get('/colours', listPublicColours);
 router.get('/', listPublicProducts);
 router.get('/:id', getPublicProduct);

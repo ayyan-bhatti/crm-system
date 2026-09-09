@@ -5,7 +5,7 @@ import { shopProductsApi } from '../../api/shopResources';
 import { Spinner, ErrorBanner, EmptyState } from '../../components/common';
 import ProductCard from '../../components/shop/ProductCard';
 import QuickViewModal from '../../components/shop/QuickViewModal';
-import { HERO, PROMOS } from '../../shopContent';
+import { CATEGORY_DISCOVERY, HERO, PROMOS } from '../../shopContent';
 
 /**
  * The storefront's front page: hero, a featured grid, and two promotional
@@ -30,6 +30,8 @@ export default function ShopHome() {
   return (
     <div>
       <Hero />
+
+      <CategoryDiscovery />
 
       {featured && featured.data.length > 0 && (
         <section className="mx-auto max-w-7xl px-4 pt-14 sm:px-6">
@@ -86,6 +88,44 @@ export default function ShopHome() {
         <QuickViewModal product={quickView} onClose={() => setQuickView(null)} />
       )}
     </div>
+  );
+}
+
+/** "What are you looking for?" — a hover-interactive grid of real categories. */
+function CategoryDiscovery() {
+  return (
+    <section className="mx-auto max-w-7xl px-4 pt-14 sm:px-6">
+      <div className="mb-6">
+        <p className="label-mono">Browse</p>
+        <h2 className="font-display mt-1 text-2xl font-semibold text-ink">
+          What are you looking for?
+        </h2>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+        {CATEGORY_DISCOVERY.map((entry) => (
+          <Link
+            key={entry.name}
+            to={`/products?category=${encodeURIComponent(entry.name)}`}
+            className="group relative aspect-[4/5] overflow-hidden rounded-xl bg-neutral-wash"
+          >
+            <img
+              src={`https://images.unsplash.com/photo-${entry.image}?w=500&q=75&auto=format&fit=crop`}
+              alt=""
+              loading="lazy"
+              className="absolute inset-0 h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+            />
+            <div
+              aria-hidden="true"
+              className="absolute inset-0 bg-gradient-to-t from-black/55 via-black/0 to-black/0"
+            />
+            <span className="absolute inset-x-0 bottom-0 p-4 font-display text-lg font-semibold text-white">
+              {entry.name}
+            </span>
+          </Link>
+        ))}
+      </div>
+    </section>
   );
 }
 

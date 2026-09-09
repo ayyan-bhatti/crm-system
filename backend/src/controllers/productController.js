@@ -247,6 +247,11 @@ const createProduct = asyncHandler(async (req, res) => {
     featured,
     salePrice,
     rating,
+    subcategory,
+    materials,
+    dimensions,
+    newArrival,
+    isActive,
   } = req.body;
 
   // Required on CREATE only, not on the schema itself — every product seeded
@@ -282,6 +287,11 @@ const createProduct = asyncHandler(async (req, res) => {
     featured,
     salePrice,
     rating,
+    subcategory,
+    materials,
+    dimensions,
+    newArrival,
+    isActive,
     ...(variants ? { variants } : {}),
     ...(images ? { images } : {}),
   });
@@ -318,6 +328,11 @@ const updateProduct = asyncHandler(async (req, res) => {
     'featured',
     'salePrice',
     'rating',
+    'subcategory',
+    'materials',
+    'dimensions',
+    'newArrival',
+    'isActive',
   ];
   editable.forEach((field) => {
     if (req.body[field] !== undefined) product[field] = req.body[field];

@@ -13,6 +13,7 @@ import ProductImage from '../../components/shop/ProductImage';
 import RatingStars from '../../components/shop/RatingStars';
 import VariantPicker from '../../components/shop/VariantPicker';
 import QuantityStepper from '../../components/shop/QuantityStepper';
+import WishlistButton from '../../components/shop/WishlistButton';
 import { money, btnPrimary, btnSecondary, galleryFor, priceRange } from '../../ui';
 
 /**
@@ -299,6 +300,8 @@ export default function ShopProductDetail() {
               >
                 {adding ? <Spinner /> : 'Add to cart'}
               </button>
+
+              <WishlistButton product={product} variant="button" />
             </div>
 
             {/*

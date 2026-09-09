@@ -3,6 +3,7 @@ import { BrowserRouter, Navigate, Outlet, Route, Routes } from 'react-router-dom
 import { AuthProvider } from './context/AuthContext';
 import { BuyerAuthProvider } from './context/BuyerAuthContext';
 import { CartProvider } from './context/CartContext';
+import { WishlistProvider } from './context/WishlistContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import DashboardLayout from './components/DashboardLayout';
 import ShopLayout from './components/ShopLayout';
@@ -84,6 +85,8 @@ const AutomationLog = lazy(() => import('./pages/marketing/AutomationLog'));
 
 const ShopHome = lazy(() => import('./pages/shop/Home'));
 const ShopProductGrid = lazy(() => import('./pages/shop/ProductGrid'));
+const Rooms = lazy(() => import('./pages/shop/Rooms'));
+const Designers = lazy(() => import('./pages/shop/Designers'));
 const ShopProductDetail = lazy(() => import('./pages/shop/ProductDetail'));
 const BuyerLogin = lazy(() => import('./pages/shop/BuyerLogin'));
 const BuyerRegister = lazy(() => import('./pages/shop/BuyerRegister'));
@@ -96,6 +99,7 @@ const BuyerAccount = lazy(() => import('./pages/shop/BuyerAccount'));
 const Unsubscribe = lazy(() => import('./pages/shop/Unsubscribe'));
 const ShopVerifyEmail = lazy(() => import('./pages/shop/VerifyEmail'));
 const TrackOrder = lazy(() => import('./pages/shop/TrackOrder'));
+const Wishlist = lazy(() => import('./pages/shop/Wishlist'));
 
 /**
  * Mounts the buyer session and cart contexts around the whole `/shop` tree,
@@ -108,7 +112,9 @@ function ShopRoot() {
   return (
     <BuyerAuthProvider>
       <CartProvider>
-        <Outlet />
+        <WishlistProvider>
+          <Outlet />
+        </WishlistProvider>
       </CartProvider>
     </BuyerAuthProvider>
   );
@@ -145,6 +151,8 @@ export default function App() {
                     <Route index element={<ShopHome />} />
                     <Route path="products" element={<ShopProductGrid />} />
                     <Route path="products/:id" element={<ShopProductDetail />} />
+                    <Route path="rooms" element={<Rooms />} />
+                    <Route path="designers" element={<Designers />} />
                     <Route path="login" element={<BuyerLogin />} />
                     <Route path="register" element={<BuyerRegister />} />
                     {/* Buyer sign-in required — see the note at the top of
@@ -193,6 +201,9 @@ export default function App() {
                       parcel without one. See TrackOrder.jsx.
                     */}
                     <Route path="track" element={<TrackOrder />} />
+                    {/* Public — a wishlist is meaningful before there is any
+                        reason to have an account. See WishlistContext. */}
+                    <Route path="wishlist" element={<Wishlist />} />
                   </Route>
                 </Route>
 

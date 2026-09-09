@@ -38,7 +38,14 @@ export default function ProductForm() {
     brand: '',
     tags: '',
     featured: false,
+    newArrival: false,
+    isActive: true,
     salePrice: '',
+    subcategory: '',
+    materials: '',
+    width: '',
+    height: '',
+    depth: '',
   });
   const [variants, setVariants] = useState([]);
   const [images, setImages] = useState('');
@@ -74,7 +81,14 @@ export default function ProductForm() {
       brand: existing.brand || '',
       tags: (existing.tags || []).join(', '),
       featured: Boolean(existing.featured),
+      newArrival: Boolean(existing.newArrival),
+      isActive: existing.isActive !== false,
       salePrice: existing.salePrice == null ? '' : String(existing.salePrice),
+      subcategory: existing.subcategory || '',
+      materials: (existing.materials || []).join(', '),
+      width: existing.dimensions?.width == null ? '' : String(existing.dimensions.width),
+      height: existing.dimensions?.height == null ? '' : String(existing.dimensions.height),
+      depth: existing.dimensions?.depth == null ? '' : String(existing.dimensions.depth),
     });
 
     /*
@@ -123,8 +137,10 @@ export default function ProductForm() {
     setSubmitting(true);
     setError('');
 
+    const { width, height, depth, ...rest } = form;
+
     const payload = {
-      ...form,
+      ...rest,
       price: Number(form.price),
       stockQty: hasVariants ? variantStockTotal : Number(form.stockQty),
       lowStockThreshold: Number(form.lowStockThreshold),
@@ -132,6 +148,16 @@ export default function ProductForm() {
         .split(',')
         .map((tag) => tag.trim())
         .filter(Boolean),
+      materials: form.materials
+        .split(',')
+        .map((material) => material.trim())
+        .filter(Boolean),
+      dimensions: {
+        width: width === '' ? null : Number(width),
+        height: height === '' ? null : Number(height),
+        depth: depth === '' ? null : Number(depth),
+        unit: 'cm',
+      },
       salePrice: form.salePrice === '' ? null : Number(form.salePrice),
       images: images
         .split('\n')
@@ -271,7 +297,7 @@ export default function ProductForm() {
                   onChange={(e) => update('tags', e.target.value)}
                 />
               </div>
-              <label className="flex items-center gap-2 text-sm text-ink-2 sm:col-span-2">
+              <label className="flex items-center gap-2 text-sm text-ink-2">
                 <input
                   type="checkbox"
                   checked={form.featured}
@@ -280,8 +306,66 @@ export default function ProductForm() {
                 />
                 Feature on the storefront homepage
               </label>
+              <label className="flex items-center gap-2 text-sm text-ink-2">
+                <input
+                  type="checkbox"
+                  checked={form.newArrival}
+                  onChange={(e) => update('newArrival', e.target.checked)}
+                  className="h-4 w-4 rounded border-hairline"
+                />
+                Show in &quot;New Arrivals&quot;
+              </label>
             </div>
           </fieldset>
+
+          <fieldset className="rounded-lg border border-hairline bg-plane p-4">
+            <legend className="px-1 text-sm font-semibold text-ink">Furniture details</legend>
+            <div className="mt-2 grid gap-4 sm:grid-cols-2">
+              <Field
+                label="Subcategory"
+                hint="A finer cut within the category, e.g. &quot;Lounge Chair&quot;."
+                value={form.subcategory}
+                onChange={(e) => update('subcategory', e.target.value)}
+              />
+              <Field
+                label="Materials"
+                hint="Comma-separated, e.g. &quot;Oak, brass&quot;."
+                value={form.materials}
+                onChange={(e) => update('materials', e.target.value)}
+              />
+              <Field
+                label="Width (cm)"
+                type="number"
+                min="0"
+                value={form.width}
+                onChange={(e) => update('width', e.target.value)}
+              />
+              <Field
+                label="Height (cm)"
+                type="number"
+                min="0"
+                value={form.height}
+                onChange={(e) => update('height', e.target.value)}
+              />
+              <Field
+                label="Depth (cm)"
+                type="number"
+                min="0"
+                value={form.depth}
+                onChange={(e) => update('depth', e.target.value)}
+              />
+            </div>
+          </fieldset>
+
+          <label className="flex items-center gap-2 text-sm text-ink-2">
+            <input
+              type="checkbox"
+              checked={form.isActive}
+              onChange={(e) => update('isActive', e.target.checked)}
+              className="h-4 w-4 rounded border-hairline"
+            />
+            Active — visible on the storefront
+          </label>
 
           <Field
             label="More images"

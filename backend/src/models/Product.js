@@ -231,6 +231,74 @@ const productSchema = new mongoose.Schema({
   },
 
   /**
+   * A finer cut within `category` — "Lounge Chair" within "Armchairs", say.
+   * Optional and free-text for the same reason `category` itself is: this
+   * app has no admin-managed taxonomy tree, so a second free-text field is
+   * the honest shape rather than a category/subcategory relation nothing
+   * else here needs.
+   */
+  subcategory: {
+    type: String,
+    trim: true,
+    default: '',
+    maxlength: [60, 'Subcategory cannot exceed 60 characters'],
+  },
+
+  /**
+   * What it's made of — "Oak, brass", "Bouclé, beechwood" — shown on the
+   * product page under the description. A list rather than one string so
+   * the page can render it as a tidy comma-joined line without the catalogue
+   * having to get punctuation right by hand on every product.
+   */
+  materials: {
+    type: [String],
+    default: [],
+    validate: {
+      validator: (list) => list.length <= 8,
+      message: 'A product can have at most 8 materials',
+    },
+  },
+
+  /**
+   * Physical size, for furniture where "will it fit" is the question a photo
+   * cannot answer. All three are optional independently — a rug has no
+   * height, a wall mirror has no depth — so this is not a single required
+   * block, just three numbers that render only the ones present.
+   */
+  dimensions: {
+    width: { type: Number, min: 0, default: null },
+    height: { type: Number, min: 0, default: null },
+    depth: { type: Number, min: 0, default: null },
+    unit: { type: String, trim: true, default: 'cm' },
+  },
+
+  /**
+   * A merchandiser's explicit call, like `featured` — NOT derived from
+   * `createdAt`. The catalogue needs to survive being re-seeded or bulk
+   * imported without every product suddenly reading as brand new just
+   * because its `createdAt` is today; this is set on purpose, per product,
+   * the same way a real store's "New in" rail is curated rather than a
+   * mechanical sort by upload date.
+   */
+  newArrival: {
+    type: Boolean,
+    default: false,
+  },
+
+  /**
+   * The archive flag. An inactive product is a soft delete: it stays in the
+   * database (every existing order line, cart entry and audit record still
+   * resolves it) but is excluded from the public catalogue, search and
+   * category listings — see the `filter.isActive` line in every public shop
+   * query. Defaults to `true` so every product that existed before this
+   * field did keeps behaving exactly as it always did.
+   */
+  isActive: {
+    type: Boolean,
+    default: true,
+  },
+
+  /**
    * Colour (and optionally size) combinations, each with its own stock.
    *
    * EMPTY IS A FIRST-CLASS STATE, NOT A MISSING ONE. A product with no variants

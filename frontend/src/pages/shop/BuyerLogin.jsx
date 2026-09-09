@@ -81,6 +81,19 @@ export default function BuyerLogin() {
             Create an account
           </Link>
         </p>
+
+        {/*
+          Deliberately quiet — a small line under the actual sign-in form,
+          not a second tab or a toggle competing with it. A shopper never
+          needs to see it register; the one visitor it is for is looking
+          for exactly this sentence and nothing else on the page.
+        */}
+        <p className="mt-8 text-center text-xs text-muted">
+          Are you an admin or staff member?{' '}
+          <Link to="/crm/login" className="font-medium text-ink-2 hover:text-ink hover:underline">
+            Login to CRM
+          </Link>
+        </p>
       </div>
     </div>
   );

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import ColourSwatches from './ColourSwatches';
 import RatingStars from './RatingStars';
+import WishlistButton from './WishlistButton';
 import { money, galleryFor, priceRange } from '../../ui';
 import ProductImage from './ProductImage';
 
@@ -58,6 +59,8 @@ export default function ProductCard({ product, onQuickView }) {
           )}
 
           <ProductBadge product={product} />
+
+          <WishlistButton product={product} className="absolute right-2.5 top-2.5" />
 
           {!product.inStock && (
             <div className="absolute inset-0 flex items-center justify-center bg-surface/60">
