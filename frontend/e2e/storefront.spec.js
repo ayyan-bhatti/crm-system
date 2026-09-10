@@ -62,6 +62,38 @@ async function signInBuyer(page, creds = BUYER) {
   await expect(page).not.toHaveURL(/\/login/);
 }
 
+/**
+ * Press "Request cancellation" and answer the confirmation it raises.
+ *
+ * THIS USED TO BE `page.once('dialog', (d) => d.accept())`, AND THAT HAD
+ * STOPPED MEANING ANYTHING.
+ *
+ * That handler waits for a NATIVE browser dialog, and there has not been one
+ * to wait for since `window.confirm` was replaced by a styled
+ * `role="alertdialog"` modal (see components/ConfirmDialog.jsx — the app has
+ * no `window.confirm` call left anywhere). So the handler never fired, the
+ * modal stayed open and unanswered, `confirm()` never resolved true, the
+ * request was never sent, and the assertion on the next line waited out its
+ * full ten seconds for a toast that was never coming.
+ *
+ * The reason this read as a timing flake rather than a broken interaction is
+ * that a native-dialog handler CANNOT fail loudly: no dialog is not an error,
+ * it is simply a handler that never runs. The only visible symptom is the
+ * assertion that comes after it, timing out — which looks exactly like a slow
+ * page and nothing like an un-clicked button.
+ *
+ * The confirming button is scoped to the dialog because it deliberately
+ * repeats the trigger's own label, so an unscoped lookup matches both buttons
+ * and fails Playwright's strict mode.
+ */
+async function requestCancellation(page) {
+  await page.getByRole('button', { name: /request cancellation/i }).click();
+  await page
+    .getByRole('alertdialog')
+    .getByRole('button', { name: /request cancellation/i })
+    .click();
+}
+
 test.describe('Catalogue', () => {
   test('the home page shows the seeded product in the New in grid', async ({ page }) => {
     await page.goto('/');
@@ -473,8 +505,7 @@ test.describe('Buyer order history and actions', () => {
     // A second request against the same order is refused server-side while
     // one is outstanding — proves the request really landed, not just the
     // toast.
-    page.once('dialog', (dialog) => dialog.accept());
-    await page.getByRole('button', { name: /request cancellation/i }).click();
+    await requestCancellation(page);
     await expect(page.getByText(/already a change waiting for approval/i)).toBeVisible();
   });
 });
@@ -512,8 +543,7 @@ test.describe('Staff decide the buyer requests', () => {
     await signInBuyer(buyerPage);
     await buyerPage.goto('/account/orders');
     await buyerPage.getByRole('link').filter({ hasText: /^ORD-|^#/ }).first().click();
-    buyerPage.once('dialog', (dialog) => dialog.accept());
-    await buyerPage.getByRole('button', { name: /request cancellation/i }).click();
+    await requestCancellation(buyerPage);
     await expect(
       buyerPage.getByText(/cancellation request has been sent for approval/i)
     ).toBeVisible();
