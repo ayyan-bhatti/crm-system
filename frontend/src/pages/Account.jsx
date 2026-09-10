@@ -3,8 +3,15 @@ import { authApi } from '../api/resources';
 import { errorMessage } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/Toast';
-import { Card, ErrorBanner, Field, PageHeader, Spinner } from '../components/common';
-import { btnPrimary, formatDate, humanize } from '../ui';
+import {
+  Button,
+  Card,
+  ErrorBanner,
+  Field,
+  PageHeader,
+  StatusBadge,
+} from '../components/common';
+import { formatDate } from '../ui';
 
 /**
  * The signed-in user's own account: who they are, and changing their password.
@@ -53,6 +60,12 @@ export default function Account() {
    * Checked here and nowhere else. The server has no opinion about the
    * confirmation field — it exists so a typo in a password nobody can see does
    * not lock someone out of their own account.
+   *
+   * REPORTED AS SOON AS THE SECOND FIELD HAS ANYTHING IN IT, rather than on
+   * blur like the rest of the app's validation. Two password fields are the one
+   * case where waiting is wrong: the user cannot see either value, so the only
+   * way they learn they mistyped is this message, and the sooner it appears the
+   * fewer characters they have to retype.
    */
   const mismatch = form.confirmation.length > 0 && form.newPassword !== form.confirmation;
 
@@ -85,98 +98,122 @@ export default function Account() {
   }
 
   return (
-    <div className="mx-auto max-w-2xl space-y-6">
-      <PageHeader title="Your account" subtitle="Your details, and your password." />
+    <div className="mx-auto max-w-4xl">
+      <PageHeader
+        eyebrow="You"
+        title="Your account"
+        subtitle="Your details, and your password."
+      />
 
-      <Card className="p-5">
-        <h2 className="mb-4 text-base font-semibold text-ink">Details</h2>
-        <dl className="space-y-3 text-sm">
-          <Detail label="Name">{user.name}</Detail>
-          <Detail label="Email">{user.email}</Detail>
-          <Detail label="Role">{humanize(user.role)}</Detail>
-          <Detail label="Member since">{formatDate(user.createdAt)}</Detail>
-          <Detail label="Email confirmed">
-            {user.emailVerified ? (
-              'Yes'
-            ) : (
-              <span className="inline-flex items-center gap-2">
-                Not yet
-                <button
-                  type="button"
-                  onClick={handleResend}
-                  disabled={resending}
-                  className="text-xs font-medium text-brand hover:underline disabled:opacity-50"
-                >
-                  {resending ? 'Sending…' : 'Resend'}
-                </button>
-              </span>
-            )}
-          </Detail>
-        </dl>
-        <p className="mt-4 border-t border-hairline pt-3 text-xs text-muted">
-          Your name, email and role are managed by an administrator. Confirming your email is
-          optional — nothing here depends on it.
-        </p>
-      </Card>
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.35fr)] lg:items-start">
+        {/* --- Who you are ------------------------------------------------ */}
+        <Card className="p-5">
+          <div className="border-b border-hairline pb-4">
+            <p className="label-mono">Profile</p>
+            <h2 className="mt-1 text-base font-semibold text-ink">Details</h2>
+          </div>
 
-      <Card className="p-5">
-        <h2 className="text-base font-semibold text-ink">Change password</h2>
-        <p className="mt-1 mb-4 text-sm text-ink-2">
-          Changing your password signs you out on every other device. This one stays signed
-          in.
-        </p>
+          <dl className="mt-4 space-y-4">
+            <Fact label="Name">{user.name}</Fact>
+            <Fact label="Email">{user.email}</Fact>
+            <Fact label="Role">
+              <StatusBadge value={user.role} />
+            </Fact>
+            <Fact label="Member since">{formatDate(user.createdAt)}</Fact>
+            <Fact label="Email confirmed">
+              {user.emailVerified ? (
+                'Yes'
+              ) : (
+                <span className="flex flex-wrap items-center gap-2">
+                  Not yet
+                  <Button variant="ghost" size="sm" loading={resending} loadingLabel="Sending…" onClick={handleResend}>
+                    Resend
+                  </Button>
+                </span>
+              )}
+            </Fact>
+          </dl>
 
-        <ErrorBanner message={error} onDismiss={() => setError('')} />
+          <p className="mt-5 border-t border-hairline pt-4 text-xs leading-relaxed text-muted">
+            Your name, email and role are managed by an administrator. Confirming your email is
+            optional — nothing here depends on it.
+          </p>
+        </Card>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <Field
-            label="Current password"
-            type="password"
-            autoComplete="current-password"
-            required
-            value={form.currentPassword}
-            onChange={set('currentPassword')}
-          />
+        {/* --- Changing your password ------------------------------------- */}
+        <Card className="p-5 sm:p-6">
+          <div className="border-b border-hairline pb-4">
+            <p className="label-mono">Security</p>
+            <h2 className="mt-1 text-base font-semibold text-ink">Change password</h2>
+            <p className="mt-1 text-sm text-ink-2">
+              Changing your password signs you out on every other device. This one stays signed in.
+            </p>
+          </div>
 
-          <Field
-            label="New password"
-            type="password"
-            autoComplete="new-password"
-            required
-            minLength={10}
-            hint="At least 10 characters, mixing letters, numbers and symbols — or a phrase of 14+ characters."
-            value={form.newPassword}
-            onChange={set('newPassword')}
-          />
+          <div className="mt-5">
+            <ErrorBanner message={error} onDismiss={() => setError('')} />
+          </div>
 
-          <Field
-            label="Confirm new password"
-            type="password"
-            autoComplete="new-password"
-            required
-            value={form.confirmation}
-            error={mismatch ? 'The two new passwords do not match.' : undefined}
-            onChange={set('confirmation')}
-          />
+          {/* `noValidate` — the messages below are ours, and the native bubble
+              suppresses them. */}
+          <form onSubmit={handleSubmit} noValidate className="space-y-4">
+            <Field
+              label="Current password"
+              type="password"
+              autoComplete="current-password"
+              placeholder="The one you use today"
+              required
+              value={form.currentPassword}
+              onChange={set('currentPassword')}
+            />
 
-          <button
-            type="submit"
-            className={btnPrimary}
-            disabled={submitting || mismatch || !form.currentPassword || !form.newPassword}
-          >
-            {submitting ? <Spinner /> : 'Change password'}
-          </button>
-        </form>
-      </Card>
+            <Field
+              label="New password"
+              type="password"
+              autoComplete="new-password"
+              placeholder="At least 10 characters"
+              required
+              minLength={10}
+              hint="At least 10 characters, mixing letters, numbers and symbols — or a phrase of 14+ characters."
+              value={form.newPassword}
+              onChange={set('newPassword')}
+            />
+
+            <Field
+              label="Confirm new password"
+              type="password"
+              autoComplete="new-password"
+              placeholder="Type it again"
+              required
+              value={form.confirmation}
+              error={mismatch ? 'The two new passwords do not match.' : undefined}
+              onChange={set('confirmation')}
+            />
+
+            <div className="sticky bottom-0 flex flex-wrap items-center gap-3 border-t border-hairline bg-surface/95 pt-4 backdrop-blur">
+              <Button
+                type="submit"
+                loading={submitting}
+                loadingLabel="Changing…"
+                disabled={mismatch || !form.currentPassword || !form.newPassword}
+              >
+                Change password
+              </Button>
+              <p className="text-xs text-muted">You stay signed in on this device.</p>
+            </div>
+          </form>
+        </Card>
+      </div>
     </div>
   );
 }
 
-function Detail({ label, children }) {
+/** One key/value pair, with real `<dt>`/`<dd>` semantics. */
+function Fact({ label, children }) {
   return (
-    <div className="flex justify-between gap-4">
-      <dt className="text-muted">{label}</dt>
-      <dd className="text-right font-medium text-ink">{children}</dd>
+    <div>
+      <dt className="label-mono">{label}</dt>
+      <dd className="mt-1 text-sm font-medium text-ink">{children}</dd>
     </div>
   );
 }

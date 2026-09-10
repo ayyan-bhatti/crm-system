@@ -5,18 +5,23 @@ import useFetch from '../../hooks/useFetch';
 import { useToast } from '../../components/Toast';
 import { useConfirm } from '../../components/ConfirmDialog';
 import {
+  Button,
   Card,
   CardSkeleton,
+  DropdownMenu,
   ErrorBanner,
   Field,
+  MenuItem,
+  Select,
+  Table,
+  TableSkeleton,
   PageHeader,
-  Spinner,
   StatusBadge,
 } from '../../components/common';
 import { useAuth } from '../../context/AuthContext';
 import PendingApprovals from './PendingApprovals';
 import { ROLE_VALUES, ROLES } from '../../constants';
-import { btnPrimary, btnSecondary, formatDate, humanize, input, td, th } from '../../ui';
+import { formatDate, humanize, input, td, th } from '../../ui';
 
 /**
  * Admin-only user management: list users, change roles, add and remove accounts.
@@ -142,12 +147,21 @@ export default function UserList() {
   return (
     <div>
       <PageHeader
+        eyebrow="System"
         title="Users"
         subtitle="Invite colleagues, manage their roles, and deactivate people who have left."
+        /*
+          The screen's one filled control, and it stops being one while the
+          panel it opened is on screen: an orange button reading "Close" is the
+          loudest thing on the page pointing at the least important action.
+        */
         action={
-          <button type="button" className={btnPrimary} onClick={() => setShowForm((v) => !v)}>
+          <Button
+            variant={showForm ? 'secondary' : 'primary'}
+            onClick={() => setShowForm((v) => !v)}
+          >
             {showForm ? 'Close' : 'Invite user'}
-          </button>
+          </Button>
         }
       />
 
@@ -198,140 +212,195 @@ export default function UserList() {
 
       <Card>
         {loading ? (
-          <Spinner full />
+          // A skeleton shaped like the table it replaces, matching the other
+          // list screens — a centred spinner told the reader nothing about what
+          // was coming and let the layout jump when it arrived.
+          <TableSkeleton rows={5} columns={6} />
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="border-b border-hairline bg-plane">
-                <tr>
-                  <th className={th}>Name</th>
-                  <th className={th}>Email</th>
-                  <th className={th}>Role</th>
-                  <th className={th}>Status</th>
-                  <th className={th}>Joined</th>
-                  <th className={`${th} text-right`}>Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-hairline">
-                {(data?.data || []).map((user) => {
-                  const isSelf = user._id === currentUser._id;
+          <Table caption="Staff accounts, with role, status and the date each joined">
+            <thead className="bg-sunken">
+              <tr className="border-b border-hairline">
+                <th className={th}>Name</th>
+                <th className={th}>Email</th>
+                <th className={th}>Role</th>
+                <th className={th}>Status</th>
+                <th className={th}>Joined</th>
+                <th className={`${th} w-12 text-right`}>
+                  <span className="sr-only">Actions</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-hairline">
+              {(data?.data || []).map((user) => {
+                const isSelf = user._id === currentUser._id;
 
-                  return (
-                    <tr key={user._id} className="hover:bg-plane">
-                      <td className={td}>
-                        {user.name}
-                        {isSelf && <span className="ml-2 text-xs text-muted">(you)</span>}
-                      </td>
-                      <td className={td}>{user.email}</td>
-                      <td className={td}>
-                        {/*
-                          Editing your own role is disabled: the API also blocks
-                          self-deletion, and demoting yourself would lock the
-                          last admin out of this screen.
-                        */}
-                        {isSelf ? (
-                          <StatusBadge value={user.role} />
-                        ) : (
-                          <select
-                            className={`${input} w-36`}
-                            value={user.role}
-                            onChange={(e) => changeRole(user._id, e.target.value)}
+                return (
+                  <tr key={user._id} className="transition-colors hover:bg-sunken/60">
+                    <td className={td}>
+                      <div className="flex items-center gap-3">
+                        <Avatar name={user.name} />
+                        <p className="min-w-0 font-medium text-ink">
+                          {user.name}
+                          {isSelf && (
+                            <span className="ml-2 text-xs font-normal text-muted">(you)</span>
+                          )}
+                        </p>
+                      </div>
+                    </td>
+                    <td className={`${td} truncate`}>{user.email}</td>
+                    <td className={td}>
+                      {/*
+                        Editing your own role is disabled: the API also blocks
+                        self-deletion, and demoting yourself would lock the
+                        last admin out of this screen.
+                      */}
+                      {isSelf ? (
+                        <StatusBadge value={user.role} />
+                      ) : (
+                        <Select
+                          className="w-36"
+                          aria-label={`Role for ${user.name}`}
+                          value={user.role}
+                          onChange={(e) => changeRole(user._id, e.target.value)}
+                        >
+                          {ROLE_VALUES.map((role) => (
+                            <option key={role} value={role}>
+                              {humanize(role)}
+                            </option>
+                          ))}
+                        </Select>
+                      )}
+                    </td>
+                    <td className={td}>
+                      {/*
+                        Pending means invited but not yet activated — the
+                        account exists and holds its role, but has no password
+                        and cannot sign in. Showing it here is what makes an
+                        un-accepted invite visible rather than a mystery.
+                      */}
+                      <StatusBadge value={user.status} />
+                    </td>
+                    <td className={`${td} whitespace-nowrap tabular`}>
+                      {formatDate(user.createdAt)}
+                    </td>
+                    <td className={`${td} text-right`}>
+                      {!isSelf && (
+                        <div className="flex justify-end">
+                          <DropdownMenu
+                            label={`Actions for ${user.name}`}
+                            triggerClassName="flex h-8 w-8 items-center justify-center rounded-md text-muted transition-colors hover:bg-sunken hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+                            trigger={
+                              <svg
+                                viewBox="0 0 20 20"
+                                className="h-4 w-4 fill-current"
+                                aria-hidden="true"
+                              >
+                                <path d="M6 10a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0zm5.5 0a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0zm5.5 0a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0z" />
+                              </svg>
+                            }
                           >
-                            {ROLE_VALUES.map((role) => (
-                              <option key={role} value={role}>
-                                {humanize(role)}
-                              </option>
-                            ))}
-                          </select>
-                        )}
-                      </td>
-                      <td className={td}>
-                        {/*
-                          Pending means invited but not yet activated — the
-                          account exists and holds its role, but has no password
-                          and cannot sign in. Showing it here is what makes an
-                          un-accepted invite visible rather than a mystery.
-                        */}
-                        <StatusBadge value={user.status} />
-                      </td>
-                      <td className={td}>{formatDate(user.createdAt)}</td>
-                      <td className={`${td} text-right`}>
-                        {!isSelf && (
-                          <div className="flex items-center justify-end gap-3">
-                            {/*
-                              Correcting a name or email. PATCH /api/users/:id
-                              has always supported both; nothing in the UI
-                              called it, so a typo in a colleague's address was
-                              unfixable without a database console.
-                            */}
-                            <button
-                              type="button"
-                              className="text-sm font-medium text-ink-2 hover:underline"
-                              onClick={() => setEditing(user)}
-                            >
-                              Edit
-                            </button>
+                            {(close) => (
+                              <>
+                                {/*
+                                  Correcting a name or email. PATCH /api/users/:id
+                                  has always supported both; nothing in the UI
+                                  called it, so a typo in a colleague's address was
+                                  unfixable without a database console.
+                                */}
+                                <MenuItem
+                                  onClick={() => {
+                                    close();
+                                    setEditing(user);
+                                  }}
+                                >
+                                  Edit details
+                                </MenuItem>
 
-                            {/*
-                              Only for an INVITED account. A pending sign-up
-                              request is also `pending`, but that person already
-                              has a password and needs a decision, not another
-                              link — re-sending would mint an invite token for an
-                              account that has no use for one.
-                            */}
-                            {user.status === 'pending' && !user.requestedRole && (
-                              <button
-                                type="button"
-                                className="text-sm font-medium text-brand hover:underline"
-                                onClick={() => resendInvite(user)}
-                              >
-                                Re-send invite
-                              </button>
+                                {/*
+                                  Only for an INVITED account. A pending sign-up
+                                  request is also `pending`, but that person already
+                                  has a password and needs a decision, not another
+                                  link — re-sending would mint an invite token for an
+                                  account that has no use for one.
+                                */}
+                                {user.status === 'pending' && !user.requestedRole && (
+                                  <MenuItem
+                                    onClick={() => {
+                                      close();
+                                      resendInvite(user);
+                                    }}
+                                  >
+                                    Re-send invite
+                                  </MenuItem>
+                                )}
+
+                                {user.status === 'active' && (
+                                  <MenuItem
+                                    onClick={() => {
+                                      close();
+                                      setStatus(user._id, user.name, 'deactivated');
+                                    }}
+                                  >
+                                    Deactivate
+                                  </MenuItem>
+                                )}
+
+                                {user.status === 'deactivated' && (
+                                  <MenuItem
+                                    onClick={() => {
+                                      close();
+                                      setStatus(user._id, user.name, 'active');
+                                    }}
+                                  >
+                                    Reactivate
+                                  </MenuItem>
+                                )}
+
+                                <MenuItem
+                                  className="text-critical-ink hover:text-critical-ink"
+                                  onClick={() => {
+                                    close();
+                                    removeUser(user._id, user.name);
+                                  }}
+                                >
+                                  Delete
+                                </MenuItem>
+                              </>
                             )}
-
-                            {user.status === 'active' && (
-                              <button
-                                type="button"
-                                className="text-sm font-medium text-ink-2 hover:underline"
-                                onClick={() => setStatus(user._id, user.name, 'deactivated')}
-                              >
-                                Deactivate
-                              </button>
-                            )}
-
-                            {user.status === 'deactivated' && (
-                              <button
-                                type="button"
-                                className="text-sm font-medium text-brand hover:underline"
-                                onClick={() => setStatus(user._id, user.name, 'active')}
-                              >
-                                Reactivate
-                              </button>
-                            )}
-
-                            <button
-                              type="button"
-                              className="text-sm font-medium text-critical-ink hover:underline"
-                              onClick={() => removeUser(user._id, user.name)}
-                            >
-                              Delete
-                            </button>
-                          </div>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+                          </DropdownMenu>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </Table>
         )}
       </Card>
     </div>
   );
 }
 
-/** Inline create form. Unlike public registration, an admin picks the role. */
+function initialsOf(name) {
+  const words = String(name || '').trim().split(/\s+/).filter(Boolean);
+  if (!words.length) return '?';
+  if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
+  return (words[0][0] + words[words.length - 1][0]).toUpperCase();
+}
+
+/** Initials disc; hidden from screen readers since the name follows it. */
+function Avatar({ name }) {
+  return (
+    <span
+      aria-hidden="true"
+      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand-wash text-[11px] font-semibold tracking-wide text-brand-ink"
+    >
+      {initialsOf(name)}
+    </span>
+  );
+}
+
 /**
  * The invite link, when the server had no way to email it.
  *
@@ -371,9 +440,8 @@ function InviteLinkPanel({ email, link, onDismiss }) {
 
   return (
     <Card className="mb-4 border-warning/40 p-5">
-      <h2 className="text-base font-semibold text-ink">
-        Invite created — no email was sent
-      </h2>
+      <p className="label-mono text-warning-ink">Action needed</p>
+      <h2 className="mt-1 text-base font-semibold text-ink">Invite created — no email was sent</h2>
       <p className="mt-1 text-sm text-ink-2">
         This deployment has no mail transport configured, so nothing was delivered to{' '}
         <span className="font-medium text-ink">{email}</span>. Send them this link yourself. It
@@ -394,9 +462,9 @@ function InviteLinkPanel({ email, link, onDismiss }) {
           onFocus={(e) => e.target.select()}
           className={`${input} font-mono text-xs`}
         />
-        <button type="button" onClick={copy} className={`${btnPrimary} shrink-0`}>
+        <Button variant="secondary" className="shrink-0" onClick={copy}>
           {copied ? 'Copied' : 'Copy link'}
-        </button>
+        </Button>
       </div>
 
       <p className="mt-3 text-xs text-muted">
@@ -425,8 +493,11 @@ function StaffActivityDigestCard() {
 
   return (
     <Card className="mb-4 p-5">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-sm font-semibold text-ink">Recent staff activity</h2>
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <div>
+          <p className="label-mono">Last {data?.facts?.windowDays ?? 30} days</p>
+          <h2 className="mt-1 text-sm font-semibold text-ink">Recent staff activity</h2>
+        </div>
         {data && (
           <span
             className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${
@@ -444,29 +515,11 @@ function StaffActivityDigestCard() {
       {data && (
         <>
           <p className="mt-2 text-sm text-ink-2">{data.narrative}</p>
-          <dl className="mt-4 grid grid-cols-2 gap-3 text-xs sm:grid-cols-4">
-            <div>
-              <dt className="font-medium uppercase tracking-wide text-muted">Changes</dt>
-              <dd className="mt-0.5 text-sm font-semibold text-ink">{data.facts.totalWrites}</dd>
-            </div>
-            <div>
-              <dt className="font-medium uppercase tracking-wide text-muted">Active</dt>
-              <dd className="mt-0.5 text-sm font-semibold text-ink">
-                {data.facts.activeAccounts}
-              </dd>
-            </div>
-            <div>
-              <dt className="font-medium uppercase tracking-wide text-muted">Idle</dt>
-              <dd className="mt-0.5 text-sm font-semibold text-ink">
-                {data.facts.idleAccounts.length}
-              </dd>
-            </div>
-            <div>
-              <dt className="font-medium uppercase tracking-wide text-muted">Pending</dt>
-              <dd className="mt-0.5 text-sm font-semibold text-ink">
-                {data.facts.pendingAccounts}
-              </dd>
-            </div>
+          <dl className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <Stat label="Changes" value={data.facts.totalWrites} />
+            <Stat label="Active" value={data.facts.activeAccounts} />
+            <Stat label="Idle" value={data.facts.idleAccounts.length} />
+            <Stat label="Pending" value={data.facts.pendingAccounts} />
           </dl>
           <p className="mt-3 text-xs text-muted">
             Last {data.facts.windowDays} days. Activity means records changed, not sign-ins.
@@ -474,6 +527,15 @@ function StaffActivityDigestCard() {
         </>
       )}
     </Card>
+  );
+}
+
+function Stat({ label, value }) {
+  return (
+    <div className="rounded-md border border-hairline bg-plane px-3 py-2.5">
+      <dt className="label-mono">{label}</dt>
+      <dd className="mt-1 text-lg font-semibold text-ink tabular">{value}</dd>
+    </div>
   );
 }
 
@@ -521,7 +583,7 @@ function InviteUserForm({ onInvited, onError }) {
   return (
     <Card className="mb-4 p-5">
       <h2 className="mb-1 text-base font-semibold text-ink">Invite a colleague</h2>
-      <p className="mb-4 text-sm text-ink-2">
+      <p className="mb-4 max-w-2xl text-sm text-ink-2">
         They choose their own password through a single-use link, which expires in 7 days. If
         this deployment has no mail transport configured, the link is shown here for you to
         send on yourself.
@@ -547,8 +609,7 @@ function InviteUserForm({ onInvited, onError }) {
           required
           hint="Controls what this person can see and do — see the role guide if unsure."
         >
-          <select
-            className={input}
+          <Select
             value={form.role}
             onChange={(e) => setForm({ ...form, role: e.target.value })}
           >
@@ -557,13 +618,13 @@ function InviteUserForm({ onInvited, onError }) {
                 {humanize(role)}
               </option>
             ))}
-          </select>
+          </Select>
         </Field>
 
         <div className="sm:col-span-3">
-          <button type="submit" className={btnPrimary} disabled={submitting}>
-            {submitting ? <Spinner /> : 'Send invitation'}
-          </button>
+          <Button type="submit" variant="secondary" loading={submitting} loadingLabel="Sending…">
+            Send invitation
+          </Button>
         </div>
       </form>
     </Card>
@@ -620,7 +681,7 @@ function EditUserForm({ user, onCancel, onSaved, onError }) {
   return (
     <Card className="mb-4 p-5">
       <h2 className="mb-1 text-base font-semibold text-ink">Edit {user.name}</h2>
-      <p className="mb-4 text-sm text-ink-2">
+      <p className="mb-4 max-w-2xl text-sm text-ink-2">
         Their role is changed in the table, and passwords are only ever set by the account
         holder through a reset link.
       </p>
@@ -642,12 +703,18 @@ function EditUserForm({ user, onCancel, onSaved, onError }) {
         />
 
         <div className="flex gap-3 sm:col-span-2">
-          <button type="submit" className={btnPrimary} disabled={saving || unchanged}>
-            {saving ? <Spinner /> : 'Save changes'}
-          </button>
-          <button type="button" className={btnSecondary} onClick={onCancel} disabled={saving}>
+          <Button
+            type="submit"
+            variant="secondary"
+            loading={saving}
+            loadingLabel="Saving…"
+            disabled={unchanged}
+          >
+            Save changes
+          </Button>
+          <Button variant="ghost" onClick={onCancel} disabled={saving}>
             Cancel
-          </button>
+          </Button>
         </div>
       </form>
     </Card>

@@ -33,19 +33,25 @@ export default function QuantityStepper({ value, onChange, max, disabled = false
 
   const clamp = (next) => Math.min(Math.max(1, next), ceiling);
 
+  const step =
+    'flex w-11 items-center justify-center text-lg leading-none text-ink-2 transition-colors ' +
+    'hover:bg-sunken hover:text-ink focus-visible:outline-none focus-visible:ring-2 ' +
+    'focus-visible:ring-inset focus-visible:ring-brand disabled:cursor-not-allowed ' +
+    'disabled:text-rule disabled:hover:bg-transparent';
+
   return (
     <div>
-      <label htmlFor={id} className="mb-1.5 block text-sm font-medium text-ink">
+      <label htmlFor={id} className="label-mono mb-2 block">
         Quantity
       </label>
 
-      <div className="inline-flex items-stretch overflow-hidden rounded-lg border border-hairline bg-raised">
+      <div className="inline-flex items-stretch overflow-hidden rounded-md border border-rule bg-surface">
         <button
           type="button"
           aria-label="Decrease quantity"
           disabled={disabled || atMin}
           onClick={() => onChange(clamp(value - 1))}
-          className="px-3 text-lg leading-none text-ink-2 transition-colors hover:bg-neutral-wash disabled:cursor-not-allowed disabled:text-muted disabled:hover:bg-transparent"
+          className={step}
         >
           −
         </button>
@@ -68,7 +74,7 @@ export default function QuantityStepper({ value, onChange, max, disabled = false
             if (Number.isFinite(next)) onChange(next);
           }}
           onBlur={(e) => onChange(clamp(Number(e.target.value) || 1))}
-          className="w-14 border-x border-hairline bg-transparent py-2 text-center text-sm font-medium text-ink [appearance:textfield] focus:outline-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+          className="w-14 border-x border-hairline bg-transparent py-3 text-center text-sm font-semibold text-ink tabular [appearance:textfield] focus:outline-none focus-visible:bg-sunken disabled:text-muted [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
         />
 
         <button
@@ -76,14 +82,14 @@ export default function QuantityStepper({ value, onChange, max, disabled = false
           aria-label="Increase quantity"
           disabled={disabled || atMax}
           onClick={() => onChange(clamp(value + 1))}
-          className="px-3 text-lg leading-none text-ink-2 transition-colors hover:bg-neutral-wash disabled:cursor-not-allowed disabled:text-muted disabled:hover:bg-transparent"
+          className={step}
         >
           +
         </button>
       </div>
 
       {/* Why "+" stopped working, said out loud rather than left to be guessed. */}
-      <p className="mt-1.5 text-xs text-muted">
+      <p className="mt-2 text-xs text-muted">
         {atMax
           ? ceiling === 1
             ? 'Only one of these left.'

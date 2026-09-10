@@ -34,6 +34,16 @@ export const HERO = {
     'nothing built to be replaced in two years.',
   primaryCta: { label: 'Shop everything', to: '/products' },
   secondaryCta: { label: 'Shop by room', to: '/rooms' },
+  /*
+   * The hero photograph. A furniture shop's hero IS a product shot — the
+   * previous generated gradient loaded instantly and said nothing about what
+   * is for sale, which on the page a first-time visitor lands on is the one
+   * thing it has to do. Same verified Unsplash id the Luna sofa uses, so it
+   * is a picture of something genuinely in the catalogue rather than a stock
+   * interior that happens to look expensive.
+   */
+  image: 'https://images.unsplash.com/photo-1600210491369-e753d80a41f3?w=1600&q=80&auto=format&fit=crop',
+  imageAlt: 'A bouclé sofa in a bright, plainly furnished living room',
 };
 
 /**

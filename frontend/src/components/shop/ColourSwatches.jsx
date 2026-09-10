@@ -1,5 +1,5 @@
 /**
- * The little circles of colour on a product card.
+ * The little circles of colour under a product card's caption.
  *
  * READ-ONLY BY DESIGN. A card's swatches say "this comes in four colours"; they
  * are not a picker. Making them selectable on a grid tile sounds helpful and is
@@ -12,6 +12,10 @@
  * DUPLICATE COLOURS ARE COLLAPSED. A product with one colour in four sizes has
  * four variants and one swatch — showing the same circle four times would imply
  * four choices that do not exist.
+ *
+ * Rendered as a `<ul>` rather than a row of spans: it is a list of the colours
+ * something comes in, and a screen reader announcing "list, 4 items" before
+ * reading the names is the difference between a set and four loose words.
  */
 export default function ColourSwatches({ variants = [], max = 5, size = 'sm' }) {
   if (!variants.length) return null;
@@ -34,15 +38,17 @@ export default function ColourSwatches({ variants = [], max = 5, size = 'sm' }) 
   }
 
   const colours = [...byColour.values()];
+  if (colours.length === 0) return null;
+
   const shown = colours.slice(0, max);
   const extra = colours.length - shown.length;
 
-  const dot = size === 'lg' ? 'h-6 w-6' : 'h-3.5 w-3.5';
+  const dot = size === 'lg' ? 'h-5 w-5' : 'h-3 w-3';
 
   return (
-    <div className="flex items-center gap-1.5">
+    <ul className="flex items-center gap-1.5">
       {shown.map((colour) => (
-        <span
+        <li
           key={colour.name}
           /*
            * `title` plus a screen-reader label, because a circle of colour has
@@ -50,8 +56,8 @@ export default function ColourSwatches({ variants = [], max = 5, size = 'sm' }) 
            * twelve men who would not be able to tell two of these apart.
            */
           title={colour.inStock ? colour.name : `${colour.name} — out of stock`}
-          className={`${dot} inline-block rounded-full ring-1 ring-inset ring-ink/15 ${
-            colour.inStock ? '' : 'opacity-35'
+          className={`${dot} rounded-full ring-1 ring-inset ring-ink/20 ${
+            colour.inStock ? '' : 'opacity-30'
           }`}
           style={{ backgroundColor: colour.hex }}
         >
@@ -59,9 +65,11 @@ export default function ColourSwatches({ variants = [], max = 5, size = 'sm' }) 
             {colour.name}
             {colour.inStock ? '' : ' (out of stock)'}
           </span>
-        </span>
+        </li>
       ))}
-      {extra > 0 && <span className="text-[11px] font-medium text-muted">+{extra}</span>}
-    </div>
+      {extra > 0 && (
+        <li className="text-[11px] font-medium tracking-wide text-muted">+{extra}</li>
+      )}
+    </ul>
   );
 }

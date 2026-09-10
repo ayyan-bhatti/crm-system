@@ -2,13 +2,29 @@ import { useRef, useState } from 'react';
 import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useBuyerAuth } from '../../context/BuyerAuthContext';
 import { errorMessage } from '../../api/client';
-import { Card, ErrorBanner, Field, Spinner } from '../../components/common';
+import { Button, ErrorBanner, Field, Spinner } from '../../components/common';
 import ConsentCheckboxes from '../../components/ConsentCheckboxes';
-import { btnPrimary, link } from '../../ui';
+/*
+ * The password control is shared with the sign-in page rather than written
+ * twice. The two screens are one pair — same geometry, same show/hide
+ * behaviour, same reason for building the accessible name out of text rather
+ * than an `aria-label` — and a second copy is how the two quietly stop matching.
+ */
+import { PasswordField } from './BuyerLogin';
+import { link } from '../../ui';
 
 const EMAIL_RE = /^\S+@\S+\.\S+$/;
 
-/** Client-side hints only — the server is still the real authority on both. */
+/**
+ * Client-side hints only — the server is still the real authority on both.
+ *
+ * TEN CHARACTERS, NOT THE SHARED `validators.password`'s EIGHT. The storefront
+ * account minimum is ten and is enforced on the server; using the generic rule
+ * here would let this form accept a nine-character password, post it, and get
+ * the rejection back from the API — which is a worse experience than the
+ * inline message, and a message that contradicts the hint printed under the
+ * field besides.
+ */
 function validate(form) {
   const errors = {};
   if (!form.name.trim()) errors.name = 'Enter your name.';
@@ -58,6 +74,7 @@ export default function BuyerRegister() {
 
   const fieldErrors = validate(form);
 
+  /** Errors are shown on blur, or once the form has been submitted — never mid-keystroke. */
   function blur(field) {
     setTouched((t) => ({ ...t, [field]: true }));
   }
@@ -82,21 +99,34 @@ export default function BuyerRegister() {
     }
   }
 
+  const returningToCheckout = location.state?.from === '/checkout';
+
   return (
-    <div className="flex min-h-full items-center justify-center px-4 py-16">
-      <div className="w-full max-w-sm">
-        <h1 className="font-display mb-6 text-center text-2xl font-semibold text-ink">
+    <div className="mx-auto grid w-full max-w-6xl gap-12 px-4 py-12 sm:px-6 lg:grid-cols-[1fr_minmax(0,26rem)] lg:items-start lg:gap-20 lg:py-24">
+      <RegisterAside />
+
+      <div className="w-full">
+        <p className="label-mono">Your account</p>
+        <h1 className="font-display mt-2 text-[32px] leading-tight text-ink sm:text-[36px]">
           Create an account
         </h1>
+        <p className="mt-3 max-w-sm text-sm leading-relaxed text-ink-2">
+          {returningToCheckout
+            ? 'One short step, then straight back to your basket to finish checking out.'
+            : 'It takes a minute, and it is what puts your orders, addresses and delivery updates in one place.'}
+        </p>
 
-        <Card className="p-6">
-          <ErrorBanner message={error} />
+        <div className="mt-8">
+          <ErrorBanner message={error} onDismiss={() => setError('')} />
 
-          <form onSubmit={handleSubmit} noValidate className="space-y-4">
+          <form onSubmit={handleSubmit} noValidate className="space-y-5">
             <Field
               label="Name"
+              name="name"
               autoComplete="name"
+              placeholder="Amina Raza"
               required
+              hint="How we address you on your order confirmations."
               value={form.name}
               onBlur={() => blur('name')}
               onChange={(e) => setForm({ ...form, name: e.target.value })}
@@ -104,8 +134,11 @@ export default function BuyerRegister() {
             />
             <Field
               label="Email"
+              name="email"
               type="email"
+              inputMode="email"
               autoComplete="email"
+              placeholder="name@example.com"
               required
               hint="Used to send your order confirmations."
               value={form.email}
@@ -113,15 +146,14 @@ export default function BuyerRegister() {
               onChange={(e) => setForm({ ...form, email: e.target.value })}
               error={touched.email ? fieldErrors.email : undefined}
             />
-            <Field
+            <PasswordField
+              id="register-password"
               label="Password"
-              type="password"
               autoComplete="new-password"
-              required
               hint="At least 10 characters."
               value={form.password}
               onBlur={() => blur('password')}
-              onChange={(e) => setForm({ ...form, password: e.target.value })}
+              onChange={(value) => setForm({ ...form, password: value })}
               error={touched.password ? fieldErrors.password : undefined}
             />
 
@@ -147,13 +179,19 @@ export default function BuyerRegister() {
               disabled={submitting}
             />
 
-            <button type="submit" className={`${btnPrimary} w-full`} disabled={submitting}>
-              {submitting ? <Spinner /> : 'Create account'}
-            </button>
+            <Button
+              type="submit"
+              size="lg"
+              className="w-full"
+              loading={submitting}
+              loadingLabel="Creating account…"
+            >
+              Create account
+            </Button>
           </form>
-        </Card>
+        </div>
 
-        <p className="mt-5 text-center text-sm text-ink-2">
+        <p className="mt-7 text-sm text-ink-2">
           Already have an account?{' '}
           <Link to="/login" state={location.state} className={link}>
             Sign in
@@ -161,5 +199,35 @@ export default function BuyerRegister() {
         </p>
       </div>
     </div>
+  );
+}
+
+/** The editorial half — see the note on `AuthAside` in BuyerLogin.jsx. */
+function RegisterAside() {
+  const points = [
+    ['Checkout in a tap', 'Saved addresses mean the next order takes seconds, not minutes.'],
+    ['Know where it is', 'A delivery timeline and courier tracking on every order.'],
+    ['Change your mind', 'Ask to amend or cancel while an order is still being prepared.'],
+  ];
+
+  return (
+    <aside className="hidden lg:block lg:pt-16">
+      <p className="label-mono">Join us</p>
+      <p className="font-display mt-3 max-w-md text-[40px] leading-[1.1] text-ink">
+        Everything you buy, kept in one calm place.
+      </p>
+
+      <dl className="mt-10 max-w-sm space-y-6 border-t border-hairline pt-8">
+        {points.map(([term, detail]) => (
+          <div key={term} className="flex gap-4">
+            <span aria-hidden="true" className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-brand" />
+            <div>
+              <dt className="text-sm font-semibold text-ink">{term}</dt>
+              <dd className="mt-1 text-sm leading-relaxed text-ink-2">{detail}</dd>
+            </div>
+          </div>
+        ))}
+      </dl>
+    </aside>
   );
 }

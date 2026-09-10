@@ -3,18 +3,23 @@ import { contactsApi } from '../../api/resources';
 import { errorMessage } from '../../api/client';
 import useFetch from '../../hooks/useFetch';
 import { useToast } from '../../components/Toast';
-import { ErrorBanner, Spinner } from '../../components/common';
+import {
+  Button,
+  Drawer,
+  ErrorBanner,
+  Field,
+  Select,
+  Spinner,
+  Textarea,
+} from '../../components/common';
 import DraftMessageCard from '../../components/DraftMessageCard';
 import {
   CONTACT_CHANNELS,
   CONTACT_SOURCE_LABELS,
   SEGMENT_LABELS,
   SEGMENT_STYLES,
-  btnPrimary,
-  btnSecondary,
   channelBlockedReason,
   formatDate,
-  input,
   money,
 } from '../../ui';
 
@@ -29,6 +34,15 @@ import {
  * filters and the scroll position, and the filters are how this screen is
  * navigated at all. The panel keeps the list underneath, which is the shape
  * the task actually has.
+ *
+ * BUILT ON THE SHARED `Drawer`, NOT A HAND-ROLLED SLIDE-OVER.
+ *
+ * The bespoke version was a fixed div, a backdrop button and an `<aside>` —
+ * and it had none of the four things an overlay has to get right. Escape did
+ * not close it, Tab walked straight out of it into the list underneath, the
+ * page behind it kept scrolling, and focus never came back to the row that
+ * opened it. `Drawer` does all four in one place (see `useOverlay`), so this
+ * screen no longer owns three of them badly.
  *
  * WHAT THE CONSENT TOGGLES ARE AND ARE NOT
  *
@@ -142,274 +156,273 @@ export default function ContactPanel({ email, onClose, onChanged, channelStatus 
   }
 
   const blocked = contact ? channelBlockedReason(contact, sendChannel) : '';
+  const logOnly = Boolean(channelStatus && !channelStatus[sendChannel]?.live);
 
   return (
-    <div className="fixed inset-0 z-40 flex justify-end">
-      {/*
-        The click-away backdrop is a real <button>, not a div with an onClick.
+    <Drawer open onClose={onClose} title={contact?.name || email} className="max-w-xl">
+      {loading && (
+        <div className="p-5">
+          <Spinner full />
+        </div>
+      )}
 
-        A div carrying a click handler is unreachable by keyboard and invisible
-        to assistive technology, so the panel would be dismissable by mouse and
-        by nothing else. As a button it is focusable, responds to Enter and
-        Space for free, and needs no `role`/`tabIndex`/`onKeyDown` scaffolding
-        to imitate what the element already does.
-      */}
-      <button
-        type="button"
-        className="absolute inset-0 h-full w-full cursor-default bg-black/20"
-        onClick={onClose}
-        aria-label="Close contact details"
-      />
+      {error && (
+        <div className="p-5">
+          <ErrorBanner message={error} />
+        </div>
+      )}
 
-      <aside
-        className="relative flex h-full w-full max-w-lg flex-col overflow-y-auto border-l border-hairline bg-surface shadow-xl"
-        role="dialog"
-        aria-label={`Contact: ${contact?.name || email}`}
-      >
-        <header className="flex items-start justify-between gap-3 border-b border-hairline p-5">
-          <div className="min-w-0">
-            <h2 className="truncate text-base font-semibold text-ink">
-              {contact?.name || email}
-            </h2>
+      {contact && (
+        <div className="divide-y divide-hairline">
+          {/* --- who they are --------------------------------------------- */}
+          <section className="p-5">
             <p className="truncate text-sm text-muted">{email}</p>
-          </div>
-          <button type="button" className={btnSecondary} onClick={onClose}>
-            Close
-          </button>
-        </header>
 
-        {loading && (
-          <div className="p-5">
-            <Spinner />
-          </div>
-        )}
+            <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
+              <div>
+                <dt className="label-mono">Source</dt>
+                <dd className="mt-1 text-sm text-ink-2">
+                  {CONTACT_SOURCE_LABELS[contact.source]}
+                </dd>
+              </div>
+              <div>
+                <dt className="label-mono">Phone</dt>
+                <dd className="mt-1 text-sm text-ink-2">{contact.phone || '—'}</dd>
+              </div>
+              <div>
+                <dt className="label-mono">Orders</dt>
+                <dd className="tabular mt-1 text-sm text-ink-2">{contact.orderCount}</dd>
+              </div>
+              <div>
+                <dt className="label-mono">Lifetime</dt>
+                <dd className="tabular mt-1 text-sm font-medium text-ink">
+                  {money(contact.totalRevenue)}
+                </dd>
+              </div>
+            </dl>
 
-        <ErrorBanner message={error} />
-
-        {contact && (
-          <div className="space-y-6 p-5">
-            {/* --- who they are ------------------------------------------- */}
-            <section>
-              <dl className="grid grid-cols-2 gap-3 text-sm">
-                <div>
-                  <dt className="text-xs text-muted">Source</dt>
-                  <dd className="text-ink-2">{CONTACT_SOURCE_LABELS[contact.source]}</dd>
-                </div>
-                <div>
-                  <dt className="text-xs text-muted">Phone</dt>
-                  <dd className="text-ink-2">{contact.phone || '—'}</dd>
-                </div>
-                <div>
-                  <dt className="text-xs text-muted">Orders</dt>
-                  <dd className="text-ink-2">{contact.orderCount}</dd>
-                </div>
-                <div>
-                  <dt className="text-xs text-muted">Lifetime value</dt>
-                  <dd className="text-ink-2">{money(contact.totalRevenue)}</dd>
-                </div>
-              </dl>
-
-              {contact.segments.length > 0 && (
-                <div className="mt-3 flex flex-wrap gap-1">
-                  {contact.segments.map((segment) => (
-                    <span
-                      key={segment}
-                      className={`rounded-full px-2 py-0.5 text-xs ring-1 ring-inset ${SEGMENT_STYLES[segment]}`}
-                    >
-                      {SEGMENT_LABELS[segment]}
-                    </span>
-                  ))}
-                </div>
-              )}
-            </section>
-
-            {/* --- consent ------------------------------------------------ */}
-            <section>
-              <h3 className="text-sm font-semibold text-ink">Marketing consent</h3>
-              <p className="mt-1 text-xs text-muted">
-                Only tick a box if this person has actually agreed. Every change here is
-                recorded in the audit trail against your name.
-              </p>
-
-              <ul className="mt-3 space-y-2">
-                {CONTACT_CHANNELS.map((channel) => {
-                  const state = contact.consent[channel.value];
-
-                  return (
-                    <li
-                      key={channel.value}
-                      className="flex items-center justify-between gap-3 rounded-lg border border-hairline bg-plane px-3 py-2"
-                    >
-                      <div className="min-w-0">
-                        <span className="text-sm text-ink">{channel.label}</span>
-                        <p className="text-xs text-muted">
-                          {state.optIn
-                            ? `Opted in ${state.optInAt ? formatDate(state.optInAt) : '(date not recorded)'}`
-                            : state.optOutAt
-                              ? `Opted out ${formatDate(state.optOutAt)}`
-                              : 'Never opted in'}
-                        </p>
-                      </div>
-
-                      <button
-                        type="button"
-                        className={state.optIn ? btnSecondary : btnPrimary}
-                        onClick={() => toggleConsent(channel.value, !state.optIn)}
-                        disabled={saving === channel.value}
-                      >
-                        {saving === channel.value ? (
-                          <Spinner />
-                        ) : state.optIn ? (
-                          'Opt out'
-                        ) : (
-                          'Opt in'
-                        )}
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            </section>
-
-            {/* --- tags --------------------------------------------------- */}
-            <section>
-              <h3 className="text-sm font-semibold text-ink">Tags</h3>
-              <p className="mt-1 text-xs text-muted">
-                Your own labels — &ldquo;VIP&rdquo;, &ldquo;wholesale&rdquo;. The coloured
-                segments above are calculated and cannot be set by hand.
-              </p>
-
-              <div className="mt-2 flex flex-wrap gap-1">
-                {contact.tags.map((tag) => (
+            {contact.segments.length > 0 && (
+              <div className="mt-4 flex flex-wrap gap-1.5">
+                {contact.segments.map((segment) => (
                   <span
-                    key={tag}
-                    className="inline-flex items-center gap-1 rounded-full bg-neutral-100 px-2 py-0.5 text-xs text-ink-2 ring-1 ring-inset ring-neutral-400/20"
+                    key={segment}
+                    className={`rounded-full px-2.5 py-1 text-[11px] font-medium ring-1 ring-inset ${SEGMENT_STYLES[segment]}`}
                   >
-                    {tag}
-                    <button
-                      type="button"
-                      onClick={() => removeTag(tag)}
-                      aria-label={`Remove tag ${tag}`}
-                      className="text-muted hover:text-critical"
-                    >
-                      ×
-                    </button>
+                    {SEGMENT_LABELS[segment]}
                   </span>
                 ))}
-                {!contact.tags.length && <span className="text-xs text-muted">No tags yet</span>}
               </div>
+            )}
+          </section>
 
-              <form onSubmit={addTag} className="mt-3 flex gap-2">
-                <input
-                  className={input}
-                  placeholder="Add a tag"
+          {/* --- consent -------------------------------------------------- */}
+          <section className="p-5">
+            <h3 className="text-sm font-semibold text-ink">Marketing consent</h3>
+            <p className="mt-1 text-xs text-muted">
+              Only tick a box if this person has actually agreed. Every change here is
+              recorded in the audit trail against your name.
+            </p>
+
+            <ul className="mt-4 space-y-2">
+              {CONTACT_CHANNELS.map((channel) => {
+                const state = contact.consent[channel.value];
+
+                return (
+                  <li
+                    key={channel.value}
+                    className="flex items-center justify-between gap-3 rounded-md border border-hairline bg-plane px-3 py-2.5"
+                  >
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span
+                          aria-hidden="true"
+                          className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                            state.optIn ? 'bg-good' : 'bg-rule'
+                          }`}
+                        />
+                        <span className="text-sm font-medium text-ink">{channel.label}</span>
+                        <span
+                          className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${
+                            state.optIn
+                              ? 'bg-good-wash text-good-ink'
+                              : 'bg-neutral-wash text-neutral-ink'
+                          }`}
+                        >
+                          {state.optIn ? 'Opted in' : 'No opt-in'}
+                        </span>
+                      </div>
+                      <p className="mt-1 text-xs text-muted">
+                        {state.optIn
+                          ? `Opted in ${state.optInAt ? formatDate(state.optInAt) : '(date not recorded)'}`
+                          : state.optOutAt
+                            ? `Opted out ${formatDate(state.optOutAt)}`
+                            : 'Never opted in'}
+                      </p>
+                    </div>
+
+                    {/*
+                      Secondary, not primary, on BOTH sides of the toggle. An
+                      orange "Opt in" button beside every channel makes the
+                      panel look like it is urging staff to tick them — which
+                      is precisely the thing the paragraph above warns against.
+                      The one accent on this panel belongs to Send.
+                    */}
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => toggleConsent(channel.value, !state.optIn)}
+                      loading={saving === channel.value}
+                      loadingLabel="Saving…"
+                    >
+                      {state.optIn ? 'Opt out' : 'Opt in'}
+                    </Button>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+
+          {/* --- tags ----------------------------------------------------- */}
+          <section className="p-5">
+            <h3 className="text-sm font-semibold text-ink">Tags</h3>
+            <p className="mt-1 text-xs text-muted">
+              Your own labels — &ldquo;VIP&rdquo;, &ldquo;wholesale&rdquo;. The coloured
+              segments above are calculated and cannot be set by hand.
+            </p>
+
+            <div className="mt-3 flex flex-wrap gap-1.5">
+              {contact.tags.map((tag) => (
+                <span
+                  key={tag}
+                  className="inline-flex items-center gap-1.5 rounded-full bg-sunken py-1 pl-2.5 pr-1.5 text-xs text-ink-2 ring-1 ring-inset ring-rule/40"
+                >
+                  {tag}
+                  <button
+                    type="button"
+                    onClick={() => removeTag(tag)}
+                    aria-label={`Remove tag ${tag}`}
+                    className="rounded-full p-0.5 text-muted transition-colors hover:bg-critical-wash hover:text-critical-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+                  >
+                    <svg viewBox="0 0 20 20" className="h-3 w-3 fill-current" aria-hidden="true">
+                      <path d="M5.3 4A1 1 0 004 5.3L8.6 10 4 14.7A1 1 0 105.3 16L10 11.4l4.7 4.6a1 1 0 001.3-1.3L11.4 10 16 5.3A1 1 0 0014.7 4L10 8.6z" />
+                    </svg>
+                  </button>
+                </span>
+              ))}
+              {!contact.tags.length && <span className="text-xs text-muted">No tags yet</span>}
+            </div>
+
+            <form onSubmit={addTag} className="mt-3 flex items-end gap-2">
+              <div className="flex-1">
+                <Field
+                  label="Add a tag"
+                  placeholder="VIP"
                   value={tagDraft}
                   maxLength={32}
                   onChange={(e) => setTagDraft(e.target.value)}
-                  aria-label="New tag"
                 />
-                <button type="submit" className={btnSecondary} disabled={!tagDraft.trim()}>
-                  Add
-                </button>
-              </form>
-            </section>
+              </div>
+              <Button type="submit" variant="secondary" disabled={!tagDraft.trim()}>
+                Add
+              </Button>
+            </form>
+          </section>
 
-            {/* --- draft + send ------------------------------------------- */}
-            {contact.customerId && (
+          {/* --- draft + send --------------------------------------------- */}
+          {contact.customerId && (
+            <section className="p-5">
               <DraftMessageCard
                 customerId={contact.customerId}
                 subtitle="Generates a starting point — copy it into the box below to send it."
               />
-            )}
-
-            <section>
-              <h3 className="text-sm font-semibold text-ink">Send a message</h3>
-
-              <div className="mt-3 space-y-3">
-                <label className="block">
-                  <span className="mb-1.5 block text-sm font-medium text-ink-2">Channel</span>
-                  <select
-                    className={input}
-                    value={sendChannel}
-                    onChange={(e) => setSendChannel(e.target.value)}
-                    aria-label="Channel"
-                  >
-                    {CONTACT_CHANNELS.map((channel) => {
-                      const reason = channelBlockedReason(contact, channel.value);
-
-                      return (
-                        /*
-                          A channel the contact has not agreed to is DISABLED
-                          rather than hidden, and the option says why. Hiding
-                          it would leave someone wondering whether the shop can
-                          send SMS at all; disabling it with a reason answers
-                          the real question, which is "how do I reach this
-                          person" — and the answer is "ask them first".
-                        */
-                        <option key={channel.value} value={channel.value} disabled={Boolean(reason)}>
-                          {channel.label}
-                          {reason ? ' — no opt-in' : ''}
-                          {channelStatus && !channelStatus[channel.value]?.live && !reason
-                            ? ' (log only)'
-                            : ''}
-                        </option>
-                      );
-                    })}
-                  </select>
-                </label>
-
-                {sendChannel === 'email' && (
-                  <label className="block">
-                    <span className="mb-1.5 block text-sm font-medium text-ink-2">Subject</span>
-                    <input
-                      className={input}
-                      value={subject}
-                      onChange={(e) => setSubject(e.target.value)}
-                      maxLength={200}
-                    />
-                  </label>
-                )}
-
-                <label className="block">
-                  <span className="mb-1.5 block text-sm font-medium text-ink-2">Message</span>
-                  <textarea
-                    className={`${input} min-h-32`}
-                    value={body}
-                    onChange={(e) => setBody(e.target.value)}
-                  />
-                </label>
-
-                {blocked && (
-                  <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-                    {blocked} Record their consent above before messaging them on this channel.
-                  </p>
-                )}
-
-                {channelStatus && !channelStatus[sendChannel]?.live && !blocked && (
-                  <p className="text-xs text-muted">
-                    No live {sendChannel} provider is configured, so this message will be written
-                    to the server log rather than delivered.
-                  </p>
-                )}
-
-                <button
-                  type="button"
-                  className={btnPrimary}
-                  onClick={handleSend}
-                  disabled={
-                    sending ||
-                    Boolean(blocked) ||
-                    !body.trim() ||
-                    (sendChannel === 'email' && !subject.trim())
-                  }
-                >
-                  {sending ? <Spinner /> : 'Send'}
-                </button>
-              </div>
             </section>
-          </div>
-        )}
-      </aside>
-    </div>
+          )}
+
+          <section className="p-5">
+            <h3 className="text-sm font-semibold text-ink">Send a message</h3>
+
+            <div className="mt-4 space-y-4">
+              <Field
+                label="Channel"
+                hint={
+                  logOnly && !blocked
+                    ? `No live ${sendChannel} provider is configured, so this message will be written to the server log rather than delivered.`
+                    : undefined
+                }
+              >
+                <Select
+                  value={sendChannel}
+                  onChange={(e) => setSendChannel(e.target.value)}
+                >
+                  {CONTACT_CHANNELS.map((channel) => {
+                    const reason = channelBlockedReason(contact, channel.value);
+
+                    return (
+                      /*
+                        A channel the contact has not agreed to is DISABLED
+                        rather than hidden, and the option says why. Hiding
+                        it would leave someone wondering whether the shop can
+                        send SMS at all; disabling it with a reason answers
+                        the real question, which is "how do I reach this
+                        person" — and the answer is "ask them first".
+                      */
+                      <option key={channel.value} value={channel.value} disabled={Boolean(reason)}>
+                        {channel.label}
+                        {reason ? ' — no opt-in' : ''}
+                        {channelStatus && !channelStatus[channel.value]?.live && !reason
+                          ? ' (log only)'
+                          : ''}
+                      </option>
+                    );
+                  })}
+                </Select>
+              </Field>
+
+              {sendChannel === 'email' && (
+                <Field
+                  label="Subject"
+                  value={subject}
+                  onChange={(e) => setSubject(e.target.value)}
+                  maxLength={200}
+                />
+              )}
+
+              <Field label="Message">
+                <Textarea rows={6} value={body} onChange={(e) => setBody(e.target.value)} />
+              </Field>
+
+              {blocked && (
+                <p className="flex items-start gap-2 rounded-md border border-warning/30 bg-warning-wash px-3 py-2.5 text-sm text-warning-ink">
+                  <svg
+                    viewBox="0 0 20 20"
+                    className="mt-0.5 h-4 w-4 shrink-0 fill-current"
+                    aria-hidden="true"
+                  >
+                    <path d="M10 2a8 8 0 100 16 8 8 0 000-16zm0 4a1 1 0 011 1v4a1 1 0 11-2 0V7a1 1 0 011-1zm0 9a1.1 1.1 0 110-2.2 1.1 1.1 0 010 2.2z" />
+                  </svg>
+                  <span>
+                    {blocked} Record their consent above before messaging them on this channel.
+                  </span>
+                </p>
+              )}
+
+              {/* The panel's ONE accent. */}
+              <Button
+                onClick={handleSend}
+                loading={sending}
+                loadingLabel="Sending…"
+                disabled={
+                  Boolean(blocked) ||
+                  !body.trim() ||
+                  (sendChannel === 'email' && !subject.trim())
+                }
+              >
+                Send
+              </Button>
+            </div>
+          </section>
+        </div>
+      )}
+    </Drawer>
   );
 }

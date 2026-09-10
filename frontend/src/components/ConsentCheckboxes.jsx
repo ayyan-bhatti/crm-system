@@ -1,3 +1,4 @@
+import { Checkbox } from './common';
 import { CONTACT_CHANNELS } from '../ui';
 
 /**
@@ -67,37 +68,37 @@ export default function ConsentCheckboxes({
         }));
 
   return (
-    <fieldset className="rounded-lg border border-hairline bg-plane p-4">
-      <legend className="px-1 text-sm font-medium text-ink-2">{legend}</legend>
+    <fieldset className="rounded-xl border border-hairline bg-sunken/60 px-4 py-4 sm:px-5">
+      <legend className="label-mono px-1">{legend}</legend>
 
-      {hint && <p className="mb-3 text-xs text-muted">{hint}</p>}
+      {hint && <p className="mb-4 max-w-prose text-xs leading-relaxed text-muted">{hint}</p>}
 
-      <div className="space-y-3">
+      <div className="space-y-3.5">
         {list.map((channel) => {
           const key = `${channel.value}OptIn`;
 
+          /*
+           * The shared `Checkbox` rather than a bare input, so the whole row
+           * is the hit target and the box matches every other control in the
+           * system. `name` is what gives each row a stable, unique control id
+           * inside that component — see `ChoiceRow`.
+           */
           return (
-            <label key={channel.value} className="flex items-start gap-3">
-              <input
-                type="checkbox"
-                className="mt-0.5"
-                /*
-                 * `Boolean(...)` rather than the raw value, so an undefined
-                 * key does not flip the input from controlled to uncontrolled
-                 * the first time it is ticked — React warns about that and
-                 * then silently stops tracking the box.
-                 */
-                checked={Boolean(value[key])}
-                disabled={disabled}
-                onChange={(e) => onChange({ ...value, [key]: e.target.checked })}
-              />
-              <span>
-                <span className="block text-sm text-ink">{channel.label}</span>
-                {channel.hint && (
-                  <span className="block text-xs text-muted">{channel.hint}</span>
-                )}
-              </span>
-            </label>
+            <Checkbox
+              key={channel.value}
+              name={key}
+              label={channel.label}
+              hint={channel.hint}
+              /*
+               * `Boolean(...)` rather than the raw value, so an undefined
+               * key does not flip the input from controlled to uncontrolled
+               * the first time it is ticked — React warns about that and
+               * then silently stops tracking the box.
+               */
+              checked={Boolean(value[key])}
+              disabled={disabled}
+              onChange={(e) => onChange({ ...value, [key]: e.target.checked })}
+            />
           );
         })}
       </div>

@@ -5,7 +5,14 @@ import { shopOrdersApi, shopCheckoutApi } from '../../api/shopResources';
 import { useBuyerAuth } from '../../context/BuyerAuthContext';
 import { useCart } from '../../context/CartContext';
 import DeliveryTimeline from '../../components/DeliveryTimeline';
-import { Card, EmptyState, ErrorBanner, Spinner, StatusBadge } from '../../components/common';
+import {
+  ButtonLink,
+  Card,
+  EmptyState,
+  ErrorBanner,
+  Spinner,
+  StatusBadge,
+} from '../../components/common';
 import { formatDate, link, money, orderLabel, td, th, variantLabel } from '../../ui';
 
 /**
@@ -129,20 +136,20 @@ function StripeReturn({ sessionId }) {
   if (state.status === 'pending') {
     return (
       <Shell>
-        <div className="text-center">
+        <div className="py-10 text-center">
           <Spinner full />
-          <h1 className="font-display mt-2 text-2xl font-semibold text-ink">
+          <h1 className="font-display mt-2 text-[28px] leading-tight text-ink">
             Confirming your payment
           </h1>
-          <p className="mx-auto mt-2 max-w-md text-sm text-ink-2">
+          <p className="mx-auto mt-3 max-w-md text-sm leading-relaxed text-ink-2">
             {gaveUp
               ? 'This is taking longer than usual. Your payment has not been lost — the order will appear in your order history shortly.'
               : 'This usually takes a couple of seconds. Please do not close this page.'}
           </p>
           {gaveUp && (
-            <Link to="/account/orders" className={`${link} mt-4 inline-block`}>
+            <ButtonLink to="/account/orders" variant="secondary" className="mt-6">
               Go to your orders
-            </Link>
+            </ButtonLink>
           )}
         </div>
       </Shell>
@@ -152,18 +159,16 @@ function StripeReturn({ sessionId }) {
   if (state.status !== 'completed' || !state.order) {
     return (
       <Shell>
-        <EmptyState
-          title="This payment did not go through"
-          hint={
-            state.note ||
-            'Nothing has been charged and your cart is untouched. You can try again whenever you like.'
-          }
-          action={
-            <Link to="/checkout" className={link}>
-              Back to checkout
-            </Link>
-          }
-        />
+        <Card>
+          <EmptyState
+            title="This payment did not go through"
+            hint={
+              state.note ||
+              'Nothing has been charged and your cart is untouched. You can try again whenever you like.'
+            }
+            action={<ButtonLink to="/checkout">Back to checkout</ButtonLink>}
+          />
+        </Card>
       </Shell>
     );
   }
@@ -188,15 +193,13 @@ function DirectOrder({ id, stateOrder, isSignedIn }) {
   if (!order) {
     return (
       <Shell>
-        <EmptyState
-          title="We don't have this order's details anymore"
-          hint="If you just placed it, you will find it in your order history."
-          action={
-            <Link to="/products" className={link}>
-              Keep shopping
-            </Link>
-          }
-        />
+        <Card>
+          <EmptyState
+            title="We don't have this order's details anymore"
+            hint="If you just placed it, you will find it in your order history."
+            action={<ButtonLink to="/products">Keep shopping</ButtonLink>}
+          />
+        </Card>
       </Shell>
     );
   }
@@ -205,92 +208,167 @@ function DirectOrder({ id, stateOrder, isSignedIn }) {
 }
 
 function Shell({ children }) {
-  return <div className="mx-auto max-w-2xl px-4 py-16 sm:px-6">{children}</div>;
+  return <div className="mx-auto max-w-3xl px-4 py-12 sm:px-6 lg:py-16">{children}</div>;
+}
+
+/**
+ * What happens next, in three sentences.
+ *
+ * This is the part a confirmation page usually leaves out, and it is the part
+ * the buyer is actually wondering about. "Thank you" answers a question nobody
+ * asked; "we will email you when it ships" answers the one they have.
+ */
+function WhatHappensNext({ paid }) {
+  const steps = [
+    ['A confirmation email', 'On its way now, with everything on this page in it.'],
+    ['We pack your order', 'You will get an email the moment it leaves the warehouse.'],
+    [
+      paid ? 'Delivery' : 'Pay on delivery',
+      paid
+        ? 'Track it from your order page at any point along the way.'
+        : 'Have the exact amount ready for the courier when they arrive.',
+    ],
+  ];
+
+  return (
+    <Card className="mt-6 p-6">
+      <h2 className="font-display text-[22px] leading-none text-ink">What happens next</h2>
+      <ol className="mt-5 space-y-5">
+        {steps.map(([title, detail], index) => (
+          <li key={title} className="flex gap-4">
+            <span
+              aria-hidden="true"
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-rule text-xs font-semibold text-ink-2"
+            >
+              {index + 1}
+            </span>
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-ink">{title}</p>
+              <p className="mt-1 text-sm leading-relaxed text-ink-2">{detail}</p>
+            </div>
+          </li>
+        ))}
+      </ol>
+    </Card>
+  );
 }
 
 function Confirmed({ order, paid }) {
   return (
     <Shell>
-      <div className="animate-fade-rise text-center">
-        <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-good-wash">
-          <svg viewBox="0 0 20 20" className="h-6 w-6 fill-good-ink" aria-hidden="true">
-            <path d="M10 2a8 8 0 100 16 8 8 0 000-16zm4 6.2l-4.7 4.7a1 1 0 01-1.42 0L6 11.02l1.42-1.42 1.17 1.18 4-4L14 8.2z" />
-          </svg>
+      <div className="animate-fade-rise">
+        <div className="text-center">
+          <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-full bg-good-wash">
+            <svg viewBox="0 0 20 20" className="h-7 w-7 fill-good-ink" aria-hidden="true">
+              <path d="M10 2a8 8 0 100 16 8 8 0 000-16zm4 6.2l-4.7 4.7a1 1 0 01-1.42 0L6 11.02l1.42-1.42 1.17 1.18 4-4L14 8.2z" />
+            </svg>
+          </div>
+
+          <p className="label-mono">Order confirmed</p>
+          <h1 className="font-display mt-2 text-[34px] leading-tight text-ink sm:text-[40px]">
+            Thank you for your order
+          </h1>
+          <p className="mx-auto mt-4 max-w-md text-sm leading-relaxed text-ink-2">
+            {paid
+              ? 'Your payment has been received and we are getting your order ready.'
+              : 'We are getting your order ready. You will pay the courier when it arrives.'}
+          </p>
         </div>
 
-        <h1 className="font-display text-3xl font-semibold text-ink">Thank you for your order</h1>
-        <p className="mt-2 text-sm text-ink-2">
-          Order {orderLabel(order)}, placed {formatDate(order.createdAt)}.
-        </p>
-        <p className="mt-1 text-sm text-ink-2">
-          {paid
-            ? 'Your payment has been received.'
-            : 'You will pay when the order is delivered.'}
-        </p>
-        <div className="mt-3 flex justify-center gap-2">
-          <StatusBadge value={order.fulfilment || 'processing'} />
-        </div>
+        {/*
+          The order number, given a line of its own rather than folded into a
+          sentence. It is the one string on this page somebody will need again
+          — quoted in an email, read down a phone line — and burying a reference
+          mid-paragraph is how it gets mistyped.
+        */}
+        <dl className="mt-8 grid gap-px overflow-hidden rounded-xl border border-hairline bg-hairline sm:grid-cols-3">
+          <div className="bg-surface px-5 py-4">
+            <dt className="label-mono">Order number</dt>
+            <dd className="mt-1.5 text-sm font-semibold text-ink tabular">{orderLabel(order)}</dd>
+          </div>
+          <div className="bg-surface px-5 py-4">
+            <dt className="label-mono">Placed</dt>
+            <dd className="mt-1.5 text-sm font-semibold text-ink">{formatDate(order.createdAt)}</dd>
+          </div>
+          <div className="bg-surface px-5 py-4">
+            <dt className="label-mono">Status</dt>
+            <dd className="mt-1.5">
+              <StatusBadge value={order.fulfilment || 'processing'} />
+            </dd>
+          </div>
+        </dl>
       </div>
 
-      <Card className="mt-8 p-5">
-        <h2 className="mb-4 text-sm font-semibold text-ink">Where your order is</h2>
-        <DeliveryTimeline order={order} />
+      <Card className="mt-6 p-6">
+        <h2 className="font-display text-[22px] leading-none text-ink">Where your order is</h2>
+        <div className="mt-6">
+          <DeliveryTimeline order={order} />
+        </div>
       </Card>
 
-      <Card className="mt-6 p-5">
-        <table className="w-full">
-          <thead className="border-b border-hairline">
-            <tr>
-              <th className={th}>Item</th>
-              <th className={`${th} text-right`}>Qty</th>
-              <th className={`${th} text-right`}>Total</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-hairline">
-            {order.items.map((item, index) => (
-              <tr key={index}>
-                <td className={td}>
-                  {item.product?.name || 'Product'}
-                  {/* Which colour and size went out — otherwise a buyer with
-                      two colours of one thing cannot tell the lines apart. */}
-                  {item.variant && (
-                    <span className="mt-0.5 flex items-center gap-1.5 text-xs text-muted">
-                      {item.variant.colorHex && (
-                        <span
-                          aria-hidden="true"
-                          className="inline-block h-2.5 w-2.5 rounded-full ring-1 ring-inset ring-ink/15"
-                          style={{ backgroundColor: item.variant.colorHex }}
-                        />
-                      )}
-                      {variantLabel(item.variant)}
-                    </span>
-                  )}
-                </td>
-                <td className={`${td} text-right`}>{item.quantity}</td>
-                <td className={`${td} text-right`}>{money(item.priceAtOrder * item.quantity)}</td>
+      <WhatHappensNext paid={paid} />
+
+      <Card className="mt-6 overflow-hidden">
+        <h2 className="px-6 pb-4 pt-6 font-display text-[22px] leading-none text-ink">
+          Your items
+        </h2>
+        <div className="w-full overflow-x-auto">
+          <table className="w-full border-collapse">
+            <thead className="border-y border-hairline bg-plane">
+              <tr>
+                <th className={th}>Item</th>
+                <th className={`${th} text-right`}>Qty</th>
+                <th className={`${th} text-right`}>Total</th>
               </tr>
-            ))}
-          </tbody>
-          <tfoot>
-            <tr className="border-t border-hairline">
-              <td className={td} colSpan={2}>
-                <span className="font-medium text-ink-2">Total</span>
-              </td>
-              <td className={`${td} text-right text-base font-semibold text-ink`}>
-                {money(order.total)}
-              </td>
-            </tr>
-          </tfoot>
-        </table>
+            </thead>
+            <tbody className="divide-y divide-hairline">
+              {order.items.map((item, index) => (
+                <tr key={index}>
+                  <td className={`${td} font-medium text-ink`}>
+                    {item.product?.name || 'Product'}
+                    {/* Which colour and size went out — otherwise a buyer with
+                        two colours of one thing cannot tell the lines apart. */}
+                    {item.variant && (
+                      <span className="mt-0.5 flex items-center gap-1.5 text-xs font-normal text-muted">
+                        {item.variant.colorHex && (
+                          <span
+                            aria-hidden="true"
+                            className="inline-block h-2.5 w-2.5 rounded-full ring-1 ring-inset ring-ink/15"
+                            style={{ backgroundColor: item.variant.colorHex }}
+                          />
+                        )}
+                        {variantLabel(item.variant)}
+                      </span>
+                    )}
+                  </td>
+                  <td className={`${td} text-right tabular`}>{item.quantity}</td>
+                  <td className={`${td} text-right tabular`}>
+                    {money(item.priceAtOrder * item.quantity)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr className="border-t border-hairline bg-plane">
+                <td className={td} colSpan={2}>
+                  <span className="font-semibold text-ink">Total</span>
+                </td>
+                <td className={`${td} text-right text-base font-semibold text-ink tabular`}>
+                  {money(order.total)}
+                </td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
       </Card>
 
-      <div className="mt-8 flex flex-wrap justify-center gap-4 text-sm">
-        <Link to="/products" className={link}>
-          Keep shopping
-        </Link>
-        <Link to="/account/orders" className={link}>
+      <div className="mt-10 flex flex-wrap items-center justify-center gap-3">
+        <ButtonLink to="/account/orders" size="lg">
           View your orders
-        </Link>
+        </ButtonLink>
+        <ButtonLink to="/products" variant="secondary" size="lg">
+          Keep shopping
+        </ButtonLink>
       </div>
     </Shell>
   );

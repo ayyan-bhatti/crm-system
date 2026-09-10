@@ -16,6 +16,11 @@ import { useMemo } from 'react';
  * A SIZE THAT EXISTS BUT IS SOLD OUT IS SHOWN AND DISABLED, not hidden. "We
  * don't have that in your size right now" and "we don't make that size" are
  * different facts, and hiding the first tells the shopper the second.
+ *
+ * THE ACCESSIBLE NAMES HERE ARE A CONTRACT. The colour buttons are named by
+ * the colour ("Midnight", "Forest (out of stock)") and the fieldset's legend
+ * carries the current selection, which is what lets both a screen reader and
+ * the test suite answer "which colour is chosen" without looking at a pixel.
  */
 export default function VariantPicker({ variants, value, onChange }) {
   // Distinct colours, preserving catalogue order rather than sorting — the
@@ -57,18 +62,22 @@ export default function VariantPicker({ variants, value, onChange }) {
   }
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-7">
       <fieldset>
-        <legend className="mb-2 text-sm font-medium text-ink">
-          Colour
-          <span className="ml-1 text-critical-ink" aria-hidden="true">
-            *
+        <legend className="mb-3 flex flex-wrap items-baseline gap-x-2">
+          <span className="label-mono">
+            Colour
+            <span className="ml-1 text-critical-ink" aria-hidden="true">
+              *
+            </span>
+            <span className="sr-only"> (Required)</span>
           </span>
-          <span className="sr-only"> (Required)</span>
-          {selectedColour && <span className="ml-2 font-normal text-ink-2">{selectedColour}</span>}
+          {selectedColour && (
+            <span className="text-sm font-medium text-ink">{selectedColour}</span>
+          )}
         </legend>
 
-        <div className="flex flex-wrap gap-2.5">
+        <div className="flex flex-wrap gap-3">
           {colours.map((colour) => {
             const active = colour.name === selectedColour;
             return (
@@ -79,9 +88,9 @@ export default function VariantPicker({ variants, value, onChange }) {
                 disabled={!colour.inStock}
                 aria-pressed={active}
                 title={colour.inStock ? colour.name : `${colour.name} — out of stock`}
-                className={`relative h-9 w-9 rounded-full ring-1 ring-inset ring-ink/15 transition-all ${
-                  active ? 'ring-2 ring-offset-2 ring-offset-plane ring-brand' : ''
-                } ${colour.inStock ? 'hover:scale-105' : 'cursor-not-allowed opacity-35'}`}
+                className={`relative h-10 w-10 rounded-full ring-1 ring-inset ring-ink/15 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-plane ${
+                  active ? 'ring-2 ring-brand ring-offset-2 ring-offset-plane' : ''
+                } ${colour.inStock ? 'hover:scale-105' : 'cursor-not-allowed opacity-40'}`}
                 style={{ backgroundColor: colour.hex }}
               >
                 {/* The name is the accessible label; the colour alone is not one. */}
@@ -92,7 +101,7 @@ export default function VariantPicker({ variants, value, onChange }) {
                 {!colour.inStock && (
                   <span
                     aria-hidden="true"
-                    className="absolute inset-0 flex items-center justify-center text-xs font-bold text-ink/50"
+                    className="absolute inset-0 flex items-center justify-center text-xs font-bold text-ink/60"
                   >
                     ✕
                   </span>
@@ -101,12 +110,14 @@ export default function VariantPicker({ variants, value, onChange }) {
             );
           })}
         </div>
-        <p className="mt-2 text-xs text-muted">Shown as a swatch — pick one to add to your cart.</p>
+        <p className="mt-2.5 text-xs text-muted">
+          Shown as a swatch — pick one to add to your cart.
+        </p>
       </fieldset>
 
       {sizesForColour.length > 0 && (
         <fieldset>
-          <legend className="mb-2 text-sm font-medium text-ink">
+          <legend className="label-mono mb-3">
             Size
             <span className="ml-1 text-critical-ink" aria-hidden="true">
               *
@@ -122,17 +133,17 @@ export default function VariantPicker({ variants, value, onChange }) {
                 onClick={() => onChange(variant._id)}
                 disabled={!variant.inStock}
                 aria-pressed={variant._id === value}
-                className={`min-w-14 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
+                className={`min-w-14 rounded-md border px-4 py-2.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-plane ${
                   variant._id === value
-                    ? 'border-brand bg-brand-wash text-brand-ink'
-                    : 'border-hairline bg-raised text-ink-2 hover:border-rule'
-                } ${variant.inStock ? '' : 'cursor-not-allowed text-muted line-through opacity-60'}`}
+                    ? 'border-ink bg-ink text-plane'
+                    : 'border-rule bg-surface text-ink-2 hover:border-ink/30 hover:text-ink'
+                } ${variant.inStock ? '' : 'cursor-not-allowed text-muted line-through opacity-50'}`}
               >
                 {variant.size}
               </button>
             ))}
           </div>
-          <p className="mt-2 text-xs text-muted">
+          <p className="mt-2.5 text-xs text-muted">
             Only the sizes stocked in {selectedColour} are shown.
           </p>
         </fieldset>

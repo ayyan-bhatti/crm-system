@@ -2,16 +2,17 @@ import { Link } from 'react-router-dom';
 import { campaignsApi } from '../../api/resources';
 import useFetch from '../../hooks/useFetch';
 import {
+  ButtonLink,
   Card,
   ErrorBanner,
   EmptyState,
   PageHeader,
+  Table,
   TableSkeleton,
 } from '../../components/common';
 import {
   CAMPAIGN_STATUS_LABELS,
   CAMPAIGN_STATUS_STYLES,
-  btnPrimary,
   formatDate,
   link,
   td,
@@ -37,104 +38,127 @@ export default function CampaignList() {
   const campaigns = data?.data || [];
 
   return (
-    <div className="space-y-5">
+    <div>
       <PageHeader
+        eyebrow="Marketing"
         title="Campaigns"
         subtitle="Email, SMS and WhatsApp sends. Nothing goes out to anyone who has not opted in."
-        action={
-          <Link to="/crm/campaigns/new" className={btnPrimary}>
-            New campaign
-          </Link>
-        }
+        action={<ButtonLink to="/crm/campaigns/new">New campaign</ButtonLink>}
       />
 
       <ErrorBanner message={error} />
 
-      {loading && <TableSkeleton rows={5} columns={5} />}
+      <Card className="overflow-hidden">
+        {loading && <TableSkeleton rows={5} columns={6} />}
 
-      {!loading && !campaigns.length && (
-        <EmptyState
-          title="No campaigns yet"
-          hint="Pick an audience, let the AI draft the copy, and review it before anything is sent."
-          action={
-            <Link to="/crm/campaigns/new" className={btnPrimary}>
-              New campaign
-            </Link>
-          }
-        />
-      )}
+        {!loading && !campaigns.length && (
+          <EmptyState
+            title="No campaigns yet"
+            hint="Pick an audience, let the AI draft the copy, and review it before anything is sent."
+            action={
+              <ButtonLink to="/crm/campaigns/new" variant="secondary">
+                New campaign
+              </ButtonLink>
+            }
+          />
+        )}
 
-      {!loading && campaigns.length > 0 && (
-        <Card className="overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-hairline">
-              <thead className="bg-plane">
-                <tr>
-                  <th className={th}>Campaign</th>
-                  <th className={th}>Channel</th>
-                  <th className={th}>Status</th>
-                  <th className={th}>Outcome</th>
-                  <th className={th}>Created</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-hairline">
-                {campaigns.map((campaign) => (
-                  <tr key={campaign._id} className="hover:bg-neutral-wash">
-                    <td className={td}>
-                      <Link to={`/crm/campaigns/${campaign._id}`} className={link}>
-                        {campaign.name}
-                      </Link>
-                      {campaign.goal && (
-                        <p className="mt-0.5 max-w-md truncate text-xs text-muted">
-                          {campaign.goal}
-                        </p>
-                      )}
-                    </td>
+        {!loading && campaigns.length > 0 && (
+          <Table caption="Campaigns">
+            <thead className="border-b border-hairline bg-plane">
+              <tr>
+                <th className={th} scope="col">
+                  Campaign
+                </th>
+                <th className={th} scope="col">
+                  Channel
+                </th>
+                <th className={th} scope="col">
+                  Status
+                </th>
+                <th className={th} scope="col">
+                  Audience
+                </th>
+                <th className={th} scope="col">
+                  Outcome
+                </th>
+                <th className={th} scope="col">
+                  Created
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-hairline">
+              {campaigns.map((campaign) => (
+                <tr key={campaign._id} className="transition-colors hover:bg-sunken">
+                  <td className={td}>
+                    <Link to={`/crm/campaigns/${campaign._id}`} className={link}>
+                      {campaign.name}
+                    </Link>
+                    {campaign.goal && (
+                      <p className="mt-0.5 max-w-md truncate text-xs text-muted">
+                        {campaign.goal}
+                      </p>
+                    )}
+                  </td>
 
-                    <td className={`${td} capitalize`}>{campaign.channel}</td>
+                  <td className={`${td} capitalize`}>{campaign.channel}</td>
 
-                    <td className={td}>
+                  <td className={td}>
+                    <span
+                      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium ring-1 ring-inset ${
+                        CAMPAIGN_STATUS_STYLES[campaign.status]
+                      }`}
+                    >
+                      {/* A dot as well as the word, so the state never rests
+                          on colour alone. */}
                       <span
-                        className={`rounded-full px-2 py-0.5 text-xs ring-1 ring-inset ${
-                          CAMPAIGN_STATUS_STYLES[campaign.status]
-                        }`}
-                      >
-                        {CAMPAIGN_STATUS_LABELS[campaign.status]}
-                      </span>
-                    </td>
+                        aria-hidden="true"
+                        className="h-1.5 w-1.5 rounded-full bg-current opacity-70"
+                      />
+                      {CAMPAIGN_STATUS_LABELS[campaign.status]}
+                    </span>
+                  </td>
 
-                    <td className={td}>
-                      {campaign.status === 'sent' ? (
-                        <span className="text-xs">
-                          <strong className="text-ink">{campaign.sentCount}</strong> sent
-                          {campaign.skippedNoConsentCount > 0 && (
-                            <>
-                              {' · '}
-                              <span className="text-amber-700">
-                                {campaign.skippedNoConsentCount} no opt-in
-                              </span>
-                            </>
-                          )}
-                          {campaign.failureCount > 0 && (
-                            <>
-                              {' · '}
-                              <span className="text-critical">{campaign.failureCount} failed</span>
-                            </>
-                          )}
+                  <td className={`${td} tabular`}>
+                    {campaign.audienceCount ? (
+                      <span className="font-medium text-ink">{campaign.audienceCount}</span>
+                    ) : (
+                      <span className="text-muted">—</span>
+                    )}
+                  </td>
+
+                  <td className={td}>
+                    {campaign.status === 'sent' ? (
+                      <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+                        <span className="tabular">
+                          <strong className="font-semibold text-good-ink">
+                            {campaign.sentCount}
+                          </strong>{' '}
+                          <span className="text-ink-2">sent</span>
                         </span>
-                      ) : (
-                        <span className="text-xs text-muted">—</span>
-                      )}
-                    </td>
+                        {campaign.skippedNoConsentCount > 0 && (
+                          <span className="tabular rounded bg-warning-wash px-1.5 py-0.5 font-medium text-warning-ink">
+                            {campaign.skippedNoConsentCount} no opt-in
+                          </span>
+                        )}
+                        {campaign.failureCount > 0 && (
+                          <span className="tabular rounded bg-critical-wash px-1.5 py-0.5 font-medium text-critical-ink">
+                            {campaign.failureCount} failed
+                          </span>
+                        )}
+                      </span>
+                    ) : (
+                      <span className="text-xs text-muted">—</span>
+                    )}
+                  </td>
 
-                    <td className={td}>{formatDate(campaign.createdAt)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Card>
-      )}
+                  <td className={td}>{formatDate(campaign.createdAt)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        )}
+      </Card>
     </div>
   );
 }

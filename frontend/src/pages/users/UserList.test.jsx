@@ -220,9 +220,17 @@ describe('editing a user', () => {
 
   const render = () => renderWithProviders(<UserList />, { route: '/users', guarded: true });
 
+  /*
+   * The row's actions now live behind a "⋯" menu rather than sitting in the
+   * row as a line of bare links, so reaching the editor is two clicks: open
+   * the menu for that person, then choose Edit. Only the route to the control
+   * changed — everything these tests assert about the editor itself is
+   * unchanged.
+   */
   const openEditor = async (user) => {
     const row = (await screen.findByText('Bilal Ahmed')).closest('tr');
-    await user.click(within(row).getByRole('button', { name: /^edit$/i }));
+    await user.click(within(row).getByRole('button', { name: /actions for bilal ahmed/i }));
+    await user.click(within(row).getByRole('menuitem', { name: /edit details/i }));
   };
 
   it('prefills the form with the existing details', async () => {

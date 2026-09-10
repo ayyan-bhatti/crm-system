@@ -4,8 +4,9 @@ import VariantPicker from './VariantPicker';
 import { useCart } from '../../context/CartContext';
 import { useToast } from '../Toast';
 import { errorMessage } from '../../api/client';
-import { Spinner } from '../common';
-import { btnPrimary, btnSecondary, galleryFor, money } from '../../ui';
+import { Button, Modal } from '../common';
+import RatingStars from './RatingStars';
+import { btnSecondary, galleryFor, money } from '../../ui';
 import ProductImage from './ProductImage';
 
 /**
@@ -20,6 +21,14 @@ import ProductImage from './ProductImage';
  * The product passed in is the one from the grid, which already carries
  * everything shown here, so opening this makes NO request. That is the point of
  * quick view; fetching would make it slower than the navigation it replaces.
+ *
+ * BUILT ON THE SHARED `Modal`, WHICH IS WHY THIS FILE IS SHORT.
+ *
+ * It used to hand-roll Escape-to-close and a body scroll lock and get the other
+ * half of the job wrong: focus stayed on the grid behind it, Tab walked out of
+ * the dialog into the page underneath, and closing left focus on `<body>`
+ * rather than on the tile that opened it. `Modal` does all four, once, for
+ * every overlay in the app — see `useOverlay` in components/common.jsx.
  */
 export default function QuickViewModal({ product, onClose }) {
   const { addItem } = useCart();
@@ -27,36 +36,16 @@ export default function QuickViewModal({ product, onClose }) {
   const [variantId, setVariantId] = useState(null);
   const [adding, setAdding] = useState(false);
 
-  const hasVariants = (product?.variants || []).length > 0;
-  const variant = product?.variants?.find((v) => v._id === variantId) || null;
-
-  /*
-   * Escape closes it, and the body stops scrolling behind it.
-   *
-   * Both are what makes this a dialog rather than a div that looks like one.
-   * Without the scroll lock, a wheel over the backdrop scrolls the grid
-   * underneath, which is disorienting on a laptop and actively broken on a
-   * phone, where the page behind can end up somewhere else entirely by the time
-   * the modal closes.
-   */
-  useEffect(() => {
-    function onKey(event) {
-      if (event.key === 'Escape') onClose();
-    }
-
-    document.addEventListener('keydown', onKey);
-    const previous = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-
-    return () => {
-      document.removeEventListener('keydown', onKey);
-      document.body.style.overflow = previous;
-    };
-  }, [onClose]);
+  // A different product in the same dialog is a different choice. Without this
+  // a variant id from the previous tile survives into the next one, where it
+  // matches nothing the shopper can see.
+  useEffect(() => setVariantId(null), [product?._id]);
 
   if (!product) return null;
 
-  const price = variant?.price ?? product.price;
+  const hasVariants = (product.variants || []).length > 0;
+  const variant = product.variants?.find((v) => v._id === variantId) || null;
+  const price = variant?.price ?? product.salePrice ?? product.price;
   const canAdd = product.inStock && (!hasVariants || Boolean(variantId));
 
   async function handleAdd() {
@@ -73,92 +62,99 @@ export default function QuickViewModal({ product, onClose }) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center">
-      <button
-        type="button"
-        aria-label="Close quick view"
-        onClick={onClose}
-        className="absolute inset-0 bg-ink/40 backdrop-blur-sm"
-      />
+    <Modal
+      open
+      onClose={onClose}
+      size="xl"
+      title={
+        <span className="font-display block text-[26px] font-normal leading-tight">
+          {product.name}
+        </span>
+      }
+    >
+      <div className="grid gap-8 sm:grid-cols-2">
+        <div className="overflow-hidden rounded-lg bg-sunken">
+          <ProductImage
+            product={product}
+            src={galleryFor(product)[0]}
+            alt={product.name}
+            className="aspect-[4/5] w-full object-cover"
+          />
+        </div>
 
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label={`Quick view: ${product.name}`}
-        className="animate-fade-rise relative max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-t-2xl bg-surface shadow-pop sm:rounded-2xl"
-      >
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Close"
-          className="absolute right-3 top-3 z-10 rounded-full bg-surface/90 p-2 text-ink-2 hover:bg-neutral-wash"
-        >
-          ✕
-        </button>
+        <div className="flex min-w-0 flex-col">
+          {product.brand ? (
+            <p className="label-mono">{product.brand}</p>
+          ) : (
+            product.category && <p className="label-mono">{product.category}</p>
+          )}
 
-        <div className="grid gap-6 p-5 sm:grid-cols-2 sm:p-6">
-          <div className="aspect-square overflow-hidden rounded-xl bg-neutral-wash">
-            <ProductImage
-              product={product}
-              src={galleryFor(product)[0]}
-              alt=""
-              className="h-full w-full object-cover"
-            />
+          <div className="mt-2 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+            <span className="font-display text-[28px] leading-none text-ink tabular">
+              {money(price)}
+            </span>
+            {!variant && product.salePrice && (
+              <span className="text-sm text-muted line-through tabular">
+                {money(product.price)}
+              </span>
+            )}
           </div>
 
-          <div>
-            <p className="text-xs font-medium uppercase tracking-wide text-muted">
-              {product.category}
-            </p>
-            <h2 className="font-display mt-1 text-2xl font-semibold text-ink">{product.name}</h2>
-            <p className="mt-2 text-xl font-semibold text-ink tabular">{money(price)}</p>
+          {product.rating?.count > 0 && <RatingStars rating={product.rating} className="mt-3" />}
 
-            {product.description && (
-              <p className="mt-3 line-clamp-4 text-sm leading-relaxed text-ink-2">
-                {product.description}
+          {product.description && (
+            <p className="mt-4 line-clamp-4 text-sm leading-relaxed text-ink-2">
+              {product.description}
+            </p>
+          )}
+
+          {hasVariants && (
+            <div className="mt-6 border-t border-hairline pt-6">
+              <VariantPicker
+                variants={product.variants}
+                value={variantId}
+                onChange={setVariantId}
+              />
+            </div>
+          )}
+
+          <div className="mt-7 space-y-2.5">
+            <Button
+              className="w-full"
+              size="lg"
+              disabled={!canAdd}
+              loading={adding}
+              loadingLabel="Adding…"
+              onClick={handleAdd}
+            >
+              Add to cart
+            </Button>
+
+            {/*
+              The reason the button is disabled, said out loud. A greyed-out
+              control with no explanation is the single most common way a
+              storefront loses a sale it could have made.
+            */}
+            {hasVariants && !variantId && product.inStock && (
+              <p className="text-center text-xs text-muted">Choose a colour to continue.</p>
+            )}
+            {!product.inStock && (
+              <p className="text-center text-xs text-muted">
+                Sold out for now — the rest of {product.category || 'the range'} is still
+                available.
               </p>
             )}
 
-            {hasVariants && (
-              <div className="mt-5">
-                <VariantPicker
-                  variants={product.variants}
-                  value={variantId}
-                  onChange={setVariantId}
-                />
-              </div>
-            )}
-
-            <div className="mt-6 space-y-2">
-              <button
-                type="button"
-                className={`${btnPrimary} w-full`}
-                disabled={!canAdd || adding}
-                onClick={handleAdd}
-              >
-                {adding ? <Spinner /> : 'Add to cart'}
-              </button>
-
-              {/*
-                The reason the button is disabled, said out loud. A greyed-out
-                control with no explanation is the single most common way a
-                storefront loses a sale it could have made.
-              */}
-              {hasVariants && !variantId && product.inStock && (
-                <p className="text-center text-xs text-muted">Choose a colour to continue.</p>
-              )}
-
-              <Link
-                to={`/products/${product._id}`}
-                onClick={onClose}
-                className={`${btnSecondary} w-full`}
-              >
-                See full details
-              </Link>
-            </div>
+            <Link
+              to={`/products/${product._id}`}
+              onClick={onClose}
+              className={`${btnSecondary} w-full`}
+            >
+              See full details
+            </Link>
           </div>
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }

@@ -4,9 +4,9 @@ import { useBuyerAuth } from '../../context/BuyerAuthContext';
 import { useCart, lineKey } from '../../context/CartContext';
 import { shopCheckoutApi, shopAuthApi } from '../../api/shopResources';
 import { errorMessage } from '../../api/client';
-import { Card, ErrorBanner, Field, Spinner } from '../../components/common';
+import { Button, Card, ErrorBanner, Field, Spinner } from '../../components/common';
 import ConsentCheckboxes from '../../components/ConsentCheckboxes';
-import { btnPrimary, btnSecondary, formatDate, galleryFor, money, variantLabel } from '../../ui';
+import { formatDate, galleryFor, money, variantLabel } from '../../ui';
 import ProductImage from '../../components/shop/ProductImage';
 
 /**
@@ -67,6 +67,13 @@ const FALLBACK_PAYMENT_METHODS = [
  *
  * `mode` on the response is what distinguishes them — deliberately an explicit
  * field rather than something inferred from the shape of `data`.
+ *
+ * THE LAYOUT IS THE ARGUMENT. Three numbered sections down the left — where it
+ * goes, how fast, how it is paid for — and the summary pinned beside them on a
+ * wide screen so the total never scrolls out of sight while somebody is making
+ * up their mind. On a phone the summary sits first, collapsed to a total, so
+ * the first thing on screen is the number being agreed to rather than a list
+ * to scroll past.
  */
 export default function Checkout() {
   const { buyer, isSignedIn, loading: authLoading, refresh } = useBuyerAuth();
@@ -232,23 +239,42 @@ export default function Checkout() {
     }
   }
 
+  const payingByCard = paymentMethod === 'card';
+
   return (
-    <div className="mx-auto max-w-5xl px-4 py-10 sm:px-6">
-      <h1 className="font-display mb-6 text-3xl font-semibold text-ink">Checkout</h1>
+    <div className="mx-auto max-w-6xl px-4 py-10 sm:px-6 lg:py-14">
+      <p className="label-mono">Secure checkout</p>
+      <h1 className="font-display mt-2 text-[32px] leading-tight text-ink sm:text-[36px]">
+        Checkout
+      </h1>
 
-      <div className="grid gap-8 lg:grid-cols-3">
-        <div className="lg:col-span-2">
-          <Card className="p-6">
-            {cancelledByStripe && (
-              <div className="mb-4 rounded-lg border border-hairline bg-plane px-4 py-3 text-sm text-ink-2">
-                You came back without paying, so nothing has been charged and your cart is
-                exactly as you left it.
-              </div>
-            )}
+      <div className="mt-8 grid gap-8 lg:mt-12 lg:grid-cols-[minmax(0,1fr)_22rem] lg:items-start lg:gap-12">
+        {/*
+          The summary comes FIRST in source order and is moved to the right
+          column from `lg` up. On a phone that puts the total — the thing being
+          agreed to — above the form rather than at the bottom of it, and it
+          means the DOM order matches the reading order on the narrow layout,
+          which is the one that matters for a screen reader.
+        */}
+        <OrderSummary items={items} total={total} className="lg:order-2 lg:sticky lg:top-24" />
 
-            <ErrorBanner message={error} />
+        <div className="lg:order-1">
+          {cancelledByStripe && (
+            <div className="mb-6 flex items-start gap-3 rounded-xl border border-hairline bg-sunken px-4 py-3.5 text-sm text-ink-2">
+              <svg viewBox="0 0 20 20" className="mt-0.5 h-4 w-4 shrink-0 fill-muted" aria-hidden="true">
+                <path d="M10 2a8 8 0 100 16 8 8 0 000-16zm1 4v5H9V6zm0 7v2H9v-2z" />
+              </svg>
+              <span>
+                You came back without paying, so nothing has been charged and your cart is exactly
+                as you left it.
+              </span>
+            </div>
+          )}
 
-            <form onSubmit={handleSubmit} noValidate className="space-y-6">
+          <ErrorBanner message={error} onDismiss={() => setError('')} />
+
+          <form onSubmit={handleSubmit} noValidate className="space-y-10">
+            <Section step={1} title="Where it goes">
               <SavedAddresses
                 addresses={addresses}
                 addressId={addressId}
@@ -266,45 +292,41 @@ export default function Checkout() {
                   }}
                 />
               )}
+            </Section>
 
-              {/*
-                How fast, asked BEFORE how they are paying.
-                The order matters: the delivery date is part of what a shopper
-                is deciding to buy, and burying it after the payment method
-                makes it read as an afterthought to a decision already made.
-              */}
-              {deliveryOptions.length > 1 && (
+            {/*
+              How fast, asked BEFORE how they are paying.
+              The order matters: the delivery date is part of what a shopper
+              is deciding to buy, and burying it after the payment method
+              makes it read as an afterthought to a decision already made.
+            */}
+            {deliveryOptions.length > 1 && (
+              <Section step={2} title="How fast">
                 <fieldset>
-                  <legend className="mb-2 text-sm font-medium text-ink">
-                    Delivery speed
-                    <span className="ml-1 text-critical-ink" aria-hidden="true">
-                      *
-                    </span>
-                    <span className="sr-only"> (Required)</span>
-                  </legend>
+                  <legend className="sr-only">Delivery speed (required)</legend>
 
-                  <div className="space-y-2">
+                  <div className="space-y-2.5">
                     {deliveryOptions.map((option) => {
                       const selected = deliverySpeed === option.value;
                       return (
                         <label
                           key={option.value}
-                          className={`flex cursor-pointer items-start gap-3 rounded-xl border p-3.5 text-sm transition-all ${
+                          className={`flex cursor-pointer items-start gap-3.5 rounded-xl border p-4 text-sm transition-colors ${
                             selected
-                              ? 'border-brand bg-brand-wash/40 ring-1 ring-brand/20'
-                              : 'border-hairline hover:border-rule hover:bg-plane/60'
+                              ? 'border-brand bg-brand-wash/50'
+                              : 'border-hairline bg-surface hover:border-rule hover:bg-plane'
                           }`}
                         >
                           <input
                             type="radio"
                             name="deliverySpeed"
-                            className="mt-1 accent-[var(--color-brand)]"
+                            className="mt-0.5 h-4 w-4 shrink-0 accent-brand"
                             checked={selected}
                             onChange={() => setDeliverySpeed(option.value)}
                           />
                           <span className="min-w-0 flex-1">
                             <span className="flex flex-wrap items-baseline justify-between gap-2">
-                              <span className="font-medium text-ink">{option.label}</span>
+                              <span className="font-semibold text-ink">{option.label}</span>
                               {/*
                                 The DATE, not the day count. "Arrives in 3–5
                                 working days" asks the shopper to do arithmetic
@@ -312,30 +334,28 @@ export default function Checkout() {
                                 the thing they are actually choosing between.
                               */}
                               {option.estimatedDate && (
-                                <span className="text-xs font-medium text-ink-2">
+                                <span className="text-xs font-medium text-ink-2 tabular">
                                   {formatDate(option.estimatedDate)}
                                 </span>
                               )}
                             </span>
-                            <span className="mt-0.5 block text-xs text-muted">{option.hint}</span>
+                            <span className="mt-1 block text-xs leading-relaxed text-muted">
+                              {option.hint}
+                            </span>
                           </span>
                         </label>
                       );
                     })}
                   </div>
                 </fieldset>
-              )}
+              </Section>
+            )}
 
+            <Section step={deliveryOptions.length > 1 ? 3 : 2} title="How you pay">
               <fieldset>
-                <legend className="mb-2 text-sm font-medium text-ink">
-                  Payment method
-                  <span className="ml-1 text-critical-ink" aria-hidden="true">
-                    *
-                  </span>
-                  <span className="sr-only"> (Required)</span>
-                </legend>
+                <legend className="sr-only">Payment method (required)</legend>
 
-                <div className="space-y-2">
+                <div className="space-y-2.5">
                   {paymentMethods.map((method) => {
                     const disabled = !method.available;
                     const selected = paymentMethod === method.value;
@@ -351,32 +371,36 @@ export default function Checkout() {
                     return (
                       <label
                         key={method.value}
-                        className={`flex items-start gap-3 rounded-xl border p-3.5 text-sm transition-all ${
+                        className={`flex items-start gap-3.5 rounded-xl border p-4 text-sm transition-colors ${
                           disabled
-                            ? 'cursor-not-allowed border-hairline bg-neutral-wash/60 opacity-70'
+                            ? 'cursor-not-allowed border-dashed border-rule bg-sunken/70'
                             : selected
-                              ? 'cursor-pointer border-brand bg-brand-wash/40 ring-1 ring-brand/20'
-                              : 'cursor-pointer border-hairline hover:border-rule hover:bg-plane/60'
+                              ? 'cursor-pointer border-brand bg-brand-wash/50'
+                              : 'cursor-pointer border-hairline bg-surface hover:border-rule hover:bg-plane'
                         }`}
                       >
                         <input
                           type="radio"
                           name="paymentMethod"
-                          className="mt-1 accent-[var(--color-brand)]"
+                          className="mt-0.5 h-4 w-4 shrink-0 accent-brand"
                           checked={selected}
                           disabled={disabled}
                           onChange={() => setPaymentMethod(method.value)}
                         />
                         <span className="min-w-0">
                           <span className="flex flex-wrap items-center gap-2">
-                            <span className="font-medium text-ink">{method.label}</span>
+                            <span
+                              className={`font-semibold ${disabled ? 'text-muted' : 'text-ink'}`}
+                            >
+                              {method.label}
+                            </span>
                             {disabled && (
-                              <span className="rounded-full border border-hairline bg-raised px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted">
+                              <span className="rounded-full border border-rule px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-muted">
                                 Unavailable
                               </span>
                             )}
                           </span>
-                          <span className="mt-0.5 block text-xs text-muted">
+                          <span className="mt-1 block text-xs leading-relaxed text-muted">
                             {disabled ? method.unavailableReason || method.hint : method.hint}
                           </span>
                         </span>
@@ -385,31 +409,33 @@ export default function Checkout() {
                   })}
                 </div>
               </fieldset>
+            </Section>
 
-              {/*
-                MARKETING CONSENT AT CHECKOUT.
+            {/*
+              MARKETING CONSENT AT CHECKOUT.
 
-                Below the payment method and above the button, deliberately —
-                it is the least important thing on this page and must not sit
-                between a shopper and paying. Every box starts unchecked and
-                nothing here can block the order.
+              Below the payment method and above the button, deliberately —
+              it is the least important thing on this page and must not sit
+              between a shopper and paying. Every box starts unchecked and
+              nothing here can block the order.
 
-                Shown only once the server has told us which channels exist,
-                rather than from a hard-coded list, for the same reason the
-                payment methods are: a capability the server owns has to be
-                published by the server.
-              */}
-              {marketingChannels.length > 0 && (
-                <ConsentCheckboxes
-                  legend="Keep in touch (optional)"
-                  hint="Nothing to do with this order — you will get your confirmation and delivery updates either way."
-                  channels={marketingChannels}
-                  value={consent}
-                  onChange={setConsent}
-                  disabled={submitting}
-                />
-              )}
+              Shown only once the server has told us which channels exist,
+              rather than from a hard-coded list, for the same reason the
+              payment methods are: a capability the server owns has to be
+              published by the server.
+            */}
+            {marketingChannels.length > 0 && (
+              <ConsentCheckboxes
+                legend="Keep in touch (optional)"
+                hint="Nothing to do with this order — you will get your confirmation and delivery updates either way."
+                channels={marketingChannels}
+                value={consent}
+                onChange={setConsent}
+                disabled={submitting}
+              />
+            )}
 
+            <div className="space-y-3 border-t border-hairline pt-8">
               {/*
                 Disabled until a payment method is actually settled, which is a
                 real state now rather than a theoretical one: the method list
@@ -418,35 +444,57 @@ export default function Checkout() {
                 then flipped to "Pay $20" a moment later — a label changing
                 under somebody's cursor on the button that takes their money.
               */}
-              <button
+              <Button
                 type="submit"
-                className={`${btnPrimary} w-full py-2.5`}
-                disabled={submitting || !addressId || !paymentMethod}
+                size="lg"
+                className="w-full"
+                loading={submitting}
+                loadingLabel={payingByCard ? 'Taking you to Stripe…' : 'Placing order…'}
+                disabled={!addressId || !paymentMethod}
               >
-                {submitting ? (
-                  <Spinner />
-                ) : !paymentMethod ? (
-                  'Loading payment options…'
-                ) : paymentMethod === 'card' ? (
-                  `Pay ${money(total)}`
-                ) : (
-                  `Place order — ${money(total)}`
-                )}
-              </button>
+                {!paymentMethod
+                  ? 'Loading payment options…'
+                  : payingByCard
+                    ? `Pay ${money(total)}`
+                    : `Place order — ${money(total)}`}
+              </Button>
 
-              {paymentMethod === 'card' && (
-                <p className="text-center text-xs text-muted">
-                  You will be taken to Stripe to complete payment. Your order is created once the
-                  payment is confirmed.
-                </p>
-              )}
-            </form>
-          </Card>
+              <p className="text-center text-xs leading-relaxed text-muted">
+                {payingByCard
+                  ? 'You will be taken to Stripe to complete payment. Your order is created once the payment is confirmed.'
+                  : 'You can ask to change or cancel your order while it is still being prepared.'}
+              </p>
+            </div>
+          </form>
         </div>
-
-        <OrderSummary items={items} total={total} />
       </div>
     </div>
+  );
+}
+
+/**
+ * One numbered step of the form.
+ *
+ * The number is decorative and marked `aria-hidden` — the heading already
+ * carries the section's name, and "1 Where it goes" read aloud is a worse
+ * sentence than "Where it goes". What the numbers do for a sighted reader is
+ * turn three stacked cards into a sequence with an end, which is the single
+ * cheapest thing a checkout can do about the feeling that it will never finish.
+ */
+function Section({ step, title, children }) {
+  return (
+    <section>
+      <div className="mb-4 flex items-center gap-3">
+        <span
+          aria-hidden="true"
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-rule text-xs font-semibold text-ink-2"
+        >
+          {step}
+        </span>
+        <h2 className="font-display text-[22px] leading-none text-ink">{title}</h2>
+      </div>
+      {children}
+    </section>
   );
 }
 
@@ -459,52 +507,59 @@ export default function Checkout() {
 function SavedAddresses({ addresses, addressId, onChange, onAdd }) {
   if (addresses.length === 0) {
     return (
-      <div className="rounded-lg border border-hairline bg-plane p-4 text-sm text-ink-2">
-        You have no saved addresses yet.{' '}
-        <button type="button" onClick={onAdd} className="font-medium text-brand hover:underline">
-          Add one
-        </button>{' '}
-        to continue.
+      <div className="rounded-xl border border-dashed border-rule bg-sunken/60 px-4 py-5 text-sm text-ink-2">
+        <p className="font-semibold text-ink">You have no saved addresses yet.</p>
+        <p className="mt-1">We need somewhere to send this before you can check out.</p>
+        <button
+          type="button"
+          onClick={onAdd}
+          className="mt-3 font-semibold text-brand-ink underline underline-offset-[3px] hover:text-ink"
+        >
+          Add a delivery address
+        </button>
       </div>
     );
   }
 
   return (
-    <fieldset className="space-y-3">
-      <legend className="mb-1 text-sm font-medium text-ink">
-        Deliver to
-        <span className="ml-1 text-critical-ink" aria-hidden="true">
-          *
-        </span>
-        <span className="sr-only"> (Required)</span>
-      </legend>
+    <fieldset>
+      <legend className="sr-only">Deliver to (required)</legend>
 
-      {addresses.map((addr) => (
-        <label
-          key={addr._id}
-          className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 text-sm transition-colors ${
-            addressId === addr._id ? 'border-brand bg-brand-wash/40' : 'border-hairline'
-          }`}
-        >
-          <input
-            type="radio"
-            name="addressId"
-            className="mt-1"
-            checked={addressId === addr._id}
-            onChange={() => onChange(addr._id)}
-          />
-          <span>
-            <span className="block font-medium text-ink">{addr.label}</span>
-            <span className="block text-ink-2">
-              {addr.address}
-              {addr.city ? `, ${addr.city}` : ''}
-            </span>
-            {addr.phone && <span className="block text-xs text-muted">{addr.phone}</span>}
-          </span>
-        </label>
-      ))}
+      <div className="space-y-2.5">
+        {addresses.map((addr) => {
+          const selected = addressId === addr._id;
+          return (
+            <label
+              key={addr._id}
+              className={`flex cursor-pointer items-start gap-3.5 rounded-xl border p-4 text-sm transition-colors ${
+                selected
+                  ? 'border-brand bg-brand-wash/50'
+                  : 'border-hairline bg-surface hover:border-rule hover:bg-plane'
+              }`}
+            >
+              <input
+                type="radio"
+                name="addressId"
+                className="mt-0.5 h-4 w-4 shrink-0 accent-brand"
+                checked={selected}
+                onChange={() => onChange(addr._id)}
+              />
+              <span className="min-w-0">
+                <span className="block font-semibold text-ink">{addr.label}</span>
+                <span className="mt-0.5 block text-ink-2">{addr.address}</span>
+                {addr.city && <span className="block text-ink-2">{addr.city}</span>}
+                {addr.phone && <span className="mt-0.5 block text-xs text-muted">{addr.phone}</span>}
+              </span>
+            </label>
+          );
+        })}
+      </div>
 
-      <button type="button" onClick={onAdd} className="text-sm text-brand hover:underline">
+      <button
+        type="button"
+        onClick={onAdd}
+        className="mt-3.5 text-sm font-semibold text-brand-ink underline underline-offset-[3px] hover:text-ink"
+      >
         Add another address
       </button>
     </fieldset>
@@ -560,68 +615,120 @@ function NewAddressForm({ onCancel, onSaved }) {
   }
 
   return (
-    <div className="space-y-4 rounded-lg border border-hairline bg-plane p-4">
-      <p className="text-sm font-semibold text-ink">New delivery address</p>
+    <div className="mt-4 space-y-5 rounded-xl border border-hairline bg-plane p-5">
+      <h3 className="text-sm font-semibold text-ink">New delivery address</h3>
 
       <ErrorBanner message={failed} />
 
-      <Field
-        label="Address name"
-        name="label"
-        required
-        hint="What to call it later — Home, Office, Mum's."
-        value={form.label}
-        error={errors.label}
-        onChange={(e) => update('label', e.target.value)}
-      />
+      <div className="grid gap-5 sm:grid-cols-2">
+        <Field
+          label="Address name"
+          name="label"
+          required
+          placeholder="Home"
+          hint="What to call it later — Home, Office, Mum's."
+          value={form.label}
+          error={errors.label}
+          onChange={(e) => update('label', e.target.value)}
+        />
 
-      <Field
-        label="Street address"
-        name="address"
-        required
-        hint="Flat or house number and street, e.g. 12 Canal Road."
-        value={form.address}
-        error={errors.address}
-        onChange={(e) => update('address', e.target.value)}
-      />
+        <Field
+          label="Phone number"
+          name="phone"
+          type="tel"
+          autoComplete="tel"
+          required
+          placeholder="0300 1234567"
+          hint="The courier calls this number on the day of delivery."
+          value={form.phone}
+          error={errors.phone}
+          onChange={(e) => update('phone', e.target.value)}
+        />
 
-      <Field
-        label="City"
-        name="city"
-        required
-        hint="The town or city the courier delivers to."
-        value={form.city}
-        error={errors.city}
-        onChange={(e) => update('city', e.target.value)}
-      />
+        <div className="sm:col-span-2">
+          <Field
+            label="Street address"
+            name="address"
+            autoComplete="street-address"
+            required
+            placeholder="12 Canal Road"
+            hint="Flat or house number and street."
+            value={form.address}
+            error={errors.address}
+            onChange={(e) => update('address', e.target.value)}
+          />
+        </div>
 
-      <Field
-        label="Phone number"
-        name="phone"
-        required
-        hint="The courier calls this number on the day of delivery."
-        value={form.phone}
-        error={errors.phone}
-        onChange={(e) => update('phone', e.target.value)}
-      />
+        <Field
+          label="City"
+          name="city"
+          autoComplete="address-level2"
+          required
+          placeholder="Lahore"
+          hint="The town or city the courier delivers to."
+          value={form.city}
+          error={errors.city}
+          onChange={(e) => update('city', e.target.value)}
+        />
+      </div>
 
-      <div className="flex gap-2">
-        <button type="button" className={btnPrimary} onClick={handleSave} disabled={saving}>
-          {saving ? <Spinner /> : 'Save address'}
-        </button>
-        <button type="button" className={btnSecondary} onClick={onCancel}>
+      <div className="flex flex-wrap gap-2.5">
+        <Button type="button" onClick={handleSave} loading={saving} loadingLabel="Saving…">
+          Save address
+        </Button>
+        <Button type="button" variant="secondary" onClick={onCancel} disabled={saving}>
           Cancel
-        </button>
+        </Button>
       </div>
     </div>
   );
 }
 
-function OrderSummary({ items, total }) {
+/**
+ * What is being bought, and for how much.
+ *
+ * ONE COPY IN THE DOM, TWO BEHAVIOURS. From `lg` the item list is always open
+ * beside the form; below it the list collapses behind a toggle so the total
+ * stays at the top of a phone screen without a scroll. Rendering a separate
+ * mobile summary would have been simpler and is wrong twice over: a screen
+ * reader would meet every line item twice, and the two copies would drift.
+ */
+function OrderSummary({ items, total, className = '' }) {
+  const [openOnMobile, setOpenOnMobile] = useState(false);
+  const count = items.reduce((sum, line) => sum + line.quantity, 0);
+
   return (
-    <Card className="h-fit p-6">
-      <h2 className="mb-4 text-sm font-semibold text-ink">Order summary</h2>
-      <ul className="space-y-3">
+    <Card className={`h-fit ${className}`}>
+      <div className="flex items-baseline justify-between gap-3 px-5 pt-5">
+        <h2 className="font-display text-[22px] leading-none text-ink">Order summary</h2>
+        <span className="text-xs text-muted">
+          {count} {count === 1 ? 'item' : 'items'}
+        </span>
+      </div>
+
+      <button
+        type="button"
+        onClick={() => setOpenOnMobile((open) => !open)}
+        aria-expanded={openOnMobile}
+        aria-controls="checkout-summary-items"
+        className="mt-3 flex w-full items-center justify-between gap-2 border-t border-hairline px-5 py-3 text-sm font-medium text-ink-2 transition-colors hover:bg-plane focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand lg:hidden"
+      >
+        {openOnMobile ? 'Hide items' : 'Show items'}
+        <svg
+          viewBox="0 0 20 20"
+          className={`h-4 w-4 fill-muted transition-transform ${openOnMobile ? 'rotate-180' : ''}`}
+          aria-hidden="true"
+        >
+          <path d="M5.6 7.5L10 11.9l4.4-4.4 1.4 1.4-5.8 5.8-5.8-5.8z" />
+        </svg>
+      </button>
+
+      <ul
+        id="checkout-summary-items"
+        className={`space-y-4 border-t border-hairline px-5 py-5 lg:block ${
+          openOnMobile ? 'block' : 'hidden'
+        }`}
+      >
         {items.map((line) => {
           const label = variantLabel(line.variant);
           return (
@@ -634,9 +741,9 @@ function OrderSummary({ items, total }) {
             */
             <li
               key={lineKey(line.product._id, line.variant?.variantId)}
-              className="flex items-start gap-3 text-sm"
+              className="flex items-start gap-3.5 text-sm"
             >
-              <div className="h-12 w-12 shrink-0 overflow-hidden rounded-lg border border-hairline bg-neutral-wash">
+              <div className="h-14 w-14 shrink-0 overflow-hidden rounded-lg border border-hairline bg-neutral-wash">
                 <ProductImage
                   product={line.product}
                   src={galleryFor(line.product)[0]}
@@ -648,7 +755,7 @@ function OrderSummary({ items, total }) {
               <div className="min-w-0 flex-1">
                 <p className="font-medium leading-snug text-ink">{line.product.name}</p>
                 {label && (
-                  <p className="mt-0.5 flex items-center gap-1.5 text-xs text-muted">
+                  <p className="mt-1 flex items-center gap-1.5 text-xs text-muted">
                     {line.variant?.colorHex && (
                       <span
                         aria-hidden="true"
@@ -659,7 +766,7 @@ function OrderSummary({ items, total }) {
                     {label}
                   </p>
                 )}
-                <p className="mt-0.5 text-xs text-muted">Qty {line.quantity}</p>
+                <p className="mt-1 text-xs text-muted">Qty {line.quantity}</p>
               </div>
 
               <span className="shrink-0 font-medium text-ink tabular">
@@ -669,10 +776,21 @@ function OrderSummary({ items, total }) {
           );
         })}
       </ul>
-      <div className="mt-4 flex justify-between border-t border-hairline pt-4 text-sm font-semibold text-ink">
-        <span>Total</span>
-        <span className="tabular">{money(total)}</span>
-      </div>
+
+      <dl className="space-y-2 border-t border-hairline px-5 py-5 text-sm">
+        <div className="flex items-baseline justify-between gap-3">
+          <dt className="text-ink-2">Subtotal</dt>
+          <dd className="font-medium text-ink tabular">{money(total)}</dd>
+        </div>
+        <div className="flex items-baseline justify-between gap-3">
+          <dt className="text-ink-2">Delivery</dt>
+          <dd className="text-ink-2">Calculated at dispatch</dd>
+        </div>
+        <div className="flex items-baseline justify-between gap-3 border-t border-hairline pt-3">
+          <dt className="font-semibold text-ink">Total</dt>
+          <dd className="font-display text-[22px] leading-none text-ink tabular">{money(total)}</dd>
+        </div>
+      </dl>
     </Card>
   );
 }

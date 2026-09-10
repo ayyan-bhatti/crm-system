@@ -1,7 +1,9 @@
+import { useState } from 'react';
 import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import usePermissions from '../hooks/usePermissions';
 import { humanize } from '../ui';
+import { Drawer, DropdownMenu, MenuItem } from './common';
 import CommandPalette, { openCommandPalette } from './CommandPalette';
 
 /**
@@ -117,10 +119,71 @@ function NavIcon({ name }) {
   );
 }
 
+/** The brand mark, shared with the storefront header so the two read as one product. */
+function Wordmark({ className = '' }) {
+  return (
+    <Link to="/crm" className={`flex items-center gap-2.5 ${className}`}>
+      <span className="flex h-8 w-8 items-center justify-center rounded-md bg-ink text-[15px] font-semibold text-plane">
+        S
+      </span>
+      <span className="font-display text-[19px] leading-none text-ink">SimpleCRM</span>
+    </Link>
+  );
+}
+
+/**
+ * The signed-in identity, as a menu rather than three stacked links.
+ *
+ * The account controls moved out of the sidebar and into the header because
+ * the sidebar's job is navigation between screens, and "sign out" is not a
+ * screen. It also buys back the vertical space the nav actually needs.
+ */
+function ProfileMenu({ user, initials, onLogout }) {
+  return (
+    <DropdownMenu
+      label="Account menu"
+      triggerClassName="flex items-center gap-2 rounded-md py-1 pl-1 pr-2 transition-colors hover:bg-sunken focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+      trigger={
+        <>
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand-wash text-xs font-semibold text-brand-ink">
+            {initials}
+          </span>
+          <span className="hidden min-w-0 text-left lg:block">
+            <span className="block truncate text-sm font-medium leading-tight text-ink">{user.name}</span>
+            <span className="block truncate text-xs leading-tight text-muted">{humanize(user.role)}</span>
+          </span>
+          <svg viewBox="0 0 20 20" className="hidden h-4 w-4 shrink-0 fill-muted lg:block" aria-hidden="true">
+            <path d="M5.6 7.5L10 11.9l4.4-4.4 1.4 1.4-5.8 5.8-5.8-5.8z" />
+          </svg>
+        </>
+      }
+    >
+      {(close) => (
+        <>
+          <div className="border-b border-hairline px-3 pb-2 pt-1 lg:hidden">
+            <p className="truncate text-sm font-medium text-ink">{user.name}</p>
+            <p className="truncate text-xs text-muted">{humanize(user.role)}</p>
+          </div>
+          <MenuItem to="/crm/account" onClick={close}>
+            Your account
+          </MenuItem>
+          <MenuItem to="/" onClick={close}>
+            Back to store
+          </MenuItem>
+          <MenuItem onClick={onLogout} className="border-t border-hairline">
+            Sign out
+          </MenuItem>
+        </>
+      )}
+    </DropdownMenu>
+  );
+}
+
 export default function DashboardLayout() {
   const { user, logout } = useAuth();
   const { can } = usePermissions();
   const navigate = useNavigate();
+  const [navOpen, setNavOpen] = useState(false);
 
   // Awaited so the navigation happens after the server has revoked the refresh
   // token — otherwise a fast click-through could race the request.
@@ -133,13 +196,10 @@ export default function DashboardLayout() {
     ...section,
     items: section.items.filter((item) => !item.requires || can[item.requires]),
   })).filter((section) => section.items.length > 0);
-  const visibleItems = NAV_ITEMS.filter((item) => !item.requires || can[item.requires]);
 
   const navClass = ({ isActive }) =>
-    `flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-all duration-200 ${
-      isActive
-        ? 'bg-brand text-ink shadow-card'
-        : 'text-ink-2 hover:translate-x-0.5 hover:bg-neutral-wash hover:text-ink'
+    `relative flex items-center gap-3 rounded-md py-2 pl-4 pr-3 text-sm font-medium transition-colors ${
+      isActive ? 'bg-sunken text-ink' : 'text-ink-2 hover:bg-sunken/70 hover:text-ink'
     }`;
 
   // Initials avatar — cheaper and more reliable than an image, and it never 404s.
@@ -150,152 +210,150 @@ export default function DashboardLayout() {
     .join('')
     .toUpperCase();
 
-  return (
-    <div className="crm-shell flex min-h-full">
-      <CommandPalette />
-
-      {/* --- Sidebar ----------------------------------------------------- */}
-      <aside className="hidden w-60 shrink-0 border-r border-hairline bg-surface sm:flex sm:flex-col">
-        <div className="flex h-16 items-center gap-2.5 px-5">
-          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-ink text-sm font-bold text-brand shadow-lift">
-            S
-          </span>
-          <span className="font-display text-[16px] font-semibold tracking-tight text-ink">
-            SimpleCRM
-          </span>
-        </div>
-
-        {/*
-          The command palette's trigger. Styled like a disabled search field
-          rather than a button, because that's the affordance people already
-          recognise from every app that has one of these — pressing it should
-          feel like the same thing typing Cmd/Ctrl+K does, so it opens the
-          identical palette instance rather than a second search UI.
-        */}
-        <button
-          type="button"
-          onClick={openCommandPalette}
-          className="mx-3 mb-2 flex items-center justify-between gap-2 rounded-lg border border-hairline bg-raised px-3 py-1.5 text-left text-sm text-muted transition-colors hover:text-ink-2"
-        >
-          <span className="flex items-center gap-2">
-            <svg viewBox="0 0 20 20" className="h-3.5 w-3.5 shrink-0 fill-current" aria-hidden="true">
-              <path d="M13 8a5 5 0 11-10 0 5 5 0 0110 0zm-1.6 4.6L15 16.2l-1.4 1.4-3.6-3.6 1.4-1.4z" />
-            </svg>
-            Search…
-          </span>
-          <kbd className="kbd-chip">⌘K</kbd>
-        </button>
-
-        {/*
-          The storefront's one entry point from the CRM — mirrors the small
-          "CRM" link ShopLayout offers in the other direction. Staff are
-          shoppers too, and closing this tab or hunting for the site's public
-          URL shouldn't be the only way back to it.
-        */}
-        <Link
-          to="/"
-          className="mx-3 mb-2 flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-muted hover:bg-neutral-wash hover:text-ink-2"
-        >
-          <svg viewBox="0 0 20 20" className="h-3.5 w-3.5 shrink-0 fill-current" aria-hidden="true">
-            <path d="M9.3 3.3a1 1 0 011.4 0l6 6a1 1 0 01-1.4 1.4L15 10.4V16a1 1 0 01-1 1h-3a1 1 0 01-1-1v-3H10v3a1 1 0 01-1 1H6a1 1 0 01-1-1v-5.6l-.3.3a1 1 0 01-1.4-1.4l6-6z" />
-          </svg>
-          Back to store
-        </Link>
-
-        <nav className="flex-1 space-y-4 overflow-y-auto px-3 py-2">
-          {visibleSections.map((section) => (
-            <div key={section.label}>
-              <p className="label-mono px-3 pb-1.5">{section.label}</p>
-              <div className="space-y-1">
-                {section.items.map((item) => (
-                  <NavLink key={item.to} to={item.to} end={item.end} className={navClass}>
+  const navigation = (
+    <nav className="flex-1 space-y-6 overflow-y-auto px-3 pb-6">
+      {visibleSections.map((section) => (
+        <div key={section.label}>
+          <p className="label-mono px-4 pb-2">{section.label}</p>
+          <div className="space-y-0.5">
+            {section.items.map((item) => (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                end={item.end}
+                className={navClass}
+                onClick={() => setNavOpen(false)}
+              >
+                {({ isActive }) => (
+                  <>
+                    {/*
+                      The active marker is a rail rather than a filled pill.
+                      A solid orange nav item would spend the one accent
+                      colour on "where you are", which is exactly the job a
+                      quiet background does perfectly well — leaving the
+                      orange free to mean "this is the action".
+                    */}
+                    {isActive && (
+                      <span
+                        className="absolute inset-y-1.5 left-0 w-[3px] rounded-full bg-brand"
+                        aria-hidden="true"
+                      />
+                    )}
                     <NavIcon name={item.icon} />
                     {item.label}
-                  </NavLink>
-                ))}
-              </div>
-            </div>
-          ))}
-        </nav>
-
-        {/* Signed-in identity, pinned to the bottom where account controls live. */}
-        <div className="border-t border-hairline p-3">
-          <div className="flex items-center gap-2.5 rounded-lg px-2 py-2">
-            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand-wash text-xs font-semibold text-brand-ink">
-              {initials}
-            </span>
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-medium text-ink">{user.name}</p>
-              <p className="truncate text-xs text-muted">{humanize(user.role)}</p>
-            </div>
+                  </>
+                )}
+              </NavLink>
+            ))}
           </div>
-
-          {/* The account page holds the change-password form. Reachable from
-              the identity block, which is where people look for it. */}
-          <NavLink
-            to="/crm/account"
-            className="mt-1 block w-full rounded-lg px-3 py-2 text-left text-sm font-medium text-ink-2 transition-colors hover:bg-neutral-wash hover:text-ink"
-          >
-            Your account
-          </NavLink>
-
-          <button
-            type="button"
-            onClick={handleLogout}
-            className="mt-1 w-full rounded-lg px-3 py-2 text-left text-sm font-medium text-ink-2 transition-colors hover:bg-neutral-wash hover:text-ink"
-          >
-            Sign out
-          </button>
         </div>
+      ))}
+    </nav>
+  );
+
+  const storeLink = (
+    <Link
+      to="/"
+      className="flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium text-muted transition-colors hover:bg-sunken hover:text-ink"
+    >
+      <svg viewBox="0 0 20 20" className="h-4 w-4 shrink-0 fill-current" aria-hidden="true">
+        <path d="M9.3 3.3a1 1 0 011.4 0l6 6a1 1 0 01-1.4 1.4L15 10.4V16a1 1 0 01-1 1h-3a1 1 0 01-1-1v-3H10v3a1 1 0 01-1 1H6a1 1 0 01-1-1v-5.6l-.3.3a1 1 0 01-1.4-1.4l6-6z" />
+      </svg>
+      Back to store
+    </Link>
+  );
+
+  return (
+    <div className="flex min-h-full">
+      <CommandPalette />
+
+      {/* --- Sidebar (desktop) -------------------------------------------- */}
+      <aside className="hidden w-64 shrink-0 flex-col border-r border-hairline bg-surface lg:flex">
+        <div className="flex h-16 shrink-0 items-center px-5">
+          <Wordmark />
+        </div>
+        {navigation}
+        <div className="border-t border-hairline p-3">{storeLink}</div>
       </aside>
 
-      {/* --- Main column -------------------------------------------------- */}
+      {/* --- Sidebar (mobile, as a drawer) --------------------------------- */}
+      <Drawer open={navOpen} onClose={() => setNavOpen(false)} side="left" title="Menu" className="max-w-[17rem]">
+        <div className="flex h-full flex-col pt-3">
+          {navigation}
+          <div className="border-t border-hairline p-3">{storeLink}</div>
+        </div>
+      </Drawer>
+
+      {/* --- Main column --------------------------------------------------- */}
       <div className="flex min-w-0 flex-1 flex-col">
-        {/* Mobile header: the sidebar is hidden below sm, so the nav repeats
-            here as a scrolling row. */}
-        <header className="flex h-16 items-center justify-between gap-4 border-b border-hairline bg-surface px-5 sm:hidden">
-          <span className="font-display text-[16px] font-semibold tracking-tight text-ink">
-            SimpleCRM
-          </span>
-          <div className="flex items-center gap-3">
-            <Link to="/" className="text-sm font-medium text-ink-2 hover:text-ink">
-              Store
-            </Link>
-            <NavLink
-              to="/crm/account"
-              className="flex h-8 w-8 items-center justify-center rounded-full bg-brand-wash text-xs font-semibold text-brand-ink"
-              aria-label="Your account"
-            >
-              {initials}
-            </NavLink>
-            <button
-              type="button"
-              onClick={handleLogout}
-              className="text-sm font-medium text-ink-2 hover:text-ink"
-            >
-              Sign out
-            </button>
+        {/*
+          The header carries search, what needs attention, and who you are —
+          the three things that belong to the session rather than to any one
+          screen. Sticky, because on a long table the search box is the first
+          thing you reach for after scrolling.
+        */}
+        <header className="sticky top-0 z-30 flex h-16 shrink-0 items-center gap-3 border-b border-hairline bg-plane/85 px-4 backdrop-blur-sm lg:px-8">
+          <button
+            type="button"
+            onClick={() => setNavOpen(true)}
+            aria-label="Open navigation"
+            className="-ml-1 rounded-md p-2 text-ink-2 transition-colors hover:bg-sunken hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand lg:hidden"
+          >
+            <svg viewBox="0 0 20 20" className="h-5 w-5 fill-current" aria-hidden="true">
+              <path d="M3 5h14v2H3V5zm0 4h14v2H3V9zm0 4h14v2H3v-2z" />
+            </svg>
+          </button>
+
+          <Wordmark className="lg:hidden" />
+
+          {/*
+            Styled as a field rather than a button, because that is the
+            affordance people recognise — and pressing it opens the identical
+            palette Cmd/Ctrl+K does, rather than a second search UI.
+          */}
+          <button
+            type="button"
+            onClick={openCommandPalette}
+            className="ml-auto flex w-full max-w-xs items-center justify-between gap-2 rounded-md border border-hairline bg-surface px-3 py-2 text-left text-sm text-muted transition-colors hover:border-rule hover:text-ink-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand lg:ml-0 lg:mr-auto"
+          >
+            <span className="flex items-center gap-2 truncate">
+              <svg viewBox="0 0 20 20" className="h-4 w-4 shrink-0 fill-current" aria-hidden="true">
+                <path d="M13 8a5 5 0 11-10 0 5 5 0 0110 0zm-1.6 4.6L15 16.2l-1.4 1.4-3.6-3.6 1.4-1.4z" />
+              </svg>
+              <span className="hidden sm:inline">Search customers, orders, products…</span>
+              <span className="sm:hidden">Search…</span>
+            </span>
+            <kbd className="kbd-chip hidden sm:inline-flex">⌘K</kbd>
+          </button>
+
+          <div className="flex shrink-0 items-center gap-1">
+            {/*
+              A real queue, not a decorative bell: it goes to the approvals
+              screen, and it only exists for the people who can act on it.
+              No count badge, because inventing one would mean a second fetch
+              on every screen to render a number nobody asked for.
+            */}
+            {can.approveChanges && (
+              <NavLink
+                to="/crm/approvals"
+                aria-label="Approvals waiting for you"
+                className={({ isActive }) =>
+                  `rounded-md p-2 transition-colors hover:bg-sunken focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand ${
+                    isActive ? 'text-brand-ink' : 'text-ink-2 hover:text-ink'
+                  }`
+                }
+              >
+                <svg viewBox="0 0 20 20" className="h-5 w-5 fill-current" aria-hidden="true">
+                  <path d="M10 2a5 5 0 00-5 5v2.6l-1.3 2.6a1 1 0 00.9 1.4h10.8a1 1 0 00.9-1.4L15 9.6V7a5 5 0 00-5-5zm0 16a2.5 2.5 0 002.4-1.8H7.6A2.5 2.5 0 0010 18z" />
+                </svg>
+              </NavLink>
+            )}
+
+            <ProfileMenu user={user} initials={initials} onLogout={handleLogout} />
           </div>
         </header>
 
-        <nav className="flex gap-1 overflow-x-auto border-b border-hairline bg-surface px-3 py-2 sm:hidden">
-          {visibleItems.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              end={item.end}
-              className={({ isActive }) =>
-                `whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-medium transition-all duration-200 ${
-                  isActive ? 'bg-brand text-ink' : 'text-ink-2'
-                }`
-              }
-            >
-              {item.label}
-            </NavLink>
-          ))}
-        </nav>
-
-        <main className="flex-1 overflow-x-hidden px-5 py-6 lg:px-8">
+        <main className="flex-1 overflow-x-hidden px-4 py-7 sm:px-6 lg:px-8">
           <div className="mx-auto max-w-[1400px]">
             <Outlet />
           </div>

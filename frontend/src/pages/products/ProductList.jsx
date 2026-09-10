@@ -4,9 +4,15 @@ import { productsApi } from '../../api/resources';
 import useFetch, { useDebounced } from '../../hooks/useFetch';
 import usePermissions from '../../hooks/usePermissions';
 import {
+  Button,
   Card,
   CardSkeleton,
+  Checkbox,
+  DropdownMenu,
   ListEmptyState,
+  MenuItem,
+  Select,
+  Table,
   TableSkeleton,
   ErrorBanner,
   PageHeader,
@@ -46,6 +52,8 @@ export default function ProductList() {
   const { data: categories } = useFetch(() => productsApi.categories(), []);
   const { can } = usePermissions();
 
+  const isFiltered = Boolean(category || lowStock || search);
+
   function setFilter(key, value) {
     const next = new URLSearchParams(searchParams);
     if (value) next.set(key, value);
@@ -60,11 +68,17 @@ export default function ProductList() {
     setSearchParams(next);
   }
 
+  function clearFilters() {
+    setSearchInput('');
+    setSearchParams(new URLSearchParams(), { replace: true });
+  }
+
   return (
     <div>
       <PageHeader
+        eyebrow="Commerce"
         title="Products"
-        subtitle="Inventory and stock levels."
+        subtitle="The catalogue, with the stock level behind every listing."
         action={
           <Can do="manageProducts">
             <Link to="/crm/products/new" className={btnPrimary}>
@@ -86,20 +100,24 @@ export default function ProductList() {
       {can.viewAllRecords && <ReorderSuggestionsCard />}
 
       <Card>
-        <div className="grid gap-3 border-b border-hairline p-4 sm:grid-cols-3">
-          <input
-            className={input}
-            placeholder="Search name or SKU"
-            value={searchInput}
-            onChange={(e) => {
-              setSearchInput(e.target.value);
-              setFilter('search', e.target.value);
-            }}
-          />
-
-          <select
-            className={input}
+        <FilterBar
+          onClear={isFiltered ? clearFilters : null}
+          search={
+            <SearchField
+              placeholder="Search name or SKU"
+              aria-label="Search products"
+              value={searchInput}
+              onChange={(e) => {
+                setSearchInput(e.target.value);
+                setFilter('search', e.target.value);
+              }}
+            />
+          }
+        >
+          <Select
+            className="sm:w-48"
             value={category}
+            aria-label="Filter by category"
             onChange={(e) => setFilter('category', e.target.value)}
           >
             <option value="">All categories</option>
@@ -108,88 +126,160 @@ export default function ProductList() {
                 {value}
               </option>
             ))}
-          </select>
+          </Select>
 
-          <label className="flex items-center gap-2 text-sm text-ink-2">
-            <input
-              type="checkbox"
-              className="h-4 w-4 rounded border-hairline"
-              checked={lowStock}
-              onChange={(e) => setFilter('lowStock', e.target.checked ? 'true' : '')}
-            />
-            Low stock only
-          </label>
-        </div>
+          <Checkbox
+            label="Low stock only"
+            className="whitespace-nowrap py-2"
+            checked={lowStock}
+            onChange={(e) => setFilter('lowStock', e.target.checked ? 'true' : '')}
+          />
+        </FilterBar>
 
         {loading ? (
           <TableSkeleton rows={6} columns={5} />
         ) : !data?.data.length ? (
           // Distinguishes "no products at all" from "none match your filters" —
           // see the note on ListEmptyState.
-          <ListEmptyState
-            filtered={Boolean(category || lowStock || search)}
-            entity="products"
-            onClear={() => {
-              setSearchInput('');
-              setSearchParams(new URLSearchParams(), { replace: true });
-            }}
-          />
+          <ListEmptyState filtered={isFiltered} entity="products" onClear={clearFilters} />
         ) : (
           <>
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="border-b border-hairline bg-plane">
-                  <tr>
-                    <th className={th}>Product</th>
-                    <th className={th}>Category</th>
-                    <th className={`${th} text-right`}>Price</th>
-                    <th className={`${th} text-right`}>Stock</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-hairline">
-                  {data.data.map((product) => (
-                    <tr key={product._id} className="hover:bg-plane">
-                      <td className={td}>
+            <Table caption="Products, with category, price and stock on hand">
+              <thead className="bg-sunken">
+                <tr className="border-b border-hairline">
+                  <th className={th}>Product</th>
+                  <th className={th}>Category</th>
+                  <th className={`${th} text-right`}>Price</th>
+                  <th className={`${th} text-right`}>Stock</th>
+                  <th className={`${th} w-12 text-right`}>
+                    <span className="sr-only">Actions</span>
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-hairline">
+                {data.data.map((product) => (
+                  <tr key={product._id} className="transition-colors hover:bg-sunken/60">
+                    <td className={td}>
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                         <Link to={`/crm/products/${product._id}`} className={link}>
                           {product.name}
                         </Link>
-                        {product.featured && (
-                          <span className="ml-2 rounded-full bg-brand-wash px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-brand-ink">
-                            Featured
-                          </span>
-                        )}
-                        {product.isActive === false && (
-                          <span className="ml-2 rounded-full bg-neutral-wash px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-neutral-ink">
-                            Inactive
-                          </span>
-                        )}
-                        <p className="label-mono mt-0.5">
-                          {product.sku}
-                          {product.brand ? ` · ${product.brand}` : ''}
-                        </p>
-                      </td>
-                      <td className={td}>{product.category}</td>
-                      <td className={`${td} text-right`}>{money(product.price)}</td>
-                      <td className={`${td} text-right`}>
-                        <span className={product.isLowStock ? 'font-medium text-critical-ink' : ''}>
-                          {product.stockQty}
+                        {product.featured && <Tag tone="brand">Featured</Tag>}
+                        {product.isActive === false && <Tag tone="neutral">Inactive</Tag>}
+                      </div>
+                      <p className="label-mono mt-1">
+                        {product.sku}
+                        {product.brand ? ` · ${product.brand}` : ''}
+                      </p>
+                    </td>
+                    <td className={td}>{product.category}</td>
+                    <td className={`${td} whitespace-nowrap text-right tabular`}>
+                      {money(product.price)}
+                    </td>
+                    <td className={`${td} whitespace-nowrap text-right`}>
+                      <span
+                        className={`tabular ${
+                          product.isLowStock ? 'font-semibold text-critical-ink' : ''
+                        }`}
+                      >
+                        {product.stockQty}
+                      </span>
+                      {product.isLowStock && (
+                        <span className="ml-2 rounded-full bg-critical-wash px-2 py-0.5 text-xs font-medium text-critical-ink">
+                          Low
                         </span>
-                        {product.isLowStock && (
-                          <span className="ml-2 rounded-full bg-critical-wash px-2 py-0.5 text-xs font-medium text-critical-ink">
-                            Low
-                          </span>
+                      )}
+                    </td>
+                    <td className={`${td} text-right`}>
+                      <RowMenu label={`Actions for ${product.name}`}>
+                        <MenuItem to={`/crm/products/${product._id}`}>Open product</MenuItem>
+                        {can.manageProducts && (
+                          <MenuItem to={`/crm/products/${product._id}/edit`}>Edit product</MenuItem>
                         )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                      </RowMenu>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
 
             <Pagination page={data.page} pages={data.pages} total={data.total} onChange={setPage} />
           </>
         )}
       </Card>
+    </div>
+  );
+}
+
+/* --- List furniture, local to this screen ---------------------------------
+ * See the note on the same helpers in CustomerList: CRM-list chrome stays
+ * beside the list rather than in the shared library.
+ * ------------------------------------------------------------------------*/
+
+/** A small inline marker on a product name — featured, inactive. */
+function Tag({ tone, children }) {
+  const tones = {
+    brand: 'bg-brand-wash text-brand-ink',
+    neutral: 'bg-neutral-wash text-neutral-ink',
+  };
+
+  return (
+    <span
+      className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${tones[tone]}`}
+    >
+      {children}
+    </span>
+  );
+}
+
+/** A search input with the magnifier inside it rather than beside it. */
+function SearchField({ className = '', ...rest }) {
+  return (
+    <div className="relative">
+      <svg
+        viewBox="0 0 20 20"
+        className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 fill-muted"
+        aria-hidden="true"
+      >
+        <path d="M9 2a7 7 0 105.2 11.66l3.07 3.07a1 1 0 001.42-1.42l-3.07-3.07A7 7 0 009 2zm0 2a5 5 0 110 10A5 5 0 019 4z" />
+      </svg>
+      <input type="search" className={`${input} pl-9 ${className}`} {...rest} />
+    </div>
+  );
+}
+
+/** Search left, filters right, and a clear affordance only once one is set. */
+function FilterBar({ search, children, onClear }) {
+  return (
+    <div className="flex flex-col gap-3 border-b border-hairline p-4 lg:flex-row lg:items-center">
+      <div className="min-w-0 flex-1 lg:max-w-sm">{search}</div>
+      <div className="flex flex-wrap items-center gap-3 lg:justify-end">
+        {children}
+        {onClear && (
+          <Button variant="ghost" size="sm" onClick={onClear}>
+            Clear filters
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** The "⋯" row-actions trigger, with the menu the caller supplies. */
+function RowMenu({ label, children }) {
+  return (
+    <div className="flex justify-end">
+      <DropdownMenu
+        label={label}
+        triggerClassName="flex h-8 w-8 items-center justify-center rounded-md text-muted transition-colors hover:bg-sunken hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+        trigger={
+          <svg viewBox="0 0 20 20" className="h-4 w-4 fill-current" aria-hidden="true">
+            <path d="M6 10a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0zm5.5 0a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0zm5.5 0a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0z" />
+          </svg>
+        }
+      >
+        {children}
+      </DropdownMenu>
     </div>
   );
 }
@@ -207,17 +297,30 @@ function ReorderSuggestionsCard() {
 
   return (
     <Card className="mb-4 p-5">
-      <h2 className="text-sm font-semibold text-ink">Reorder suggestions</h2>
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <div>
+          <p className="label-mono">Stock planning</p>
+          <h2 className="mt-1 text-sm font-semibold text-ink">Reorder suggestions</h2>
+        </div>
+        {suggestions.length > 0 && (
+          <span className="rounded-full bg-warning-wash px-2.5 py-0.5 text-xs font-medium text-warning-ink">
+            {suggestions.length} to review
+          </span>
+        )}
+      </div>
 
       {loading && <CardSkeleton lines={2} />}
       <ErrorBanner message={error} />
 
       {suggestions.length > 0 && (
-        <ul className="mt-3 grid gap-3 sm:grid-cols-2">
+        <ul className="mt-4 grid gap-3 sm:grid-cols-2">
           {suggestions.map((item) => (
-            <li key={item.productId} className="rounded-lg border border-hairline p-3 text-sm">
-              <p className="font-medium text-ink">{item.name}</p>
-              <p className="mt-0.5 text-xs text-ink-2">{item.justification}</p>
+            <li
+              key={item.productId}
+              className="rounded-md border border-hairline bg-plane p-3 text-sm"
+            >
+              <p className="font-semibold text-ink">{item.name}</p>
+              <p className="mt-1 text-xs leading-relaxed text-ink-2">{item.justification}</p>
             </li>
           ))}
         </ul>

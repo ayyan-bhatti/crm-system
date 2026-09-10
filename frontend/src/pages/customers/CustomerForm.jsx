@@ -6,9 +6,21 @@ import { errorMessage } from '../../api/client';
 import useFetch from '../../hooks/useFetch';
 import usePermissions from '../../hooks/usePermissions';
 import { useToast } from '../../components/Toast';
-import { Card, ErrorBanner, Field, PageHeader, Spinner } from '../../components/common';
+import {
+  Breadcrumb,
+  Button,
+  Card,
+  ErrorBanner,
+  Field,
+  PageHeader,
+  Select,
+  Spinner,
+  Textarea,
+  useFormValidation,
+  validators,
+} from '../../components/common';
 import { CUSTOMER_STATUSES } from '../../constants';
-import { btnPrimary, btnSecondary, input } from '../../ui';
+import { humanize } from '../../ui';
 
 /**
  * Create and edit share one component.
@@ -16,7 +28,24 @@ import { btnPrimary, btnSecondary, input } from '../../ui';
  * The two screens differ only in whether they load an existing record first and
  * which API call they submit to — duplicating the twelve form fields to keep
  * them separate would mean every future field change has to be made twice.
+ *
+ * THE FORM IS SECTIONED, and that is not decoration. A single stack of twelve
+ * controls asks the reader to work out for themselves which of them belong
+ * together; three headed sections say it. It also gives every group a place to
+ * carry one line of explanation, which is where "why does this form want a
+ * consent tick?" gets answered rather than in a support call.
  */
+
+/**
+ * Defined at module scope so its identity is stable across renders — the
+ * validation hook memoises on it.
+ */
+const RULES = {
+  name: validators.required('Name'),
+  email: validators.email,
+  phone: validators.phone,
+};
+
 export default function CustomerForm() {
   const { id } = useParams();
   const isEdit = Boolean(id);
@@ -39,6 +68,14 @@ export default function CustomerForm() {
   });
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+
+  /*
+   * Client-side validation that only speaks once the user has had their turn —
+   * nothing is reported until a field has been blurred or the form submitted.
+   * See the long note on `useFormValidation`.
+   */
+  const { visibleErrors, markTouched, validate } = useFormValidation(RULES);
+  const errors = visibleErrors(form);
 
   /*
    * A successful save navigates to the customer's detail page, so the
@@ -96,8 +133,23 @@ export default function CustomerForm() {
     setForm((prev) => ({ ...prev, [field]: value }));
   }
 
+  /** Wires a text field to its value, its error and its blur in one place. */
+  function fieldProps(field) {
+    return {
+      value: form[field],
+      error: errors[field],
+      onChange: (event) => update(field, event.target.value),
+      onBlur: () => markTouched(field),
+    };
+  }
+
   async function handleSubmit(event) {
     event.preventDefault();
+
+    // Stops here rather than sending something the server will only refuse.
+    // `validate` also flips every field to "reported", so nothing stays hidden.
+    if (!validate(form)) return;
+
     setSubmitting(true);
     setError('');
 
@@ -127,48 +179,84 @@ export default function CustomerForm() {
    */
   if (isEdit && loadError) {
     return (
-      <div className="mx-auto max-w-2xl">
-        <PageHeader title="Edit customer" />
+      <div className="mx-auto max-w-3xl">
+        <Breadcrumb
+          className="mb-3"
+          items={[{ label: 'Customers', to: '/crm/customers' }, { label: 'Edit customer' }]}
+        />
+        <PageHeader eyebrow="Customer" title="Edit customer" />
         <ErrorBanner message={loadError} />
       </div>
     );
   }
 
   return (
-    <div className="mx-auto max-w-2xl">
-      <PageHeader title={isEdit ? 'Edit customer' : 'New customer'} />
+    <div className="mx-auto max-w-3xl">
+      <Breadcrumb
+        className="mb-3"
+        items={[
+          { label: 'Customers', to: '/crm/customers' },
+          ...(isEdit && existing ? [{ label: existing.name, to: `/crm/customers/${id}` }] : []),
+          { label: isEdit ? 'Edit' : 'New customer' },
+        ]}
+      />
 
-      <Card className="p-6">
-        <ErrorBanner message={error} onDismiss={() => setError('')} />
+      <PageHeader
+        eyebrow="Customer"
+        title={isEdit ? 'Edit customer' : 'New customer'}
+        subtitle={
+          isEdit
+            ? 'Changes take effect as soon as you save. Consent changes are written to the audit trail.'
+            : 'Only a name and an email are required — everything else can be filled in later.'
+        }
+      />
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+      <ErrorBanner message={error} onDismiss={() => setError('')} />
+
+      {/*
+        `noValidate` because this form shows its own messages. The native
+        bubble suppresses them, and it cannot say anything useful about why a
+        field matters.
+      */}
+      <form onSubmit={handleSubmit} noValidate className="space-y-5">
+        <Section
+          title="Who they are"
+          description="The details anyone would need to reach this account."
+        >
           <div className="grid gap-4 sm:grid-cols-2">
             <Field
               label="Name"
               required
-              value={form.name}
-              onChange={(e) => update('name', e.target.value)}
+              placeholder="Karachi Textiles"
+              autoComplete="organization"
+              {...fieldProps('name')}
             />
             <Field
               label="Email"
               type="email"
               required
+              inputMode="email"
+              autoComplete="email"
+              placeholder="orders@karachitextiles.com"
               hint="Used to match this customer to any storefront orders they place."
-              value={form.email}
-              onChange={(e) => update('email', e.target.value)}
+              {...fieldProps('email')}
             />
             <Field
               label="Phone"
+              type="tel"
+              inputMode="tel"
+              autoComplete="tel"
+              placeholder="+92 300 1234567"
               hint="Needed if they place an order."
-              value={form.phone}
-              onChange={(e) => update('phone', e.target.value)}
+              {...fieldProps('phone')}
             />
             <Field
               label="Company"
-              value={form.company}
-              onChange={(e) => update('company', e.target.value)}
+              placeholder="Karachi Textiles Ltd"
+              autoComplete="organization"
+              {...fieldProps('company')}
             />
-            <Field label="City" value={form.city} onChange={(e) => update('city', e.target.value)} />
+            <Field label="City" placeholder="Karachi" {...fieldProps('city')} />
 
             {/*
               A textarea and one free-text block, not street/postcode/country
@@ -186,88 +274,131 @@ export default function CustomerForm() {
                 label="Address"
                 hint="Optional unless an order needs delivery — where deliveries go. Shown to the rep working an order for this customer."
               >
-                <textarea
+                <Textarea
                   rows={3}
-                  className={input}
+                  placeholder={'Plot 14, Korangi Industrial Area\nKarachi 74900'}
                   value={form.address}
                   onChange={(e) => update('address', e.target.value)}
                 />
               </Field>
             </div>
+          </div>
+        </Section>
 
-            <Field label="Status">
-              <select
-                className={input}
-                value={form.status}
-                onChange={(e) => update('status', e.target.value)}
-              >
+        <Section
+          title="Ownership"
+          description="Where this account sits in the pipeline, and who is looking after it."
+        >
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Status" hint="Move a lead to active once they have bought something.">
+              <Select value={form.status} onChange={(e) => update('status', e.target.value)}>
                 {CUSTOMER_STATUSES.map((value) => (
                   <option key={value} value={value}>
-                    {value}
+                    {humanize(value)}
                   </option>
                 ))}
-              </select>
+              </Select>
             </Field>
-          </div>
 
-          {canReassign && (
-            <Field label="Assigned to" hint="Leave blank to assign later.">
-              <select
-                className={input}
-                value={form.assignedTo}
-                onChange={(e) => update('assignedTo', e.target.value)}
+            {canReassign && (
+              <Field label="Assigned to" hint="Leave blank to assign later.">
+                <Select
+                  value={form.assignedTo}
+                  onChange={(e) => update('assignedTo', e.target.value)}
+                >
+                  <option value="">Unassigned</option>
+                  {(users || []).map((u) => (
+                    <option key={u._id} value={u._id}>
+                      {u.name} ({u.role})
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+            )}
+
+            <div className="sm:col-span-2">
+              <Field
+                label="Notes"
+                hint="Up to 2,000 characters. Visible to everyone who can open this account."
               >
-                <option value="">Unassigned</option>
-                {(users || []).map((u) => (
-                  <option key={u._id} value={u._id}>
-                    {u.name} ({u.role})
-                  </option>
-                ))}
-              </select>
-            </Field>
-          )}
+                <Textarea
+                  rows={4}
+                  maxLength={2000}
+                  value={form.notes}
+                  onChange={(e) => update('notes', e.target.value)}
+                  placeholder="Anything worth remembering about this account."
+                />
+              </Field>
+            </div>
+          </div>
+        </Section>
 
-          <Field label="Notes">
-            <textarea
-              className={`${input} min-h-28`}
-              maxLength={2000}
-              value={form.notes}
-              onChange={(e) => update('notes', e.target.value)}
-              placeholder="Anything worth remembering about this account."
-            />
-          </Field>
+        {/*
+          Marketing consent.
 
-          {/*
-            Marketing consent.
+          THREE SEPARATE BOXES, and every one starts unchecked — for a new
+          customer because the schema defaults them off, and on an edit because
+          they are read from what is actually stored. There is no code path
+          through this form that produces an opted-in customer without somebody
+          ticking a box.
 
-            THREE SEPARATE BOXES, and every one starts unchecked — for a new
-            customer because the schema defaults them off, and on an edit
-            because they are read from what is actually stored. There is no
-            code path through this form that produces an opted-in customer
-            without somebody ticking a box.
-
-            The warning is not decoration. A rep can type a customer in from a
-            business card, and a business card is not consent. Every change
-            here is written to the audit trail against the name of whoever made
-            it, which is exactly the record a complaint gets checked against.
-          */}
+          The warning is not decoration. A rep can type a customer in from a
+          business card, and a business card is not consent. Every change here
+          is written to the audit trail against the name of whoever made it,
+          which is exactly the record a complaint gets checked against.
+        */}
+        <Section
+          title="Marketing consent"
+          description="Nothing is ticked by default, and nothing here is inferred from a purchase."
+        >
           <ConsentCheckboxes
             legend="Marketing consent"
             hint="Only tick these if this person has actually agreed to be contacted this way. Changes are recorded in the audit trail against your name."
             value={form}
             onChange={(next) => setForm((prev) => ({ ...prev, ...next }))}
           />
+        </Section>
 
-          <div className="flex gap-3 pt-2">
-            <button type="submit" className={btnPrimary} disabled={submitting}>
-              {submitting ? <Spinner /> : isEdit ? 'Save changes' : 'Create customer'}
-            </button>
-            <button type="button" className={btnSecondary} onClick={() => navigate(-1)}>
+        {/*
+          THE ACTION BAR STICKS TO THE BOTTOM OF THE VIEWPORT.
+
+          A four-section form is taller than a laptop screen, and a save button
+          that has to be scrolled to is a save button people forget is there.
+          Sticky on desktop only — on a phone the browser chrome already eats
+          the bottom of the screen, and a bar pinned over it is worse than one
+          at the end of the content.
+        */}
+        <div className="sticky bottom-0 -mx-1 border-t border-hairline bg-plane/95 px-1 py-3 backdrop-blur supports-[backdrop-filter]:bg-plane/80">
+          <div className="flex flex-wrap items-center gap-3">
+            <Button
+              type="submit"
+              loading={submitting}
+              loadingLabel={isEdit ? 'Saving…' : 'Creating…'}
+            >
+              {isEdit ? 'Save changes' : 'Create customer'}
+            </Button>
+            <Button variant="secondary" onClick={() => navigate(-1)}>
               Cancel
-            </button>
+            </Button>
+            <p className="text-xs text-muted">
+              {isEdit ? 'Saving returns you to this customer.' : 'Required fields are marked *.'}
+            </p>
           </div>
-        </form>
-      </Card>
+        </div>
+      </form>
     </div>
+  );
+}
+
+/** One headed group of fields, with the sentence that explains why it exists. */
+function Section({ title, description, children }) {
+  return (
+    <Card className="p-5 sm:p-6">
+      <div className="mb-5 border-b border-hairline pb-4">
+        <h2 className="text-base font-semibold text-ink">{title}</h2>
+        {description && <p className="mt-1 text-sm text-ink-2">{description}</p>}
+      </div>
+      {children}
+    </Card>
   );
 }

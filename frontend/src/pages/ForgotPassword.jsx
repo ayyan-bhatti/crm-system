@@ -2,8 +2,9 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { authApi } from '../api/resources';
 import { errorMessage } from '../api/client';
-import { Card, ErrorBanner, Field, Spinner } from '../components/common';
-import { btnPrimary, link } from '../ui';
+import { Button, Card, ErrorBanner, Field, useFormValidation, validators } from '../components/common';
+import { link } from '../ui';
+import AuthLayout, { StatusRegion } from './AuthLayout';
 
 /**
  * "I forgot my password."
@@ -20,14 +21,21 @@ import { btnPrimary, link } from '../ui';
  * and the note about checking the address covers the mistyped-email case
  * without confirming anything.
  */
+const RULES = { email: validators.email };
+
 export default function ForgotPassword() {
   const [email, setEmail] = useState('');
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
+  const { visibleErrors, markTouched, validate } = useFormValidation(RULES);
+  const errors = visibleErrors({ email });
+
   async function handleSubmit(event) {
     event.preventDefault();
+    if (!validate({ email })) return;
+
     setSubmitting(true);
     setError('');
 
@@ -44,57 +52,77 @@ export default function ForgotPassword() {
   }
 
   return (
-    <div className="crm-shell flex min-h-full items-center justify-center px-4 py-12">
-      <div className="animate-fade-rise w-full max-w-sm">
-        <div className="mb-7 text-center">
-          <h1 className="text-2xl font-semibold tracking-tight text-ink">Reset your password</h1>
-          <p className="mt-1.5 text-sm text-ink-2">
-            We will email you a link to choose a new one.
-          </p>
-        </div>
-
-        <Card className="p-6 shadow-lift">
-          {submitted ? (
-            <div className="text-center">
-              <p className="text-sm font-medium text-ink">Check your inbox</p>
-              <p className="mt-2 text-sm text-ink-2">
-                If an account exists for <span className="font-medium text-ink">{email}</span>, a
-                reset link is on its way. It expires in 30 minutes.
-              </p>
-              <p className="mt-3 text-xs text-muted">
-                Nothing arrived? Check the address for typos, and look in your spam folder.
-              </p>
-            </div>
-          ) : (
-            <>
-              <ErrorBanner message={error} />
-
-              <form onSubmit={handleSubmit} className="space-y-4">
-                <Field
-                  label="Email"
-                  type="email"
-                  autoComplete="email"
-                  placeholder="you@company.com"
-                  required
-                  value={email}
-                  onChange={(event) => setEmail(event.target.value)}
-                />
-
-                <button type="submit" className={`${btnPrimary} w-full`} disabled={submitting}>
-                  {submitting ? <Spinner /> : 'Send reset link'}
-                </button>
-              </form>
-            </>
-          )}
-        </Card>
-
-        <p className="mt-5 text-center text-sm text-ink-2">
+    <AuthLayout
+      eyebrow="Password reset"
+      title={submitted ? 'Check your inbox' : 'Reset your password'}
+      subtitle={
+        submitted
+          ? 'The same message appears whether or not the address has an account — that is deliberate.'
+          : 'We will email you a link to choose a new one.'
+      }
+      footer={
+        <>
           Remembered it?{' '}
           <Link to="/crm/login" className={link}>
             Sign in
           </Link>
-        </p>
-      </div>
-    </div>
+        </>
+      }
+    >
+      <Card className="p-6 shadow-lift sm:p-7">
+        {submitted ? (
+          <div aria-live="polite">
+            <div className="flex items-start gap-3 rounded-lg border border-good/25 bg-good-wash px-4 py-3 text-sm text-good-ink">
+              <svg
+                viewBox="0 0 20 20"
+                className="mt-0.5 h-4 w-4 shrink-0 fill-current"
+                aria-hidden="true"
+              >
+                <path d="M10 2a8 8 0 100 16 8 8 0 000-16zm4 6.2l-4.7 4.7a1 1 0 01-1.42 0L6 11.02l1.42-1.42 1.17 1.18 4-4L14 8.2z" />
+              </svg>
+              <p>
+                If an account exists for{' '}
+                <span className="font-semibold break-words">{email}</span>, a reset link is on its
+                way. It expires in 30 minutes.
+              </p>
+            </div>
+
+            <p className="mt-4 text-xs leading-relaxed text-muted">
+              Nothing arrived? Check the address for typos, and look in your spam folder.
+            </p>
+          </div>
+        ) : (
+          <>
+            <StatusRegion>
+              <ErrorBanner message={error} />
+            </StatusRegion>
+
+            <form onSubmit={handleSubmit} noValidate className="space-y-4">
+              <Field
+                label="Email address"
+                type="email"
+                inputMode="email"
+                autoComplete="email"
+                placeholder="name@example.com"
+                required
+                value={email}
+                error={errors.email}
+                onBlur={() => markTouched('email')}
+                onChange={(event) => setEmail(event.target.value)}
+              />
+
+              <Button
+                type="submit"
+                className="w-full"
+                loading={submitting}
+                loadingLabel="Sending…"
+              >
+                Send reset link
+              </Button>
+            </form>
+          </>
+        )}
+      </Card>
+    </AuthLayout>
   );
 }

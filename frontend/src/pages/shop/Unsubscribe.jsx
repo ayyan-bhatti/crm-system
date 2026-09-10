@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { unsubscribeApi } from '../../api/resources';
-import { Card, Spinner } from '../../components/common';
-import { btnSecondary } from '../../ui';
+import { ButtonLink, Spinner } from '../../components/common';
 
 /**
  * Where the unsubscribe link in a marketing email lands.
@@ -37,6 +36,17 @@ import { btnSecondary } from '../../ui';
  * has no account to sign in to. Requiring one would make it impossible for
  * exactly the people least likely to want the mail. The signed token in the
  * link is the authorisation; see backend/src/services/unsubscribeService.js.
+ *
+ * ============================================================================
+ * WHY IT IS SET AS AN APOLOGY RATHER THAN AS AN INTERFACE
+ * ============================================================================
+ *
+ * This is the last page of a relationship, and it is reached by somebody who
+ * is at best indifferent and at worst annoyed. So it is one column, generously
+ * spaced, with a sentence of reassurance about the mail that is NOT stopping —
+ * order confirmations and delivery updates — because the commonest real fear
+ * on this page is "have I just stopped hearing about my parcel". No upsell, no
+ * "are you sure", no offer to reduce the frequency instead.
  */
 export default function Unsubscribe() {
   const [params] = useSearchParams();
@@ -103,40 +113,51 @@ export default function Unsubscribe() {
     };
   }, [token]);
 
+  const failed = state.status === 'invalid' || state.status === 'error';
+
   return (
-    <div className="mx-auto max-w-lg px-4 py-16">
-      <Card className="p-8 text-center">
-        {state.status === 'working' && (
-          <>
-            <Spinner />
-            <p className="mt-3 text-sm text-muted">Updating your preferences…</p>
-          </>
-        )}
+    <div className="mx-auto max-w-xl px-4 py-16 sm:py-24">
+      {state.status === 'working' && (
+        <div className="text-center">
+          <Spinner />
+          <p className="mt-4 text-sm text-muted" role="status">
+            Updating your preferences…
+          </p>
+        </div>
+      )}
 
-        {state.status === 'done' && (
-          <>
-            <h1 className="text-xl font-semibold text-ink">
-              {state.channelLabel ? `Unsubscribed from ${state.channelLabel}` : 'Unsubscribed'}
-            </h1>
-            <p className="mt-3 text-sm text-ink-2">{state.message}</p>
-            <p className="mt-3 text-xs text-muted">
-              You will still receive messages about orders you place — confirmations, delivery
-              updates and anything you ask us about. Those are not marketing and are not affected.
-            </p>
-          </>
-        )}
+      {state.status === 'done' && (
+        <>
+          <p className="label-mono">Preferences updated</p>
+          <h1 className="font-display mt-3 text-[34px] leading-[1.1] text-ink sm:text-[42px]">
+            {state.channelLabel ? `Unsubscribed from ${state.channelLabel}` : 'Unsubscribed'}
+          </h1>
+          <p className="mt-5 text-[15px] leading-relaxed text-ink-2">{state.message}</p>
 
-        {(state.status === 'invalid' || state.status === 'error') && (
-          <>
-            <h1 className="text-xl font-semibold text-ink">We could not do that</h1>
-            <p className="mt-3 text-sm text-ink-2">{state.message}</p>
-          </>
-        )}
+          <p className="mt-8 border-t border-hairline pt-6 text-sm leading-relaxed text-muted">
+            You will still receive messages about orders you place — confirmations, delivery
+            updates and anything you ask us about. Those are not marketing and are not affected.
+          </p>
+        </>
+      )}
 
-        <Link to="/" className={`${btnSecondary} mt-6 inline-flex`}>
-          Back to the shop
-        </Link>
-      </Card>
+      {failed && (
+        <>
+          <p className="label-mono">Unsubscribe</p>
+          <h1 className="font-display mt-3 text-[34px] leading-[1.1] text-ink sm:text-[42px]">
+            We could not do that
+          </h1>
+          <p className="mt-5 text-[15px] leading-relaxed text-ink-2">{state.message}</p>
+        </>
+      )}
+
+      {state.status !== 'working' && (
+        <div className="mt-10">
+          <ButtonLink to="/" variant="secondary" size="lg">
+            Back to the shop
+          </ButtonLink>
+        </div>
+      )}
     </div>
   );
 }

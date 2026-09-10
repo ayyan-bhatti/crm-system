@@ -2,8 +2,17 @@ import { useState } from 'react';
 import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { errorMessage } from '../api/client';
-import { Card, ErrorBanner, Field, Spinner } from '../components/common';
-import { btnPrimary, link } from '../ui';
+import {
+  Button,
+  Card,
+  ErrorBanner,
+  Field,
+  Spinner,
+  useFormValidation,
+  validators,
+} from '../components/common';
+import { link } from '../ui';
+import AuthLayout, { PasswordField, StatusRegion } from './AuthLayout';
 
 /**
  * Real, already-shipped things this app does — not marketing copy invented
@@ -12,9 +21,32 @@ import { btnPrimary, link } from '../ui';
  */
 const HIGHLIGHTS = [
   { title: 'One decision queue', body: 'Every proposed change, from any manager, in one place.' },
-  { title: 'AI that shows its work', body: 'Figures come from the database; the model only writes the sentence around them.' },
-  { title: 'A command palette', body: 'Press ⌘K anywhere in the CRM to jump straight to a customer, order or page.' },
+  {
+    title: 'AI that shows its work',
+    body: 'Figures come from the database; the model only writes the sentence around them.',
+  },
+  {
+    title: 'A command palette',
+    body: 'Press ⌘K anywhere in the CRM to jump straight to a customer, order or page.',
+  },
 ];
+
+/**
+ * THE PASSWORD RULE HERE IS "NOT EMPTY", NOT THE SIGN-UP POLICY.
+ *
+ * Sign-in is not the place to enforce a length: the only passwords that reach
+ * this form are ones that already exist, and telling somebody their real
+ * password is "too short" to even try is both wrong and a small disclosure
+ * about the policy. The server decides whether the credentials are good; this
+ * only catches the empty submit.
+ *
+ * Defined at module scope because `useFormValidation` memoises on `rules` — an
+ * object literal in the body would be a new identity every render.
+ */
+const RULES = {
+  email: validators.email,
+  password: validators.required('Password'),
+};
 
 export default function Login() {
   const { login, isAuthenticated, loading: sessionLoading } = useAuth();
@@ -25,6 +57,9 @@ export default function Login() {
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
+  const { visibleErrors, markTouched, validate } = useFormValidation(RULES);
+  const errors = visibleErrors(form);
+
   // Wait for the session check before deciding — otherwise a refresh on /login
   // briefly shows the form to someone who is already signed in.
   if (sessionLoading) return <Spinner full />;
@@ -32,6 +67,8 @@ export default function Login() {
 
   async function handleSubmit(event) {
     event.preventDefault();
+    if (!validate(form)) return;
+
     setSubmitting(true);
     setError('');
 
@@ -47,100 +84,86 @@ export default function Login() {
   }
 
   return (
-    <div className="crm-shell flex min-h-full">
-      {/* --- Brand panel — hidden below lg, where there is no room for two
-          columns and the form is the only thing that matters anyway. ----- */}
-      <div className="relative hidden w-[42%] shrink-0 flex-col justify-between overflow-hidden border-r border-hairline bg-surface px-12 py-14 lg:flex">
-        <div className="flex items-center gap-2.5">
-          <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-ink text-sm font-bold text-brand shadow-lift">
-            S
-          </span>
-          <span className="font-display text-lg font-semibold tracking-tight text-ink">
-            SimpleCRM
-          </span>
-        </div>
-
-        <div className="animate-fade-rise">
-          <h1 className="max-w-md text-4xl font-semibold leading-[1.1] tracking-tight text-ink">
-            Run the whole business from one screen.
-          </h1>
-          <p className="mt-4 max-w-sm text-sm text-ink-2">
-            Customers, orders, approvals and delivery — one system, scoped to
-            what each role actually needs to see.
-          </p>
-        </div>
-
-        <ul className="stagger-children space-y-5">
+    <AuthLayout
+      eyebrow="Sign in"
+      title="Welcome back"
+      subtitle="Sign in to your SimpleCRM account."
+      aside={
+        <ul className="space-y-4">
           {HIGHLIGHTS.map((item) => (
             <li key={item.title} className="flex gap-3">
-              <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-brand" aria-hidden="true" />
-              <div>
-                <p className="text-sm font-medium text-ink">{item.title}</p>
-                <p className="mt-0.5 text-sm text-muted">{item.body}</p>
+              <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand" aria-hidden="true" />
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-plane">{item.title}</p>
+                <p className="mt-0.5 text-sm leading-relaxed text-plane/60">{item.body}</p>
               </div>
             </li>
           ))}
         </ul>
-      </div>
+      }
+      footer={
+        <>
+          No account?{' '}
+          {/* "Request one", not "Create one": signing up does not produce a
+              working account, and saying so here rather than only on the next
+              page sets the expectation before anyone fills in a form. */}
+          <Link to="/crm/register" className={link}>
+            Request one
+          </Link>
+        </>
+      }
+    >
+      <Card className="p-6 shadow-lift sm:p-7">
+        <StatusRegion>
+          <ErrorBanner message={error} />
+        </StatusRegion>
 
-      {/* --- Form column --------------------------------------------------- */}
-      <div className="flex flex-1 items-center justify-center px-4 py-12">
-        <div className="animate-fade-rise w-full max-w-sm">
-          <div className="mb-7 text-center lg:hidden">
-            <span className="mx-auto mb-4 flex h-11 w-11 items-center justify-center rounded-xl bg-ink text-lg font-bold text-brand shadow-lift">
-              S
-            </span>
-          </div>
+        {/*
+          `noValidate` because the app validates itself. Left on, the browser's
+          own bubble fires first and replaces this form's message with a
+          generic one nobody wrote.
+        */}
+        <form onSubmit={handleSubmit} noValidate className="space-y-4">
+          <Field
+            label="Email address"
+            type="email"
+            inputMode="email"
+            autoComplete="email"
+            placeholder="name@example.com"
+            required
+            value={form.email}
+            error={errors.email}
+            onBlur={() => markTouched('email')}
+            onChange={(event) => setForm({ ...form, email: event.target.value })}
+          />
 
-          <h2 className="text-2xl font-semibold tracking-tight text-ink">Welcome back</h2>
-          <p className="mt-1.5 text-sm text-ink-2">Sign in to your SimpleCRM account</p>
+          <PasswordField
+            label="Password"
+            autoComplete="current-password"
+            placeholder="Your password"
+            required
+            value={form.password}
+            error={errors.password}
+            onBlur={() => markTouched('password')}
+            onChange={(event) => setForm({ ...form, password: event.target.value })}
+          />
 
-          <Card className="mt-6 p-6 shadow-lift">
-            <ErrorBanner message={error} />
+          <Button
+            type="submit"
+            className="w-full"
+            loading={submitting}
+            loadingLabel="Signing in…"
+          >
+            Sign in
+          </Button>
 
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <Field
-                label="Email"
-                type="email"
-                autoComplete="email"
-                placeholder="you@company.com"
-                required
-                value={form.email}
-                onChange={(e) => setForm({ ...form, email: e.target.value })}
-              />
-              <Field
-                label="Password"
-                type="password"
-                autoComplete="current-password"
-                placeholder="••••••••"
-                required
-                value={form.password}
-                onChange={(e) => setForm({ ...form, password: e.target.value })}
-              />
-
-              <button type="submit" className={`${btnPrimary} w-full`} disabled={submitting}>
-                {submitting ? <Spinner /> : 'Sign in'}
-              </button>
-
-              <p className="text-center text-sm">
-                <Link to="/crm/forgot-password" className={link}>
-                  Forgot your password?
-                </Link>
-              </p>
-            </form>
-          </Card>
-
-          <p className="mt-5 text-center text-sm text-ink-2">
-            No account?{' '}
-            {/* "Request one", not "Create one": signing up does not produce a
-                working account, and saying so here rather than only on the next
-                page sets the expectation before anyone fills in a form. */}
-            <Link to="/crm/register" className={link}>
-              Request one
+          <p className="text-center text-sm">
+            <Link to="/crm/forgot-password" className={link}>
+              Forgot your password?
             </Link>
           </p>
-        </div>
-      </div>
-    </div>
+        </form>
+      </Card>
+    </AuthLayout>
   );
 }

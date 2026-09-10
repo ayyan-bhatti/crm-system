@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { shopVerifyEmailApi } from '../../api/shopResources';
-import { Card, Spinner } from '../../components/common';
-import { btnSecondary } from '../../ui';
+import { ButtonLink, Spinner } from '../../components/common';
 
 /**
  * Where the "confirm your email" link in a buyer's registration email lands.
@@ -18,9 +17,11 @@ import { btnSecondary } from '../../ui';
  * finish. The token itself is the authorisation; see
  * backend/src/services/emailVerificationService.js.
  *
- * Nothing in the app is BLOCKED by this — see the `emailVerified` field's
- * own comment on the Buyer model. Landing here just confirms an address that
- * already works.
+ * NOTHING IN THE APP IS BLOCKED BY THIS — see the `emailVerified` field's own
+ * comment on the Buyer model. Landing here just confirms an address that
+ * already works, and the copy says so rather than implying the shopper has
+ * unlocked something. A confirmation page that overstates its own importance
+ * is how people come to believe a failure here has locked them out.
  */
 export default function VerifyEmail() {
   const [params] = useSearchParams();
@@ -34,7 +35,8 @@ export default function VerifyEmail() {
     if (!token) {
       setState({
         status: 'invalid',
-        message: 'This link is missing its confirmation code. Try copying the whole link from your email.',
+        message:
+          'This link is missing its confirmation code. Try copying the whole link from your email.',
       });
       return undefined;
     }
@@ -71,37 +73,56 @@ export default function VerifyEmail() {
     };
   }, [token]);
 
+  const failed = state.status === 'invalid' || state.status === 'error';
+
   return (
-    <div className="mx-auto max-w-lg px-4 py-16">
-      <Card className="p-8 text-center">
-        {state.status === 'working' && (
-          <>
-            <Spinner />
-            <p className="mt-3 text-sm text-muted">Confirming your email…</p>
-          </>
-        )}
+    <div className="mx-auto max-w-xl px-4 py-16 sm:py-24">
+      {state.status === 'working' && (
+        <div className="text-center">
+          <Spinner />
+          <p className="mt-4 text-sm text-muted" role="status">
+            Confirming your email…
+          </p>
+        </div>
+      )}
 
-        {state.status === 'done' && (
-          <>
-            <h1 className="text-xl font-semibold text-ink">Email confirmed</h1>
-            <p className="mt-3 text-sm text-ink-2">
-              Thanks — your address is confirmed. You did not need this to shop or check out; it
-              is just good to have on file.
-            </p>
-          </>
-        )}
+      {state.status === 'done' && (
+        <>
+          <p className="label-mono">Your account</p>
+          <h1 className="font-display mt-3 text-[34px] leading-[1.1] text-ink sm:text-[42px]">
+            Email confirmed
+          </h1>
+          <p className="mt-5 text-[15px] leading-relaxed text-ink-2">
+            Thanks — your address is confirmed. You did not need this to shop or check out; it is
+            just good to have on file so we can reach you about an order.
+          </p>
+        </>
+      )}
 
-        {(state.status === 'invalid' || state.status === 'error') && (
-          <>
-            <h1 className="text-xl font-semibold text-ink">We could not do that</h1>
-            <p className="mt-3 text-sm text-ink-2">{state.message}</p>
-          </>
-        )}
+      {failed && (
+        <>
+          <p className="label-mono">Your account</p>
+          <h1 className="font-display mt-3 text-[34px] leading-[1.1] text-ink sm:text-[42px]">
+            We could not do that
+          </h1>
+          <p className="mt-5 text-[15px] leading-relaxed text-ink-2">{state.message}</p>
+          <p className="mt-6 text-sm leading-relaxed text-muted">
+            Nothing is blocked by this. You can still browse, order and track exactly as before —
+            a confirmed address is only so we can reach you.
+          </p>
+        </>
+      )}
 
-        <Link to="/" className={`${btnSecondary} mt-6 inline-flex`}>
-          Back to the shop
-        </Link>
-      </Card>
+      {state.status !== 'working' && (
+        <div className="mt-10 flex flex-wrap gap-3">
+          <ButtonLink to="/products" size="lg">
+            Start shopping
+          </ButtonLink>
+          <ButtonLink to="/" variant="secondary" size="lg">
+            Back to the shop
+          </ButtonLink>
+        </div>
+      )}
     </div>
   );
 }

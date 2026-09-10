@@ -5,8 +5,8 @@ import { shopAuthApi } from '../../api/shopResources';
 import { errorMessage } from '../../api/client';
 import { useToast } from '../../components/Toast';
 import { useConfirm } from '../../components/ConfirmDialog';
-import { Card, ErrorBanner, Field, PageHeader, Spinner } from '../../components/common';
-import { btnDanger, btnPrimary, btnSecondary, link } from '../../ui';
+import { Button, Card, EmptyState, ErrorBanner, Field, Spinner } from '../../components/common';
+import { link } from '../../ui';
 
 const EMPTY_FORM = { label: '', address: '', city: '', phone: '' };
 
@@ -18,6 +18,11 @@ const EMPTY_FORM = { label: '', address: '', city: '', phone: '' };
  * its own copy of the address list, seeded from `buyer.addresses` once the
  * session loads, and updates that copy directly from what each mutation
  * returns rather than trying to write back into the shared context.
+ *
+ * A GRID OF CARDS RATHER THAN A LIST OF ROWS, because an address is a block of
+ * text that wants to be read as a block — the shape of it (name, street, city,
+ * phone, on four lines) is itself how somebody recognises which one is which,
+ * and flattening that into a row destroys the only cue there is.
  */
 export default function BuyerAccount() {
   const { buyer, isSignedIn, loading: authLoading } = useBuyerAuth();
@@ -102,16 +107,24 @@ export default function BuyerAccount() {
     }
   }
 
-  async function handleDelete(addressId) {
-    const ok = await confirm('Remove this address?', { confirmLabel: 'Remove', tone: 'danger' });
+  /**
+   * Deleting always asks first, and the question names the address rather than
+   * saying "this one" — a confirmation that does not say what it is about is a
+   * speed bump, not a safeguard.
+   */
+  async function handleDelete(address) {
+    const ok = await confirm(`Remove the address saved as “${address.label}”?`, {
+      confirmLabel: 'Remove',
+      tone: 'danger',
+    });
     if (!ok) return;
 
     setBusy(true);
     try {
-      const next = await shopAuthApi.deleteAddress(addressId);
+      const next = await shopAuthApi.deleteAddress(address._id);
       setAddresses(next);
       toast.success('Address removed.');
-      if (editingId === addressId) closeForm();
+      if (editingId === address._id) closeForm();
     } catch (err) {
       toast.error(errorMessage(err, 'Could not remove that address'));
     } finally {
@@ -120,129 +133,178 @@ export default function BuyerAccount() {
   }
 
   return (
-    <div className="mx-auto max-w-2xl px-4 py-10 sm:px-6">
-      <PageHeader
-        title="Your addresses"
-        subtitle="Saved delivery addresses used at checkout."
-        action={
-          !adding && (
-            <button type="button" className={btnSecondary} onClick={startAdd}>
-              Add address
-            </button>
-          )
-        }
-      />
+    <div className="mx-auto max-w-3xl px-4 py-10 sm:px-6 lg:py-14">
+      <p className="label-mono">Your account</p>
+
+      <div className="mt-2 flex flex-wrap items-start justify-between gap-4">
+        <div className="min-w-0">
+          <h1 className="font-display text-[32px] leading-tight text-ink sm:text-[36px]">
+            Your addresses
+          </h1>
+          <p className="mt-3 max-w-md text-sm leading-relaxed text-ink-2">
+            The places we deliver to. Saved here once, offered at every checkout.
+          </p>
+        </div>
+
+        {!adding && (
+          <Button variant="secondary" className="shrink-0" onClick={startAdd}>
+            Add address
+          </Button>
+        )}
+      </div>
 
       {buyer && !buyer.emailVerified && (
-        <Card className="mb-6 flex flex-wrap items-center justify-between gap-3 p-4 text-sm">
-          <span className="text-ink-2">Your email address has not been confirmed yet.</span>
+        <Card className="mt-8 flex flex-wrap items-center justify-between gap-3 border-warning/30 bg-warning-wash p-4 text-sm">
+          <span className="text-warning-ink">Your email address has not been confirmed yet.</span>
           <button
             type="button"
             onClick={handleResendVerification}
             disabled={resending}
-            className="font-medium text-brand hover:underline disabled:opacity-50"
+            className="font-semibold text-warning-ink underline underline-offset-[3px] disabled:opacity-50"
           >
             {resending ? 'Sending…' : 'Resend confirmation email'}
           </button>
         </Card>
       )}
 
-      <p className="mb-6 text-sm text-ink-2">
+      {adding && (
+        <Card className="mt-8 p-6">
+          <h2 className="font-display text-[22px] leading-none text-ink">
+            {editingId ? 'Edit address' : 'Add address'}
+          </h2>
+
+          <div className="mt-5">
+            <ErrorBanner message={error} onDismiss={() => setError('')} />
+
+            <form onSubmit={handleSubmit} noValidate className="space-y-5">
+              <div className="grid gap-5 sm:grid-cols-2">
+                <Field
+                  label="Label"
+                  name="label"
+                  required
+                  placeholder="Home"
+                  hint='A name to tell this address apart, e.g. "Home" or "Work".'
+                  value={form.label}
+                  onChange={(e) => setForm({ ...form, label: e.target.value })}
+                />
+                <Field
+                  label="Phone"
+                  name="phone"
+                  type="tel"
+                  autoComplete="tel"
+                  required
+                  placeholder="0300 1234567"
+                  hint="In case we need to reach you about delivery."
+                  value={form.phone}
+                  onChange={(e) => setForm({ ...form, phone: e.target.value })}
+                />
+
+                <div className="sm:col-span-2">
+                  <Field
+                    label="Address"
+                    name="address"
+                    autoComplete="street-address"
+                    required
+                    placeholder="45 Boat Basin, Clifton"
+                    hint="Street, building, and any other delivery detail."
+                    value={form.address}
+                    onChange={(e) => setForm({ ...form, address: e.target.value })}
+                  />
+                </div>
+
+                {/*
+                  City is held separately from the free-text block and is
+                  required — a courier routes on it, so it is the one part of
+                  an address the system cannot treat as prose. See Buyer.js's
+                  addressSchema.
+                */}
+                <Field
+                  label="City"
+                  name="city"
+                  autoComplete="address-level2"
+                  required
+                  placeholder="Karachi"
+                  hint="So the courier knows which city to deliver in."
+                  value={form.city}
+                  onChange={(e) => setForm({ ...form, city: e.target.value })}
+                />
+              </div>
+
+              <div className="flex flex-wrap gap-2.5 border-t border-hairline pt-5">
+                <Button type="submit" loading={busy} loadingLabel="Saving…">
+                  Save address
+                </Button>
+                <Button type="button" variant="secondary" disabled={busy} onClick={closeForm}>
+                  Cancel
+                </Button>
+              </div>
+            </form>
+          </div>
+        </Card>
+      )}
+
+      {addresses.length === 0 && !adding && (
+        <Card className="mt-8">
+          {/*
+            No action button here on purpose: "Add address" already sits in the
+            page header, and two controls with the same accessible name on one
+            screen is an ambiguity for anyone navigating by name — and for the
+            end-to-end specs that do exactly that.
+          */}
+          <EmptyState
+            title="No saved addresses yet"
+            hint="Use “Add address” above and it will be waiting for you the next time you check out."
+          />
+        </Card>
+      )}
+
+      {addresses.length > 0 && (
+        <ul className="mt-8 grid gap-4 sm:grid-cols-2">
+          {addresses.map((addr) => (
+            <li key={addr._id}>
+              <Card
+                className={`flex h-full flex-col p-5 ${
+                  editingId === addr._id ? 'border-brand ring-1 ring-brand/20' : ''
+                }`}
+              >
+                <div className="flex-1 text-sm">
+                  <p className="font-semibold text-ink">{addr.label}</p>
+                  <p className="mt-1.5 text-ink-2">{addr.address}</p>
+                  {addr.city && <p className="text-ink-2">{addr.city}</p>}
+                  {addr.phone && <p className="mt-1.5 text-xs text-muted">{addr.phone}</p>}
+                </div>
+
+                <div className="mt-5 flex gap-2 border-t border-hairline pt-4">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={busy}
+                    onClick={() => startEdit(addr)}
+                  >
+                    Edit
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-critical-ink hover:bg-critical-wash hover:text-critical-ink"
+                    disabled={busy}
+                    onClick={() => handleDelete(addr)}
+                  >
+                    Delete
+                  </Button>
+                </div>
+              </Card>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <p className="mt-10 border-t border-hairline pt-6 text-sm text-ink-2">
         Looking for an order?{' '}
         <Link to="/account/orders" className={link}>
           View your orders
         </Link>
       </p>
-
-      {addresses.length === 0 && !adding && (
-        <Card className="p-6 text-center text-sm text-ink-2">
-          You have no saved addresses yet.
-        </Card>
-      )}
-
-      {addresses.length > 0 && (
-        <div className="space-y-3">
-          {addresses.map((addr) => (
-            <Card key={addr._id} className="flex items-start justify-between gap-4 p-4">
-              <div className="text-sm">
-                <p className="font-medium text-ink">{addr.label}</p>
-                <p className="text-ink-2">{addr.address}</p>
-                {addr.city && <p className="text-ink-2">{addr.city}</p>}
-                {addr.phone && <p className="text-xs text-muted">{addr.phone}</p>}
-              </div>
-              <div className="flex shrink-0 gap-2">
-                <button
-                  type="button"
-                  className={btnSecondary}
-                  disabled={busy}
-                  onClick={() => startEdit(addr)}
-                >
-                  Edit
-                </button>
-                <button
-                  type="button"
-                  className={btnDanger}
-                  disabled={busy}
-                  onClick={() => handleDelete(addr._id)}
-                >
-                  Delete
-                </button>
-              </div>
-            </Card>
-          ))}
-        </div>
-      )}
-
-      {adding && (
-        <Card className="mt-6 p-6">
-          <h2 className="mb-4 text-sm font-semibold text-ink">
-            {editingId ? 'Edit address' : 'Add address'}
-          </h2>
-
-          <ErrorBanner message={error} />
-
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <Field
-              label="Label"
-              required
-              hint='A name to tell this address apart, e.g. "Home" or "Work".'
-              value={form.label}
-              onChange={(e) => setForm({ ...form, label: e.target.value })}
-            />
-            <Field
-              label="Address"
-              required
-              hint="Street, building, and any other delivery detail."
-              value={form.address}
-              onChange={(e) => setForm({ ...form, address: e.target.value })}
-            />
-            <Field
-              label="City"
-              required
-              hint="So the courier knows which city to deliver in."
-              value={form.city}
-              onChange={(e) => setForm({ ...form, city: e.target.value })}
-            />
-            <Field
-              label="Phone"
-              type="tel"
-              required
-              hint="In case we need to reach you about delivery."
-              value={form.phone}
-              onChange={(e) => setForm({ ...form, phone: e.target.value })}
-            />
-
-            <div className="flex gap-2">
-              <button type="submit" className={btnPrimary} disabled={busy}>
-                {busy ? <Spinner /> : 'Save address'}
-              </button>
-              <button type="button" className={btnSecondary} disabled={busy} onClick={closeForm}>
-                Cancel
-              </button>
-            </div>
-          </form>
-        </Card>
-      )}
     </div>
   );
 }

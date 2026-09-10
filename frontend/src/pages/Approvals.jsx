@@ -1,11 +1,21 @@
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { changeRequestsApi } from '../api/resources';
 import { errorMessage } from '../api/client';
 import useFetch from '../hooks/useFetch';
 import { useToast } from '../components/Toast';
-import { Card, EmptyState, ErrorBanner, PageHeader, Spinner } from '../components/common';
-import { btnPrimary, formatDate, humanize, input, link, money, td, th } from '../ui';
+import {
+  Breadcrumb,
+  Button,
+  Card,
+  EmptyState,
+  ErrorBanner,
+  Field,
+  PageHeader,
+  Spinner,
+  Table,
+} from '../components/common';
+import { formatDate, humanize, link, money, td, th } from '../ui';
 
 /**
  * Proposed changes to customers and orders, waiting on the administrator.
@@ -111,26 +121,45 @@ export default function Approvals() {
 
   if (loading) return <Spinner full />;
 
+  const requests = data || [];
+
   return (
     <div>
+      <Breadcrumb
+        className="mb-3"
+        items={[{ label: 'Workspace', to: '/crm' }, { label: 'Approvals' }]}
+      />
+
       <PageHeader
+        eyebrow="Administration"
         title="Approvals"
         subtitle="Changes to customers and orders that a manager has proposed. Nothing here has happened yet."
       />
 
       <ErrorBanner message={error} />
 
-      {!data?.length ? (
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,2.2fr)_minmax(0,1fr)] lg:items-start">
         <Card>
-          <EmptyState
-            title="Nothing waiting"
-            message="Proposed changes to customers and orders appear here. The queue is clear."
-          />
-        </Card>
-      ) : (
-        <Card>
-          <div className="overflow-x-auto">
-            <table className="w-full">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-hairline px-5 py-4">
+            <div>
+              <p className="label-mono">Queue</p>
+              <h2 className="mt-1 text-base font-semibold text-ink">Waiting on you</h2>
+            </div>
+            {requests.length > 0 && (
+              <p className="text-sm text-muted">
+                <span className="tabular font-medium text-ink-2">{requests.length}</span>{' '}
+                {requests.length === 1 ? 'request' : 'requests'}
+              </p>
+            )}
+          </div>
+
+          {!requests.length ? (
+            <EmptyState
+              title="Nothing waiting"
+              hint="Proposed changes to customers and orders appear here. The queue is clear."
+            />
+          ) : (
+            <Table caption="Change requests waiting for a decision">
               <thead className="border-b border-hairline bg-plane">
                 <tr>
                   <th className={th}>What</th>
@@ -141,41 +170,51 @@ export default function Approvals() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-hairline">
-                {data.map((request) => {
+                {requests.map((request) => {
                   const busy = busyId === request._id;
                   const isOpen = expanded === request._id;
                   const fields = Object.entries(request.payload || {});
+                  const summary = summaries[request._id];
 
                   return (
-                    <>
-                      <tr key={request._id} className="hover:bg-plane">
+                    /*
+                      `Fragment` with a key rather than `<>`, which cannot take
+                      one — the two rows belong to the same request and React
+                      needs to be told so, or it warns on every render and
+                      re-creates the expanded row whenever the list changes.
+                    */
+                    <Fragment key={request._id}>
+                      <tr className="transition-colors hover:bg-plane">
                         <td className={`${td} font-medium text-ink`}>
                           {describeChange(request)}
-                          {fields.length > 0 && (
+                          <span className="mt-1 flex flex-wrap gap-3">
+                            {fields.length > 0 && (
+                              <button
+                                type="button"
+                                className={`${link} text-xs`}
+                                aria-expanded={isOpen}
+                                onClick={() => setExpanded(isOpen ? null : request._id)}
+                              >
+                                {isOpen ? 'Hide' : 'Show'} details
+                              </button>
+                            )}
                             <button
                               type="button"
-                              className={`${link} ml-2 text-xs`}
-                              onClick={() => setExpanded(isOpen ? null : request._id)}
+                              className={`${link} text-xs disabled:opacity-50`}
+                              disabled={summarizingId === request._id}
+                              onClick={() => summarize(request)}
                             >
-                              {isOpen ? 'Hide' : 'Show'} details
+                              {summarizingId === request._id
+                                ? 'Summarizing…'
+                                : summary
+                                  ? 'Re-summarize'
+                                  : 'AI summary'}
                             </button>
-                          )}
-                          <button
-                            type="button"
-                            className={`${link} ml-2 text-xs disabled:opacity-50`}
-                            disabled={summarizingId === request._id}
-                            onClick={() => summarize(request)}
-                          >
-                            {summarizingId === request._id
-                              ? 'Summarizing…'
-                              : summaries[request._id]
-                              ? 'Re-summarize'
-                              : 'AI summary'}
-                          </button>
+                          </span>
                         </td>
                         <td className={td}>
                           {request.label || '—'}
-                          <p className="text-xs text-muted">{humanize(request.entity)}</p>
+                          <p className="mt-0.5 text-xs text-muted">{humanize(request.entity)}</p>
                         </td>
                         <td className={td}>
                           <span className="inline-flex items-center gap-2">
@@ -189,55 +228,58 @@ export default function Approvals() {
                           {/* A buyer has no role — the badge above already says
                               who they are, so there is nothing to humanize. */}
                           {request.requestedByModel !== 'Buyer' && (
-                            <p className="text-xs text-muted">
+                            <p className="mt-0.5 text-xs text-muted">
                               {humanize(request.requestedBy?.role || '')}
                             </p>
                           )}
                         </td>
                         <td className={td}>{formatDate(request.createdAt)}</td>
                         <td className={`${td} text-right`}>
-                          <div className="flex items-center justify-end gap-3">
-                            <button
-                              type="button"
-                              className={btnPrimary}
-                              disabled={busy}
+                          <div className="flex items-center justify-end gap-2">
+                            <Button
+                              size="sm"
+                              loading={busy}
+                              loadingLabel="Working…"
                               onClick={() => decide(request, true)}
                             >
-                              {busy ? <Spinner /> : 'Approve'}
-                            </button>
-                            <button
-                              type="button"
-                              className="text-sm font-medium text-ink-2 hover:text-critical-ink hover:underline disabled:opacity-40"
+                              Approve
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
                               disabled={busy}
+                              className="text-ink-2 hover:text-critical-ink"
                               onClick={() => decide(request, false)}
                             >
                               Reject
-                            </button>
+                            </Button>
                           </div>
                         </td>
                       </tr>
 
                       {isOpen && (
-                        <tr key={`${request._id}-detail`} className="bg-plane">
+                        <tr className="bg-plane">
                           <td className={td} colSpan={5}>
-                            {summaries[request._id] && (
-                              <div className="mb-4 rounded-lg border border-hairline bg-surface p-3.5">
-                                <p className="text-sm text-ink-2">
-                                  {summaries[request._id].data.summary}
+                            {summary && (
+                              <div className="mb-4 rounded-xl border border-hairline bg-surface p-4">
+                                <p className="label-mono">Summary</p>
+                                <p className="mt-1.5 text-sm leading-relaxed text-ink-2">
+                                  {summary.data.summary}
                                 </p>
                                 <p className="mt-2 text-xs text-muted">
-                                  {summaries[request._id].mode === 'ai'
+                                  {summary.mode === 'ai'
                                     ? 'AI-generated from this request.'
                                     : 'Written from this request — AI summary unavailable right now.'}
                                 </p>
                               </div>
                             )}
 
-                            <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
+                            <p className="label-mono">What would change</p>
+                            <dl className="mt-2 grid gap-x-8 gap-y-3 sm:grid-cols-2">
                               {fields.map(([field, value]) => (
-                                <div key={field} className="flex gap-2">
-                                  <dt className="shrink-0 font-medium text-muted">{field}</dt>
-                                  <dd className="whitespace-pre-line text-ink">
+                                <div key={field}>
+                                  <dt className="text-xs font-medium text-muted">{field}</dt>
+                                  <dd className="mt-0.5 whitespace-pre-line text-sm text-ink">
                                     {field === 'total' ? money(value) : renderValue(value)}
                                   </dd>
                                 </div>
@@ -250,34 +292,58 @@ export default function Approvals() {
                               it out entirely is how the same request comes back
                               next week.
                             */}
-                            <input
-                              type="text"
-                              className={`${input} mt-4`}
-                              placeholder="Reason for rejecting (optional, sent to nobody automatically)"
-                              value={notes[request._id] || ''}
-                              onChange={(e) =>
-                                setNotes({ ...notes, [request._id]: e.target.value })
-                              }
-                            />
+                            <div className="mt-5 max-w-xl">
+                              <Field
+                                label="Reason for rejecting"
+                                id={`reject-reason-${request._id}`}
+                                placeholder="Optional — it is sent to nobody automatically."
+                                hint="Recorded against the decision, so the next person to look knows why."
+                                value={notes[request._id] || ''}
+                                onChange={(e) =>
+                                  setNotes({ ...notes, [request._id]: e.target.value })
+                                }
+                              />
+                            </div>
                           </td>
                         </tr>
                       )}
-                    </>
+                    </Fragment>
                   );
                 })}
               </tbody>
-            </table>
-          </div>
+            </Table>
+          )}
         </Card>
-      )}
 
-      <p className="mt-4 text-sm text-muted">
-        Account requests are handled separately, on the{' '}
-        <Link to="/crm/users" className={link}>
-          Users
-        </Link>{' '}
-        page.
-      </p>
+        <aside className="space-y-6">
+          <Card className="p-5">
+            <p className="label-mono">How this works</p>
+            <h2 className="mt-1 text-base font-semibold text-ink">Nothing here has happened</h2>
+            <p className="mt-2 text-sm leading-relaxed text-ink-2">
+              Every row is a change a manager or a customer has asked for and that the system has
+              deliberately not made. Approving applies it immediately and writes an audit entry
+              against your name; rejecting leaves the record exactly as it is.
+            </p>
+            <p className="mt-3 text-sm leading-relaxed text-ink-2">
+              Open <span className="font-medium text-ink">Show details</span> before deciding — the
+              row names the fields, the panel underneath shows the values they would be set to.
+            </p>
+          </Card>
+
+          <Card className="p-5">
+            <p className="label-mono">Elsewhere</p>
+            <h2 className="mt-1 text-base font-semibold text-ink">Account requests</h2>
+            <p className="mt-2 text-sm leading-relaxed text-ink-2">
+              People asking for access to the CRM are a different decision, and they are answered
+              on the{' '}
+              <Link to="/crm/users" className={link}>
+                Users
+              </Link>{' '}
+              page.
+            </p>
+          </Card>
+        </aside>
+      </div>
     </div>
   );
 }

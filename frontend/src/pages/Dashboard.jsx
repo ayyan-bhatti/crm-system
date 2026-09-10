@@ -77,19 +77,25 @@ function AdminDashboard({ data, user, can }) {
         <Greeting user={user} subtitle="The whole business at a glance." />
       </div>
 
-      {/* Org-wide money and volume, as a bento grid: revenue is the figure
-          everything else here is downstream of, so it gets the wide tile
-          rather than sitting the same size as a headcount. */}
-      <div className="bento-grid stagger-children">
-        <div className="bento-lg">
-          <StatTile
-            label="Revenue"
-            value={money(data.totalRevenue)}
-            hint={`${data.completedOrders} completed orders`}
-            spark={data.monthly}
-            sparkKey="revenue"
-          />
-        </div>
+      {/*
+        Org-wide money and volume, as ONE EVEN ROW of four.
+
+        This used to be a bento grid with revenue spanning two columns, which
+        looked considered in isolation and fell apart in place: five cells
+        across a four-column grid wraps, so the fourth tile dropped onto a row
+        of its own directly above a second three-tile row — a ragged stack of
+        3 / 1 / 3 that read as a layout bug rather than a hierarchy. Four equal
+        tiles is the thing the eye can actually scan, and revenue earns its
+        emphasis by being first and by being money, not by being wider.
+      */}
+      <div className="stagger-children grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <StatTile
+          label="Revenue"
+          value={money(data.totalRevenue)}
+          hint={`${data.completedOrders} completed orders`}
+          spark={data.monthly}
+          sparkKey="revenue"
+        />
         <StatTile
           label="Customers"
           value={data.totalCustomers}
@@ -640,14 +646,22 @@ function orderStatusData(data) {
 }
 
 /**
- * Customer status is identity, not judgement — a lead is not "bad" — so this
- * uses the categorical slots in their fixed order rather than status colours.
+ * Customer status, coloured to MATCH ITS OWN PILLS.
+ *
+ * This used the categorical slots on the reasoning that status is identity
+ * rather than judgement — a lead is not "bad". True, but it meant the same
+ * three words were one set of colours in this donut and a different set in
+ * every `StatusBadge` on the customers table, so the legend taught a mapping
+ * the rest of the app then contradicted. Matching `STATUS_STYLES` costs the
+ * philosophical point and buys a reader who can carry one colour key across
+ * the whole product — and it takes the brand orange out of a chart, which is
+ * where it was competing with the actual primary actions.
  */
 function customerStatusData(data) {
   return [
-    { name: 'Active', value: data.customersByStatus.active, fill: token('--color-series-1') },
-    { name: 'Lead', value: data.customersByStatus.lead, fill: token('--color-series-2') },
-    { name: 'Inactive', value: data.customersByStatus.inactive, fill: token('--color-series-3') },
+    { name: 'Active', value: data.customersByStatus.active, fill: token('--color-good') },
+    { name: 'Lead', value: data.customersByStatus.lead, fill: token('--color-warning') },
+    { name: 'Inactive', value: data.customersByStatus.inactive, fill: token('--color-rule') },
   ];
 }
 

@@ -1,22 +1,60 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { productsApi } from '../../api/resources';
 import { errorMessage } from '../../api/client';
 import useFetch from '../../hooks/useFetch';
-import { Card, ErrorBanner, Field, PageHeader, Spinner } from '../../components/common';
+import {
+  Breadcrumb,
+  Button,
+  Card,
+  Checkbox,
+  ErrorBanner,
+  Field,
+  PageHeader,
+  Spinner,
+  Textarea,
+  useFormValidation,
+  validators,
+} from '../../components/common';
 import { useToast } from '../../components/Toast';
-import { btnPrimary, btnSecondary, input, money } from '../../ui';
+import { input, money } from '../../ui';
 import ProductImage from '../../components/shop/ProductImage';
 
 /** A blank variant row. Black is a neutral starting colour, not a suggestion. */
 function emptyVariant() {
-  return { key: crypto.randomUUID?.() || String(Math.random()), _id: null, colorName: '', colorHex: '#000000', size: '', stockQty: '', priceOverride: '' };
+  return {
+    key: crypto.randomUUID?.() || String(Math.random()),
+    _id: null,
+    colorName: '',
+    colorHex: '#000000',
+    size: '',
+    stockQty: '',
+    priceOverride: '',
+  };
+}
+
+/** The fields on a variant row that can be wrong, and what wrong means. */
+const VARIANT_RULES = {
+  colorName: validators.required('Colour name'),
+  stockQty: validators.stock,
+  // Optional: blank means "use the product price", which is not an error.
+  priceOverride: (value) => (value === '' ? null : validators.price(value)),
+};
+
+const VARIANT_FIELDS = Object.keys(VARIANT_RULES);
+
+function variantError(row, field) {
+  return VARIANT_RULES[field](row[field]);
 }
 
 /**
  * Create / edit a product. Reachable only by managers and admins — the route is
  * wrapped in <ProtectedRoute roles={...}> in App.jsx, and the API enforces the
  * same rule independently.
+ *
+ * The form is sectioned by the DECISION each group represents — what the thing
+ * is, what it costs, how it looks in the shop, what it is made of, what colours
+ * it comes in — rather than being one twenty-control stack in schema order.
  */
 export default function ProductForm() {
   const { id } = useParams();
@@ -48,6 +86,7 @@ export default function ProductForm() {
     depth: '',
   });
   const [variants, setVariants] = useState([]);
+  const [variantTouched, setVariantTouched] = useState({});
   const [images, setImages] = useState('');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -132,8 +171,50 @@ export default function ProductForm() {
    */
   const variantStockTotal = variants.reduce((sum, row) => sum + (Number(row.stockQty) || 0), 0);
 
+  /*
+   * The rules depend on whether there are variants: with them, the top-level
+   * stock box is derived and disabled, so demanding a number in it would block
+   * a save on a field the user cannot even type into.
+   */
+  const rules = useMemo(
+    () => ({
+      name: validators.required('Name'),
+      sku: validators.required('SKU'),
+      category: validators.required('Category'),
+      imageUrl: validators.required('Image URL'),
+      price: validators.price,
+      salePrice: (value) => (value === '' ? null : validators.price(value)),
+      stockQty: (value) => (hasVariants ? null : validators.stock(value)),
+      lowStockThreshold: validators.stock,
+    }),
+    [hasVariants]
+  );
+
+  const { visibleErrors, markTouched, validate, submitted } = useFormValidation(rules);
+  const errors = visibleErrors(form);
+
+  function fieldProps(field) {
+    return {
+      value: form[field],
+      error: errors[field],
+      onChange: (event) => update(field, event.target.value),
+      onBlur: () => markTouched(field),
+    };
+  }
+
+  /** True when any variant row has something wrong with it. */
+  const variantsInvalid = variants.some((row) =>
+    VARIANT_FIELDS.some((field) => variantError(row, field))
+  );
+
   async function handleSubmit(event) {
     event.preventDefault();
+
+    // `validate` reports every field, so nothing stays hidden — and because it
+    // flips `submitted`, the variant rows start reporting themselves too.
+    const formOk = validate(form);
+    if (!formOk || variantsInvalid) return;
+
     setSubmitting(true);
     setError('');
 
@@ -190,8 +271,12 @@ export default function ProductForm() {
   // the form would invite the user to save over a record we never read.
   if (isEdit && loadError) {
     return (
-      <div className="mx-auto max-w-2xl">
-        <PageHeader title="Edit product" />
+      <div className="mx-auto max-w-3xl">
+        <Breadcrumb
+          className="mb-3"
+          items={[{ label: 'Products', to: '/crm/products' }, { label: 'Edit product' }]}
+        />
+        <PageHeader eyebrow="Product" title="Edit product" />
         <ErrorBanner message={loadError} />
       </div>
     );
@@ -199,241 +284,319 @@ export default function ProductForm() {
 
   return (
     <div className="mx-auto max-w-3xl">
-      <PageHeader title={isEdit ? 'Edit product' : 'New product'} />
+      <Breadcrumb
+        className="mb-3"
+        items={[
+          { label: 'Products', to: '/crm/products' },
+          ...(isEdit && existing ? [{ label: existing.name, to: `/crm/products/${id}` }] : []),
+          { label: isEdit ? 'Edit' : 'New product' },
+        ]}
+      />
 
-      <Card className="p-6">
-        <ErrorBanner message={error} onDismiss={() => setError('')} />
+      <PageHeader
+        eyebrow="Product"
+        title={isEdit ? 'Edit product' : 'New product'}
+        subtitle={
+          isEdit
+            ? 'Saving updates the storefront immediately.'
+            : 'A product needs a name, an SKU, a price, a category and a photo before it can be sold.'
+        }
+      />
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+      <ErrorBanner message={error} onDismiss={() => setError('')} />
+
+      {/* `noValidate` — this form shows its own messages, and the native
+          bubble suppresses them. */}
+      <form onSubmit={handleSubmit} noValidate className="space-y-5">
+        <Section title="Identity" description="What the thing is, and where it sits in the shop.">
           <div className="grid gap-4 sm:grid-cols-2">
             <Field
               label="Name"
               required
+              placeholder="Halden Lounge Chair"
               hint="Shown to customers on the storefront."
-              value={form.name}
-              onChange={(e) => update('name', e.target.value)}
+              {...fieldProps('name')}
             />
             <Field
               label="SKU"
               required
+              placeholder="HAL-LC-01"
               hint="Stored uppercase and must be unique."
-              value={form.sku}
-              onChange={(e) => update('sku', e.target.value)}
-            />
-            <Field
-              label="Price"
-              type="number"
-              step="0.01"
-              min="0"
-              required
-              hint="In USD, e.g. 29.99. Individual colours can override this below."
-              value={form.price}
-              onChange={(e) => update('price', e.target.value)}
-            />
-            <Field
-              label="Stock quantity"
-              type="number"
-              min="0"
-              required={!hasVariants}
-              disabled={hasVariants}
-              hint={
-                hasVariants
-                  ? 'Added up from the colours below — edit the quantities there.'
-                  : 'How many units are available right now.'
-              }
-              value={hasVariants ? String(variantStockTotal) : form.stockQty}
-              onChange={(e) => update('stockQty', e.target.value)}
+              {...fieldProps('sku')}
             />
             <Field
               label="Category"
               required
+              placeholder="Seating"
               hint="Used for storefront filtering and the shop's category menu."
-              value={form.category}
-              onChange={(e) => update('category', e.target.value)}
+              {...fieldProps('category')}
+            />
+            <Field
+              label="Subcategory"
+              placeholder="Lounge chair"
+              hint="A finer cut within the category."
+              {...fieldProps('subcategory')}
+            />
+            <Field
+              label="Brand / designer"
+              placeholder="Halden Studio"
+              hint="Shown on the storefront card and product page."
+              {...fieldProps('brand')}
+            />
+            <Field
+              label="Tags"
+              placeholder="mid-century, oak, lounge"
+              hint="Comma-separated — used by search and “you might also like”."
+              {...fieldProps('tags')}
+            />
+          </div>
+        </Section>
+
+        <Section
+          title="Price and stock"
+          description="What it sells for, and how many you have. Individual colours can override the price below."
+        >
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field
+              label="Price"
+              type="number"
+              inputMode="decimal"
+              step="0.01"
+              min="0"
+              required
+              placeholder="1299.00"
+              hint="In USD, e.g. 29.99."
+              {...fieldProps('price')}
+            />
+            <Field
+              label="Sale price"
+              type="number"
+              inputMode="decimal"
+              step="0.01"
+              min="0"
+              placeholder="999.00"
+              hint="Optional. Leave blank to sell at the regular price."
+              {...fieldProps('salePrice')}
+            />
+            <Field
+              label="Stock quantity"
+              type="number"
+              inputMode="numeric"
+              step="1"
+              min="0"
+              required={!hasVariants}
+              disabled={hasVariants}
+              placeholder="24"
+              hint={
+                hasVariants
+                  ? 'Added up from the colours below — edit the quantities there.'
+                  : 'Whole units available right now.'
+              }
+              error={hasVariants ? undefined : errors.stockQty}
+              value={hasVariants ? String(variantStockTotal) : form.stockQty}
+              onChange={(e) => update('stockQty', e.target.value)}
+              onBlur={() => markTouched('stockQty')}
             />
             <Field
               label="Low stock threshold"
               type="number"
+              inputMode="numeric"
+              step="1"
               min="0"
+              placeholder="10"
               hint="Flagged as low at or below this level."
-              value={form.lowStockThreshold}
-              onChange={(e) => update('lowStockThreshold', e.target.value)}
+              {...fieldProps('lowStockThreshold')}
             />
-            <div className="sm:col-span-2">
-              <Field
-                label="Image URL"
-                type="url"
-                required
-                hint="Paste a direct link to the main product photo."
-                value={form.imageUrl}
-                onChange={(e) => update('imageUrl', e.target.value)}
-              />
-            </div>
           </div>
+        </Section>
 
-          <fieldset className="rounded-lg border border-hairline bg-plane p-4">
-            <legend className="px-1 text-sm font-semibold text-ink">Merchandising</legend>
-            <div className="mt-2 grid gap-4 sm:grid-cols-2">
-              <Field
-                label="Brand"
-                hint="Shown on the storefront card and product page."
-                value={form.brand}
-                onChange={(e) => update('brand', e.target.value)}
-              />
-              <Field
-                label="Sale price"
-                type="number"
-                step="0.01"
-                min="0"
-                hint="Optional. Leave blank to sell at the regular price above."
-                value={form.salePrice}
-                onChange={(e) => update('salePrice', e.target.value)}
-              />
-              <div className="sm:col-span-2">
-                <Field
-                  label="Tags"
-                  hint="Comma-separated — used by search and 'you might also like'."
-                  value={form.tags}
-                  onChange={(e) => update('tags', e.target.value)}
+        <Section
+          title="Photography"
+          description="The main photo is what a shopper sees first, in the grid and on the product page."
+        >
+          <div className="space-y-4">
+            <Field
+              label="Image URL"
+              type="url"
+              required
+              placeholder="https://example.com/halden-chair.jpg"
+              hint="Paste a direct link to the main product photo."
+              {...fieldProps('imageUrl')}
+            />
+
+            {/*
+              An honest preview, which the previous one was not.
+              It hid the image on error and left a caption reading "shown as it
+              will look on the storefront" beside empty space — so a dead URL
+              looked like a rendering quirk in this form rather than like the
+              broken picture every shopper was about to get. `ProductImage` is
+              the same component the storefront uses, so what appears here IS
+              what appears there, including the fallback.
+            */}
+            {form.imageUrl && (
+              <div className="flex items-center gap-4 rounded-xl border border-hairline bg-plane p-3">
+                <ProductImage
+                  product={{ ...form, _id: id }}
+                  src={form.imageUrl}
+                  alt=""
+                  className="h-20 w-20 shrink-0 rounded-lg border border-hairline bg-neutral-wash object-cover"
                 />
+                <p className="text-xs leading-relaxed text-muted">
+                  Preview — exactly what the storefront will render. If this shows initials rather
+                  than a photo, the link did not load and shoppers will see the same thing.
+                </p>
               </div>
-              <label className="flex items-center gap-2 text-sm text-ink-2">
-                <input
-                  type="checkbox"
+            )}
+
+            <Field
+              label="More images"
+              hint="One URL per line, up to 8. The first is used for the card's hover image."
+            >
+              <Textarea
+                rows={3}
+                placeholder={'https://example.com/halden-side.jpg\nhttps://example.com/halden-detail.jpg'}
+                value={images}
+                onChange={(e) => setImages(e.target.value)}
+              />
+            </Field>
+          </div>
+        </Section>
+
+        <Section
+          title="Storefront copy"
+          description="What the product page says once a shopper has clicked through."
+        >
+          <div className="space-y-4">
+            <Field
+              label="Description"
+              hint="Leave it blank and that page has a name, a price and nothing else — this is most of what sells the item."
+            >
+              <Textarea
+                rows={5}
+                placeholder="Solid oak frame, hand-finished in Lahore. Seats one, comfortably, for a very long evening."
+                value={form.description}
+                onChange={(e) => update('description', e.target.value)}
+              />
+            </Field>
+
+            <fieldset className="rounded-xl border border-hairline bg-plane p-4">
+              <legend className="px-1.5 text-sm font-semibold text-ink">Where it appears</legend>
+              <div className="mt-2 space-y-3">
+                <Checkbox
+                  label="Active"
+                  hint="Unticked, the product is hidden from the storefront entirely."
+                  checked={form.isActive}
+                  onChange={(e) => update('isActive', e.target.checked)}
+                />
+                <Checkbox
+                  label="Feature on the storefront homepage"
+                  hint="Featured products get a slot on the front page."
                   checked={form.featured}
                   onChange={(e) => update('featured', e.target.checked)}
-                  className="h-4 w-4 rounded border-hairline"
                 />
-                Feature on the storefront homepage
-              </label>
-              <label className="flex items-center gap-2 text-sm text-ink-2">
-                <input
-                  type="checkbox"
+                <Checkbox
+                  label="Show in “New Arrivals”"
+                  hint="Worth turning off once the product is no longer new."
                   checked={form.newArrival}
                   onChange={(e) => update('newArrival', e.target.checked)}
-                  className="h-4 w-4 rounded border-hairline"
                 />
-                Show in &quot;New Arrivals&quot;
-              </label>
-            </div>
-          </fieldset>
+              </div>
+            </fieldset>
+          </div>
+        </Section>
 
-          <fieldset className="rounded-lg border border-hairline bg-plane p-4">
-            <legend className="px-1 text-sm font-semibold text-ink">Furniture details</legend>
-            <div className="mt-2 grid gap-4 sm:grid-cols-2">
-              <Field
-                label="Subcategory"
-                hint="A finer cut within the category, e.g. &quot;Lounge Chair&quot;."
-                value={form.subcategory}
-                onChange={(e) => update('subcategory', e.target.value)}
-              />
+        <Section
+          title="Materials and dimensions"
+          description="Optional, and the two questions a furniture shopper asks before they buy."
+        >
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="sm:col-span-2">
               <Field
                 label="Materials"
-                hint="Comma-separated, e.g. &quot;Oak, brass&quot;."
-                value={form.materials}
-                onChange={(e) => update('materials', e.target.value)}
-              />
-              <Field
-                label="Width (cm)"
-                type="number"
-                min="0"
-                value={form.width}
-                onChange={(e) => update('width', e.target.value)}
-              />
-              <Field
-                label="Height (cm)"
-                type="number"
-                min="0"
-                value={form.height}
-                onChange={(e) => update('height', e.target.value)}
-              />
-              <Field
-                label="Depth (cm)"
-                type="number"
-                min="0"
-                value={form.depth}
-                onChange={(e) => update('depth', e.target.value)}
+                placeholder="Oak, brass, wool"
+                hint="Comma-separated."
+                {...fieldProps('materials')}
               />
             </div>
-          </fieldset>
-
-          <label className="flex items-center gap-2 text-sm text-ink-2">
-            <input
-              type="checkbox"
-              checked={form.isActive}
-              onChange={(e) => update('isActive', e.target.checked)}
-              className="h-4 w-4 rounded border-hairline"
+            <Field
+              label="Width (cm)"
+              type="number"
+              inputMode="decimal"
+              min="0"
+              placeholder="78"
+              {...fieldProps('width')}
             />
-            Active — visible on the storefront
-          </label>
-
-          <Field
-            label="More images"
-            hint="One URL per line, up to 8. The first is used for the card's hover image."
-          >
-            <textarea
-              rows={2}
-              className={input}
-              value={images}
-              onChange={(e) => setImages(e.target.value)}
+            <Field
+              label="Height (cm)"
+              type="number"
+              inputMode="decimal"
+              min="0"
+              placeholder="92"
+              {...fieldProps('height')}
             />
-          </Field>
-
-          <Field
-            label="Description"
-            hint="Shown to shoppers on the product page. Leave it blank and that page has a name, a price and nothing else — this is most of what sells the item."
-          >
-            <textarea
-              rows={4}
-              className={input}
-              value={form.description}
-              onChange={(e) => update('description', e.target.value)}
+            <Field
+              label="Depth (cm)"
+              type="number"
+              inputMode="decimal"
+              min="0"
+              placeholder="84"
+              {...fieldProps('depth')}
             />
-          </Field>
-
-          {/*
-            An honest preview, which the previous one was not.
-            It hid the image on error and left a caption reading "shown as it
-            will look on the storefront" beside empty space — so a dead URL
-            looked like a rendering quirk in this form rather than like the
-            broken picture every shopper was about to get. `ProductImage` is the
-            same component the storefront uses, so what appears here IS what
-            appears there, including the fallback.
-          */}
-          {form.imageUrl && (
-            <div className="flex items-center gap-3 rounded-lg border border-hairline bg-plane p-3">
-              <ProductImage
-                product={{ ...form, _id: id }}
-                src={form.imageUrl}
-                alt=""
-                className="h-16 w-16 shrink-0 rounded-md border border-hairline bg-neutral-wash object-cover"
-              />
-              <p className="text-xs text-muted">
-                Preview — exactly what the storefront will render. If this shows initials rather
-                than a photo, the link did not load and shoppers will see the same thing.
-              </p>
-            </div>
-          )}
-
-          <VariantEditor
-            variants={variants}
-            basePrice={Number(form.price) || 0}
-            onChange={updateVariant}
-            onAdd={() => setVariants((rows) => [...rows, emptyVariant()])}
-            onRemove={(key) => setVariants((rows) => rows.filter((row) => row.key !== key))}
-          />
-
-          <div className="flex gap-3 pt-2">
-            <button type="submit" className={btnPrimary} disabled={submitting}>
-              {submitting ? <Spinner /> : isEdit ? 'Save changes' : 'Create product'}
-            </button>
-            <button type="button" className={btnSecondary} onClick={() => navigate(-1)}>
-              Cancel
-            </button>
           </div>
-        </form>
-      </Card>
+        </Section>
+
+        <VariantEditor
+          variants={variants}
+          basePrice={Number(form.price) || 0}
+          showErrors={submitted}
+          touched={variantTouched}
+          onBlur={(key, field) =>
+            setVariantTouched((current) => ({ ...current, [`${key}.${field}`]: true }))
+          }
+          onChange={updateVariant}
+          onAdd={() => setVariants((rows) => [...rows, emptyVariant()])}
+          onRemove={(key) => setVariants((rows) => rows.filter((row) => row.key !== key))}
+        />
+
+        {/*
+          Sticky on desktop: this form is five sections tall, and a save button
+          you have to scroll to find is one people lose track of halfway down.
+        */}
+        <div className="sticky bottom-0 -mx-1 border-t border-hairline bg-plane/95 px-1 py-3 backdrop-blur supports-[backdrop-filter]:bg-plane/80">
+          <div className="flex flex-wrap items-center gap-3">
+            <Button
+              type="submit"
+              loading={submitting}
+              loadingLabel={isEdit ? 'Saving…' : 'Creating…'}
+            >
+              {isEdit ? 'Save changes' : 'Create product'}
+            </Button>
+            <Button variant="secondary" onClick={() => navigate(-1)}>
+              Cancel
+            </Button>
+            {hasVariants && (
+              <p className="text-xs text-muted">
+                Stock total from colours:{' '}
+                <span className="tabular font-medium text-ink-2">{variantStockTotal}</span>
+              </p>
+            )}
+          </div>
+        </div>
+      </form>
     </div>
+  );
+}
+
+/** One headed group of fields, with the sentence that explains why it exists. */
+function Section({ title, description, children }) {
+  return (
+    <Card className="p-5 sm:p-6">
+      <div className="mb-5 border-b border-hairline pb-4">
+        <h2 className="text-base font-semibold text-ink">{title}</h2>
+        {description && <p className="mt-1 text-sm text-ink-2">{description}</p>}
+      </div>
+      {children}
+    </Card>
   );
 }
 
@@ -446,57 +609,84 @@ export default function ProductForm() {
  * happens if you do not. Presenting an empty table with headers would imply
  * that a product is incomplete until it has colours.
  */
-function VariantEditor({ variants, basePrice, onChange, onAdd, onRemove }) {
+function VariantEditor({
+  variants,
+  basePrice,
+  showErrors,
+  touched,
+  onBlur,
+  onChange,
+  onAdd,
+  onRemove,
+}) {
+  /** A row's error, but only once the user has had their turn on that field. */
+  function errorFor(row, field) {
+    if (!showErrors && !touched[`${row.key}.${field}`]) return undefined;
+    return variantError(row, field) || undefined;
+  }
+
+  function variantFieldProps(row, field) {
+    return {
+      value: row[field],
+      error: errorFor(row, field),
+      onChange: (event) => onChange(row.key, field, event.target.value),
+      onBlur: () => onBlur(row.key, field),
+    };
+  }
+
   return (
-    <fieldset className="rounded-lg border border-hairline bg-plane p-4">
-      <legend className="px-1 text-sm font-semibold text-ink">Colours and sizes</legend>
+    <Card className="p-5 sm:p-6">
+      <div className="mb-5 border-b border-hairline pb-4">
+        <h2 className="text-base font-semibold text-ink">Colours and sizes</h2>
+        <p className="mt-1 text-sm text-ink-2">
+          Each colour keeps its own stock pool. Most products need none of this.
+        </p>
+      </div>
 
       {variants.length === 0 ? (
-        <div className="mt-1">
+        <div>
           <p className="text-sm text-ink-2">
             This product is sold as one thing, with the single stock quantity above.
           </p>
-          <p className="mt-1 text-xs text-muted">
-            Add colours if shoppers need to choose between them — each one keeps its own stock,
-            and the storefront will require a choice before the product can be added to a cart.
+          <p className="mt-1.5 text-sm text-muted">
+            Add colours if shoppers need to choose between them — each one keeps its own stock, and
+            the storefront will require a choice before the product can be added to a cart.
           </p>
-          <button type="button" onClick={onAdd} className={`${btnSecondary} mt-3`}>
+          <Button variant="secondary" className="mt-4" onClick={onAdd}>
             Add a colour
-          </button>
+          </Button>
         </div>
       ) : (
-        <div className="mt-2 space-y-4">
+        <div className="space-y-4">
           {variants.map((row, index) => (
-            <div
-              key={row.key}
-              className="rounded-lg border border-hairline bg-surface p-3"
-            >
-              <div className="mb-2 flex items-center justify-between">
-                <p className="text-xs font-semibold uppercase tracking-wider text-muted">
+            <fieldset key={row.key} className="rounded-xl border border-hairline bg-plane p-4">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <legend className="sr-only">Variant {index + 1}</legend>
+                <p className="label-mono" aria-hidden="true">
                   Variant {index + 1}
                 </p>
                 <button
                   type="button"
                   onClick={() => onRemove(row.key)}
-                  className="text-xs text-muted hover:text-critical-ink"
+                  className="rounded-md px-1.5 py-0.5 text-xs font-medium text-muted transition-colors hover:text-critical-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
                 >
                   Remove
                 </button>
               </div>
 
-              <div className="grid gap-3 sm:grid-cols-2">
+              <div className="grid gap-4 sm:grid-cols-2">
                 <Field
                   label="Colour name"
                   name={`variant-${row.key}-name`}
                   required
+                  placeholder="Midnight"
                   hint="Shown as a swatch to shoppers."
-                  value={row.colorName}
-                  onChange={(e) => onChange(row.key, 'colorName', e.target.value)}
+                  {...variantFieldProps(row, 'colorName')}
                 />
 
                 <div>
                   <label
-                    className="mb-1.5 block text-sm font-medium text-ink-2"
+                    className="mb-1.5 block text-sm font-medium text-ink"
                     htmlFor={`variant-${row.key}-hex`}
                   >
                     Swatch colour
@@ -511,7 +701,7 @@ function VariantEditor({ variants, basePrice, onChange, onAdd, onRemove }) {
                       type="color"
                       value={row.colorHex}
                       onChange={(e) => onChange(row.key, 'colorHex', e.target.value)}
-                      className="h-9 w-14 shrink-0 cursor-pointer rounded border border-hairline bg-raised"
+                      className="h-10 w-14 shrink-0 cursor-pointer rounded-md border border-hairline bg-raised"
                       aria-describedby={`variant-${row.key}-hex-hint`}
                     />
                     {/*
@@ -537,6 +727,7 @@ function VariantEditor({ variants, basePrice, onChange, onAdd, onRemove }) {
                 <Field
                   label="Size"
                   name={`variant-${row.key}-size`}
+                  placeholder="Medium"
                   hint="Optional. Leave blank if this product has one size."
                   value={row.size}
                   onChange={(e) => onChange(row.key, 'size', e.target.value)}
@@ -546,11 +737,13 @@ function VariantEditor({ variants, basePrice, onChange, onAdd, onRemove }) {
                   label="Quantity"
                   name={`variant-${row.key}-qty`}
                   type="number"
+                  inputMode="numeric"
+                  step="1"
                   min="0"
                   required
+                  placeholder="12"
                   hint="Stock for this specific colour/size combination."
-                  value={row.stockQty}
-                  onChange={(e) => onChange(row.key, 'stockQty', e.target.value)}
+                  {...variantFieldProps(row, 'stockQty')}
                 />
 
                 <div className="sm:col-span-2">
@@ -558,27 +751,29 @@ function VariantEditor({ variants, basePrice, onChange, onAdd, onRemove }) {
                     label="Price override"
                     name={`variant-${row.key}-price`}
                     type="number"
+                    inputMode="decimal"
                     step="0.01"
                     min="0"
+                    placeholder={String(basePrice || '')}
                     hint={`Optional. Leave blank to use the product price of ${money(basePrice)}.`}
-                    value={row.priceOverride}
-                    onChange={(e) => onChange(row.key, 'priceOverride', e.target.value)}
+                    {...variantFieldProps(row, 'priceOverride')}
                   />
                 </div>
               </div>
-            </div>
+            </fieldset>
           ))}
 
-          <button type="button" onClick={onAdd} className={btnSecondary}>
-            Add another colour
-          </button>
-
-          <p className="text-xs text-muted">
-            Each row is one buyable combination. Two rows with the same colour and size are
-            rejected — combine them into one row with the total quantity.
-          </p>
+          <div className="flex flex-wrap items-center gap-3">
+            <Button variant="secondary" onClick={onAdd}>
+              Add another colour
+            </Button>
+            <p className="text-xs text-muted">
+              Two rows with the same colour and size are rejected — combine them into one row with
+              the total quantity.
+            </p>
+          </div>
         </div>
       )}
-    </fieldset>
+    </Card>
   );
 }

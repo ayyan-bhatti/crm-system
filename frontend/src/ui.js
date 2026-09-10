@@ -13,53 +13,78 @@
 
 export const card = 'rounded-xl border border-hairline bg-surface shadow-card';
 
+/** A card that is itself a link or a tile — pairs with `.hover-lift`. */
+export const cardInteractive = `${card} transition-shadow hover:shadow-lift`;
+
 // --- Buttons ----------------------------------------------------------------
 
+/*
+ * One button geometry for both surfaces: a 40px control with a small radius.
+ *
+ * NO TRANSFORM ON HOVER. The previous language raised every button a pixel
+ * and deepened its shadow, which is the single most recognisable "component
+ * library demo" tell — and on a dense CRM screen it means a toolbar that
+ * twitches as the pointer crosses it. Colour alone carries the hover state,
+ * which is also the cheaper repaint.
+ */
 const btnBase =
-  'inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium ' +
-  'transition-all duration-150 focus:outline-none focus-visible:ring-2 ' +
-  'focus-visible:ring-brand/40 focus-visible:ring-offset-2 focus-visible:ring-offset-plane ' +
-  'disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none';
+  'inline-flex items-center justify-center gap-2 rounded-md px-4 py-2.5 text-sm font-semibold ' +
+  'transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 ' +
+  'focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-plane ' +
+  'disabled:cursor-not-allowed disabled:opacity-45';
 
 export const btn = btnBase;
 
 /*
- * The one accent, used as a flat fill — no gradient. `--color-brand` is a
- * light lime, so the label sits in near-black ink rather than white: white
- * text on a pale fill fails contrast outright, which is why every "brand"
- * button and badge in this app takes `text-ink`, never `text-white`.
+ * The one accent, as a flat fill.
+ *
+ * The label is near-black rather than white, and that is a contrast decision
+ * rather than a stylistic one — white on this orange is 3.1:1 and fails AA at
+ * button size, while the ink is 5.7:1. See the note on `--color-on-brand` in
+ * index.css. Every filled brand surface in this app takes `text-on-brand`.
  */
-export const btnPrimary =
-  `${btnBase} bg-brand text-ink shadow-card hover:bg-brand-strong ` +
-  'hover:shadow-lift active:translate-y-0 hover:-translate-y-px';
+export const btnPrimary = `${btnBase} bg-brand text-on-brand hover:bg-brand-strong`;
 
+/** Outlined, for the secondary action beside a primary one. */
 export const btnSecondary =
-  `${btnBase} border border-hairline bg-raised text-ink-2 hover:border-rule hover:bg-plane ` +
-  'hover:text-ink';
+  `${btnBase} border border-rule bg-transparent text-ink hover:bg-sunken`;
 
-export const btnGhost = `${btnBase} text-ink-2 hover:bg-neutral-wash hover:text-ink`;
+export const btnGhost = `${btnBase} text-ink-2 hover:bg-sunken hover:text-ink`;
 
-export const btnDanger =
-  `${btnBase} bg-critical text-white shadow-card hover:brightness-95 hover:shadow-lift`;
+export const btnDanger = `${btnBase} bg-critical text-white hover:brightness-110`;
+
+/** Compact variant, for toolbars and table row actions. */
+export const btnSmall = 'px-3 py-1.5 text-[13px]';
+
+/** The storefront's own large CTA — hero, product detail, checkout. */
+export const btnLarge = 'px-7 py-3.5 text-[15px]';
 
 // --- Forms ------------------------------------------------------------------
 
 export const input =
-  'w-full rounded-lg border border-hairline bg-raised px-3 py-2 text-sm text-ink ' +
+  'w-full rounded-md border border-hairline bg-raised px-3.5 py-2.5 text-sm text-ink ' +
   'transition-colors placeholder:text-muted focus:border-brand focus:outline-none ' +
-  'focus:ring-2 focus:ring-brand/20 disabled:bg-neutral-wash disabled:text-muted';
+  'focus:ring-2 focus:ring-brand/25 disabled:bg-sunken disabled:text-muted ' +
+  'aria-[invalid=true]:border-critical aria-[invalid=true]:focus:ring-critical/25';
 
-export const label = 'mb-1.5 block text-sm font-medium text-ink-2';
+export const label = 'mb-1.5 block text-sm font-medium text-ink';
+
+/** Helper text under a field. */
+export const hintText = 'mt-1.5 text-xs text-muted';
+
+/** The inline validation message under a field. */
+export const errorText = 'mt-1.5 flex items-start gap-1.5 text-xs font-medium text-critical-ink';
 
 // --- Tables -----------------------------------------------------------------
 
 export const th =
-  'px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-muted';
+  'px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em] text-muted';
 
 export const td = 'px-4 py-3.5 text-sm text-ink-2';
 
 export const link =
-  'font-medium text-ink underline-offset-2 transition-colors hover:text-brand hover:underline';
+  'font-medium text-ink underline underline-offset-[3px] decoration-rule ' +
+  'transition-colors hover:text-brand-ink hover:decoration-brand';
 
 // --- Status ------------------------------------------------------------------
 
@@ -238,8 +263,8 @@ export const CHART_COLORS = {
 
 /** Resolve a CSS custom property to its computed value. */
 export function token(name) {
-  if (typeof window === 'undefined') return '#2a78d6';
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || '#2a78d6';
+  if (typeof window === 'undefined') return '#ff5a1f';
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || '#ff5a1f';
 }
 
 // --- Formatters --------------------------------------------------------------
@@ -378,11 +403,19 @@ export function orderLabel(order) {
 // --- Placeholder product images ----------------------------------------------
 
 /**
- * A deterministic set of background colours for generated product placeholders
- * — the same handful of hues used for the category bar chart's series colours,
- * so a placeholder reads as "part of this app" rather than a random swatch.
+ * A deterministic set of background colours for generated product placeholders.
+ *
+ * MUTED EARTH TONES, NOT THE CHART SERIES. These have to survive being seen
+ * forty at a time in a catalogue grid, which is the opposite of what a chart
+ * palette is tuned for: series colours are chosen to be maximally separable
+ * from each other, so a grid of them reads as a bag of sweets rather than a
+ * furniture shop. Desaturated and warm, they sit quietly against the cream
+ * ground and look like a considered stand-in rather than missing data.
+ *
+ * Hex rather than a token because this string is inlined into an SVG data
+ * URI, which has no access to the document's custom properties.
  */
-const PLACEHOLDER_PALETTE = ['#2a78d6', '#1f9d78', '#c2762a', '#7c5cd6', '#c23a5e', '#2a9bc2'];
+const PLACEHOLDER_PALETTE = ['#8c7a63', '#6f6455', '#5f7a6a', '#8a6a5c', '#7c6a86', '#93704f'];
 
 /** A short, stable hash of a string, used only to pick a palette index. */
 function hashString(value) {
@@ -588,11 +621,11 @@ export const SEGMENT_LABELS = {
  * one that means "call this person" stops being noticed.
  */
 export const SEGMENT_STYLES = {
-  new: 'bg-sky-50 text-sky-700 ring-sky-600/20',
-  healthy: 'bg-emerald-50 text-emerald-700 ring-emerald-600/20',
-  at_risk: 'bg-red-50 text-red-700 ring-red-600/20',
-  dormant: 'bg-amber-50 text-amber-800 ring-amber-600/20',
-  high_value: 'bg-brand-wash text-brand-ink ring-brand-strong/20',
+  new: 'bg-info-wash text-info-ink ring-info/20',
+  healthy: 'bg-good-wash text-good-ink ring-good/20',
+  at_risk: 'bg-critical-wash text-critical-ink ring-critical/20',
+  dormant: 'bg-warning-wash text-warning-ink ring-warning/25',
+  high_value: 'bg-brand-wash text-brand-ink ring-brand/25',
 };
 
 export const CAMPAIGN_STATUS_LABELS = {
@@ -605,12 +638,12 @@ export const CAMPAIGN_STATUS_LABELS = {
 };
 
 export const CAMPAIGN_STATUS_STYLES = {
-  draft: 'bg-neutral-100 text-neutral-700 ring-neutral-500/20',
-  pending_approval: 'bg-amber-50 text-amber-800 ring-amber-600/20',
-  scheduled: 'bg-sky-50 text-sky-700 ring-sky-600/20',
-  sending: 'bg-sky-50 text-sky-700 ring-sky-600/20',
-  sent: 'bg-emerald-50 text-emerald-700 ring-emerald-600/20',
-  failed: 'bg-red-50 text-red-700 ring-red-600/20',
+  draft: 'bg-neutral-wash text-neutral-ink ring-rule/40',
+  pending_approval: 'bg-warning-wash text-warning-ink ring-warning/25',
+  scheduled: 'bg-info-wash text-info-ink ring-info/20',
+  sending: 'bg-info-wash text-info-ink ring-info/20',
+  sent: 'bg-good-wash text-good-ink ring-good/20',
+  failed: 'bg-critical-wash text-critical-ink ring-critical/20',
 };
 
 export const RECIPIENT_STATUS_LABELS = {

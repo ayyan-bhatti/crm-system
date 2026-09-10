@@ -7,14 +7,14 @@ import { useCart } from '../../context/CartContext';
 import { useBuyerAuth } from '../../context/BuyerAuthContext';
 import { useToast } from '../../components/Toast';
 import { errorMessage } from '../../api/client';
-import { Spinner, ErrorBanner } from '../../components/common';
+import { Breadcrumb, Button, ErrorBanner, Skeleton } from '../../components/common';
 import ProductCard from '../../components/shop/ProductCard';
 import ProductImage from '../../components/shop/ProductImage';
 import RatingStars from '../../components/shop/RatingStars';
 import VariantPicker from '../../components/shop/VariantPicker';
 import QuantityStepper from '../../components/shop/QuantityStepper';
 import WishlistButton from '../../components/shop/WishlistButton';
-import { money, btnPrimary, btnSecondary, galleryFor, priceRange } from '../../ui';
+import { money, galleryFor, priceRange } from '../../ui';
 
 /**
  * What a shop says about a product when nobody wrote a description.
@@ -37,6 +37,18 @@ function descriptionFor(product) {
     product.category || 'general'
   } range and is covered by the same delivery and returns terms as everything else in the shop — if you need specifics before ordering, get in touch and we will get you an answer.`;
 }
+
+/**
+ * The three questions a shopper asks after "do I want it" and before "will I
+ * buy it". Kept together because they are answered together — a delivery
+ * promise with no returns policy beside it raises the second question rather
+ * than settling the first.
+ */
+const ASSURANCES = [
+  ['Delivery', 'Free over $75, otherwise $6. Arrives in 3–5 days.'],
+  ['Returns', '30 days, unused and in its original packaging.'],
+  ['Support', 'Questions answered within one working day.'],
+];
 
 export default function ShopProductDetail() {
   const { id } = useParams();
@@ -87,8 +99,20 @@ export default function ShopProductDetail() {
     setQuantity((current) => Math.min(current, maxQty));
   }, [maxQty]);
 
-  if (loading) return <Spinner full />;
-  if (error) return <ErrorBanner message={error} />;
+  if (loading) return <DetailSkeleton />;
+  if (error) {
+    return (
+      <div className="mx-auto max-w-3xl px-4 py-16 sm:px-6">
+        <ErrorBanner message={error} />
+        <Link
+          to="/products"
+          className="text-sm font-medium text-ink underline decoration-rule underline-offset-4 hover:decoration-brand"
+        >
+          Back to the catalogue
+        </Link>
+      </div>
+    );
+  }
   if (!product) return null;
 
   const images = galleryFor(product);
@@ -138,17 +162,38 @@ export default function ShopProductDetail() {
   }
 
   return (
-    <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 sm:py-10">
-      <div className="grid gap-8 md:grid-cols-2 lg:gap-14">
+    <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-10 lg:px-8">
+      <Breadcrumb
+        items={[
+          { label: 'Home', to: '/' },
+          { label: 'Shop', to: '/products' },
+          ...(product.category
+            ? [
+                {
+                  label: product.category,
+                  to: `/products?category=${encodeURIComponent(product.category)}`,
+                },
+              ]
+            : []),
+          { label: product.name },
+        ]}
+        className="mb-6 sm:mb-8"
+      />
+
+      <div className="grid gap-10 lg:grid-cols-[1.1fr_1fr] lg:gap-16 xl:gap-20">
         {/* --- Gallery ------------------------------------------------------ */}
-        <div className="md:sticky md:top-24 md:self-start">
-          <div className="overflow-hidden rounded-2xl border border-hairline bg-neutral-wash">
+        <div className="lg:sticky lg:top-28 lg:self-start">
+          <div className="overflow-hidden rounded-lg bg-sunken">
             <ProductImage
               product={product}
               src={images[activeImage]}
               alt={product.name}
+              /* The page's own hero. Deferring it is deferring the moment the
+                 page looks like anything, so it is the one image here that is
+                 deliberately not lazy. */
               loading="eager"
-              className="aspect-square w-full object-cover"
+              fetchPriority="high"
+              className="aspect-[4/5] w-full object-cover"
             />
           </div>
 
@@ -158,7 +203,7 @@ export default function ShopProductDetail() {
             nothing, which reads as broken rather than minimal.
           */}
           {images.length > 1 && (
-            <div className="mt-3 flex gap-2.5 overflow-x-auto pb-1">
+            <div className="mt-3 flex gap-3 overflow-x-auto pb-1">
               {images.map((src, index) => (
                 <button
                   key={src}
@@ -166,9 +211,9 @@ export default function ShopProductDetail() {
                   onClick={() => setActiveImage(index)}
                   aria-label={`View image ${index + 1} of ${images.length}`}
                   aria-pressed={index === activeImage}
-                  className={`h-16 w-16 shrink-0 overflow-hidden rounded-lg ring-1 ring-inset transition-all ${
+                  className={`h-20 w-16 shrink-0 overflow-hidden rounded-md bg-sunken ring-1 ring-inset transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand ${
                     index === activeImage
-                      ? 'ring-2 ring-brand'
+                      ? 'ring-2 ring-ink'
                       : 'ring-hairline hover:ring-rule'
                   }`}
                 >
@@ -176,6 +221,7 @@ export default function ShopProductDetail() {
                     product={product}
                     src={src}
                     alt=""
+                    loading="lazy"
                     className="h-full w-full object-cover"
                   />
                 </button>
@@ -185,39 +231,42 @@ export default function ShopProductDetail() {
         </div>
 
         {/* --- Buy box ------------------------------------------------------ */}
-        <div className="animate-fade-rise">
+        <div className="animate-fade-rise lg:max-w-lg">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted">
-              {product.category}
-            </p>
+            {product.category && <p className="label-mono">{product.category}</p>}
             {product.brand && (
               <>
-                <span className="h-3 w-px bg-hairline" aria-hidden="true" />
+                <span className="h-3 w-px bg-rule" aria-hidden="true" />
                 <p className="label-mono">{product.brand}</p>
               </>
             )}
           </div>
-          <h1 className="font-display mt-1.5 text-3xl font-semibold leading-tight text-ink sm:text-4xl">
+
+          <h1 className="font-display mt-3 text-[34px] leading-[1.08] text-ink sm:text-[42px]">
             {product.name}
           </h1>
 
-          {product.rating?.count > 0 && <RatingStars rating={product.rating} className="mt-2" />}
+          {product.rating?.count > 0 && (
+            <RatingStars rating={product.rating} size="lg" className="mt-4" />
+          )}
 
-          <div className="mt-4 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+          <div className="mt-5 flex flex-wrap items-baseline gap-x-3 gap-y-2">
             {product.salePrice ? (
               <>
-                <span className="text-3xl font-semibold text-brand-ink tabular">
+                <span className="font-display text-[32px] leading-none text-brand-ink tabular">
                   {money(product.salePrice)}
                 </span>
-                <span className="text-lg font-medium text-muted line-through tabular">
+                <span className="text-lg text-muted line-through tabular">
                   {money(product.price)}
                 </span>
-                <span className="rounded-full bg-brand-wash px-2 py-0.5 text-xs font-semibold text-brand-ink">
+                <span className="rounded-full bg-brand-wash px-2.5 py-1 text-xs font-semibold text-brand-ink">
                   Save {money(product.price - product.salePrice)}
                 </span>
               </>
             ) : (
-              <span className="text-3xl font-semibold text-ink tabular">{money(price)}</span>
+              <span className="font-display text-[32px] leading-none text-ink tabular">
+                {money(price)}
+              </span>
             )}
             {/* "from" only until a variant fixes the price. */}
             {range && !variant && (
@@ -227,15 +276,11 @@ export default function ShopProductDetail() {
             )}
           </div>
 
-          <p className="mt-3 flex items-center gap-2 text-sm">
+          <p className="mt-4 flex items-center gap-2 text-sm">
             <span
               aria-hidden="true"
               className={`h-2 w-2 rounded-full ${
-                product.inStock
-                  ? product.lowStock
-                    ? 'bg-warning'
-                    : 'bg-good'
-                  : 'bg-critical'
+                product.inStock ? (product.lowStock ? 'bg-warning' : 'bg-good') : 'bg-critical'
               }`}
             />
             {product.inStock ? (
@@ -249,14 +294,14 @@ export default function ShopProductDetail() {
             )}
           </p>
 
-          <p className="mt-5 text-sm leading-relaxed text-ink-2">{descriptionFor(product)}</p>
+          <p className="mt-6 text-[15px] leading-relaxed text-ink-2">{descriptionFor(product)}</p>
 
           {product.tags?.length > 0 && (
-            <ul className="mt-3 flex flex-wrap gap-1.5">
+            <ul className="mt-4 flex flex-wrap gap-1.5">
               {product.tags.map((tag) => (
                 <li
                   key={tag}
-                  className="rounded-full border border-hairline px-2 py-0.5 text-xs text-ink-2"
+                  className="rounded-full border border-hairline px-2.5 py-1 text-xs text-ink-2"
                 >
                   {tag}
                 </li>
@@ -265,7 +310,7 @@ export default function ShopProductDetail() {
           )}
 
           {hasVariants && (
-            <div className="mt-7 border-t border-hairline pt-6">
+            <div className="mt-8 border-t border-hairline pt-8">
               <VariantPicker
                 variants={product.variants}
                 value={variantId}
@@ -274,7 +319,7 @@ export default function ShopProductDetail() {
             </div>
           )}
 
-          <div className="mt-7 border-t border-hairline pt-6">
+          <div className="mt-8 border-t border-hairline pt-8">
             <QuantityStepper
               value={quantity}
               onChange={setQuantity}
@@ -282,24 +327,38 @@ export default function ShopProductDetail() {
               disabled={!product.inStock}
             />
 
-            <div className="mt-5 flex flex-wrap gap-3">
-              <button
-                type="button"
-                className={`${btnPrimary} hover-lift min-w-40 flex-1 justify-center py-2.5 sm:flex-none`}
-                disabled={!canBuy || adding || buying}
-                onClick={handleBuyNow}
-              >
-                {buying ? <Spinner /> : 'Buy now'}
-              </button>
-
-              <button
-                type="button"
-                className={`${btnSecondary} hover-lift min-w-40 flex-1 justify-center py-2.5 sm:flex-none`}
-                disabled={!canBuy || adding || buying}
+            <div className="mt-6 flex flex-wrap items-center gap-3">
+              {/*
+                `loading` rather than a hand-swapped label, because the two
+                things that must happen together when an add is in flight — the
+                copy saying so, and the control refusing further clicks — drift
+                apart the moment they are two separate expressions. Bound to one
+                prop, a button that SAYS it is working cannot also still be
+                submitting, so one impatient double-click cannot become two
+                lines in a cart.
+              */}
+              <Button
+                size="lg"
+                className="min-w-44 flex-1 justify-center sm:flex-none"
+                disabled={!canBuy || buying}
+                loading={adding}
+                loadingLabel="Adding…"
                 onClick={handleAdd}
               >
-                {adding ? <Spinner /> : 'Add to cart'}
-              </button>
+                Add to cart
+              </Button>
+
+              <Button
+                variant="secondary"
+                size="lg"
+                className="min-w-44 flex-1 justify-center sm:flex-none"
+                disabled={!canBuy || adding}
+                loading={buying}
+                loadingLabel="Taking you to checkout…"
+                onClick={handleBuyNow}
+              >
+                Buy now
+              </Button>
 
               <WishlistButton product={product} variant="button" />
             </div>
@@ -310,31 +369,31 @@ export default function ShopProductDetail() {
               loses a sale it could have made.
             */}
             {hasVariants && !variantId && product.inStock && (
-              <p className="mt-3 text-sm text-muted">Choose a colour to continue.</p>
+              <p className="mt-3.5 text-sm text-muted">Choose a colour to continue.</p>
             )}
             {!product.inStock && (
-              <p className="mt-3 text-sm text-muted">
-                This is sold out at the moment. Everything else in {product.category} is still
-                available.
+              <p className="mt-3.5 text-sm text-muted">
+                This is sold out at the moment. Everything else in{' '}
+                {product.category ? (
+                  <Link
+                    to={`/products?category=${encodeURIComponent(product.category)}`}
+                    className="font-medium text-ink underline decoration-rule underline-offset-4 hover:decoration-brand"
+                  >
+                    {product.category}
+                  </Link>
+                ) : (
+                  'the catalogue'
+                )}{' '}
+                is still available.
               </p>
             )}
           </div>
 
-          {/*
-            The three questions a shopper asks after "do I want it" and before
-            "will I buy it". They were answered nowhere on this page, which left
-            the buy box ending in a wall of whitespace and the shopper guessing
-            at delivery and returns — the two things most likely to stop a sale.
-          */}
-          <dl className="mt-7 grid gap-3 border-t border-hairline pt-6 text-sm sm:grid-cols-3">
-            {[
-              ['Delivery', 'Free over $75, otherwise $6. Arrives in 3–5 days.'],
-              ['Returns', '30 days, unused and in its original packaging.'],
-              ['Support', 'Questions answered within one working day.'],
-            ].map(([term, detail]) => (
+          <dl className="mt-8 grid gap-5 border-t border-hairline pt-8 sm:grid-cols-3">
+            {ASSURANCES.map(([term, detail]) => (
               <div key={term}>
-                <dt className="font-medium text-ink">{term}</dt>
-                <dd className="mt-0.5 text-xs leading-relaxed text-muted">{detail}</dd>
+                <dt className="label-mono">{term}</dt>
+                <dd className="mt-1.5 text-xs leading-relaxed text-ink-2">{detail}</dd>
               </div>
             ))}
           </dl>
@@ -342,10 +401,15 @@ export default function ShopProductDetail() {
       </div>
 
       {recs && recs.data.length > 0 && (
-        <section className="mt-16 border-t border-hairline pt-10">
-          <h2 className="font-display mb-2 text-xl font-semibold text-ink">You might also like</h2>
-          {recs.reason && <p className="mb-5 text-sm text-muted">{recs.reason}</p>}
-          <div className="grid grid-cols-2 gap-5 sm:grid-cols-4">
+        <section className="mt-20 border-t border-hairline pt-12 sm:mt-24">
+          <div className="mb-8">
+            <p className="label-mono">More like this</p>
+            <h2 className="font-display mt-2 text-[28px] leading-tight text-ink">
+              You might also like
+            </h2>
+            {recs.reason && <p className="mt-2 text-sm text-ink-2">{recs.reason}</p>}
+          </div>
+          <div className="grid grid-cols-2 gap-x-5 gap-y-9 sm:grid-cols-4 lg:gap-x-6">
             {recs.data.map((p) => (
               <ProductCard key={p._id} product={p} />
             ))}
@@ -354,29 +418,64 @@ export default function ShopProductDetail() {
       )}
 
       {recentlyViewed.length > 0 && (
-        <section className="mt-16 border-t border-hairline pt-10">
-          <h2 className="font-display mb-5 text-xl font-semibold text-ink">Recently viewed</h2>
-          <div className="flex gap-4 overflow-x-auto pb-1">
+        <section className="mt-20 border-t border-hairline pt-12">
+          <p className="label-mono">Your trail</p>
+          <h2 className="font-display mb-8 mt-2 text-[28px] leading-tight text-ink">
+            Recently viewed
+          </h2>
+          <ul className="flex gap-5 overflow-x-auto pb-2">
             {recentlyViewed.map((item) => (
-              <Link
-                key={item._id}
-                to={`/products/${item._id}`}
-                className="hover-lift w-32 shrink-0 overflow-hidden rounded-xl border border-hairline bg-surface"
-              >
-                <div className="aspect-square overflow-hidden bg-neutral-wash">
-                  {item.imageUrl && (
-                    <img src={item.imageUrl} alt="" className="h-full w-full object-cover" />
-                  )}
-                </div>
-                <div className="p-2">
-                  <p className="truncate text-xs font-medium text-ink">{item.name}</p>
+              <li key={item._id} className="w-36 shrink-0 sm:w-40">
+                <Link to={`/products/${item._id}`} className="group block">
+                  <div className="overflow-hidden rounded-lg bg-sunken">
+                    <ProductImage
+                      product={item}
+                      src={galleryFor(item)[0]}
+                      alt=""
+                      loading="lazy"
+                      className="aspect-[4/5] w-full object-cover transition-transform duration-700 group-hover:scale-[1.03]"
+                    />
+                  </div>
+                  <p className="mt-2.5 truncate text-sm font-medium text-ink">{item.name}</p>
                   <p className="text-xs text-muted tabular">{money(item.price)}</p>
-                </div>
-              </Link>
+                </Link>
+              </li>
             ))}
-          </div>
+          </ul>
         </section>
       )}
+    </div>
+  );
+}
+
+/**
+ * The loading state, shaped like the page it stands in for.
+ *
+ * A centred spinner here meant the header, the gallery and the buy box all
+ * appeared at once out of an empty screen, and everything below the fold
+ * jumped as the recommendations landed. Reserving the two columns keeps the
+ * page still.
+ */
+function DetailSkeleton() {
+  return (
+    <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-10 lg:px-8">
+      <p role="status" className="sr-only">
+        Loading product
+      </p>
+      <Skeleton className="mb-8 h-3 w-56" />
+      <div className="grid gap-10 lg:grid-cols-[1.1fr_1fr] lg:gap-16" aria-hidden="true">
+        <Skeleton className="aspect-[4/5] w-full rounded-lg" />
+        <div className="lg:max-w-lg">
+          <Skeleton className="h-3 w-24" />
+          <Skeleton className="mt-4 h-10 w-4/5" />
+          <Skeleton className="mt-5 h-8 w-32" />
+          <Skeleton className="mt-6 h-4 w-full" />
+          <Skeleton className="mt-2 h-4 w-full" />
+          <Skeleton className="mt-2 h-4 w-2/3" />
+          <Skeleton className="mt-9 h-12 w-40" />
+          <Skeleton className="mt-6 h-12 w-full" />
+        </div>
+      </div>
     </div>
   );
 }

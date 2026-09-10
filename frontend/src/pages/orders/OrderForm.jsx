@@ -3,10 +3,18 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { customersApi, ordersApi, productsApi, usersApi } from '../../api/resources';
 import { errorMessage } from '../../api/client';
 import useFetch from '../../hooks/useFetch';
-import { Card, ErrorBanner, Field, PageHeader, Spinner } from '../../components/common';
+import {
+  Breadcrumb,
+  Button,
+  Card,
+  ErrorBanner,
+  Field,
+  PageHeader,
+  Spinner,
+} from '../../components/common';
 import { useToast } from '../../components/Toast';
 import SearchSelect from '../../components/SearchSelect';
-import { btnPrimary, btnSecondary, humanize, input, money, orderLabel } from '../../ui';
+import { humanize, input, money, orderLabel } from '../../ui';
 
 /**
  * Create or edit an order.
@@ -63,11 +71,9 @@ export default function OrderForm() {
   /*
    * A line is (product, VARIANT, quantity). The variant was missing entirely,
    * and its absence is what made every variant product unorderable from the
-   * CRM — see the note on `variantOptions` below.
+   * CRM — see the note on `variantsFor` below.
    */
-  const [lines, setLines] = useState([
-    { product: '', quantity: 1, selected: null, variantId: '' },
-  ]);
+  const [lines, setLines] = useState([{ product: '', quantity: 1, selected: null, variantId: '' }]);
 
   /*
    * Who is going to work this order, asked here rather than on the detail page
@@ -239,7 +245,9 @@ export default function OrderForm() {
       const stock = availableStock(line);
       if (quantity > stock) {
         const variant = chosenVariant(line);
-        const what = variant ? `${line.selected.name} (${variantName(variant)})` : line.selected.name;
+        const what = variant
+          ? `${line.selected.name} (${variantName(variant)})`
+          : line.selected.name;
         return `Not enough stock for ${what}: asking for ${quantity}, ${stock} available.`;
       }
     }
@@ -293,6 +301,8 @@ export default function OrderForm() {
         toast.success('Order updated.');
         navigate(`/crm/orders/${id}`, { replace: true });
       } else {
+        // `ordersApi.create` mints a fresh idempotency key per submission, so a
+        // retry of the same click cannot become a second order.
         const order = await ordersApi.create({
           customer: customerId,
           items,
@@ -322,8 +332,18 @@ export default function OrderForm() {
   if (isEdit && loadError) return <ErrorBanner message={loadError} />;
 
   return (
-    <div className="mx-auto max-w-3xl">
+    <div className="mx-auto max-w-4xl">
+      <Breadcrumb
+        className="mb-3"
+        items={[
+          { label: 'Orders', to: '/crm/orders' },
+          ...(isEdit ? [{ label: orderLabel(existing), to: `/crm/orders/${id}` }] : []),
+          { label: isEdit ? 'Edit items' : 'New order' },
+        ]}
+      />
+
       <PageHeader
+        eyebrow="Order"
         title={isEdit ? `Edit ${orderLabel(existing)}` : 'New order'}
         subtitle={
           isEdit
@@ -332,251 +352,268 @@ export default function OrderForm() {
         }
       />
 
-      <Card className="p-6">
-        <ErrorBanner message={error} onDismiss={() => setError('')} />
+      <ErrorBanner message={error} onDismiss={() => setError('')} />
 
-        {/*
-          Said plainly rather than shown as disabled controls with no
-          explanation. A form full of dead inputs is a puzzle; a sentence is an
-          answer.
-        */}
-        {itemsLocked && (
-          <div className="mb-4 rounded-md border border-warning/25 bg-warning-wash px-4 py-3 text-sm text-warning-ink">
-            This order is {existing?.status}, so its items can no longer be changed — the stock
-            has already moved. Create a new order instead.
-          </div>
-        )}
+      {/*
+        Said plainly rather than shown as disabled controls with no
+        explanation. A form full of dead inputs is a puzzle; a sentence is an
+        answer.
+      */}
+      {itemsLocked && (
+        <div className="mb-5 rounded-xl border border-warning/25 bg-warning-wash px-4 py-3 text-sm text-warning-ink">
+          This order is {existing?.status}, so its items can no longer be changed — the stock has
+          already moved. Create a new order instead.
+        </div>
+      )}
 
-        <form onSubmit={handleSubmit} className="space-y-5">
-          {/*
-            The customer is fixed after creation. Moving an order to a different
-            customer is not an edit, it is a different order — the original
-            customer's history would silently lose a purchase they made.
-          */}
-          {isEdit ? (
-            <Field label="Customer" hint="A customer cannot be changed after the order is placed.">
-              <p className="text-sm text-ink">{existing?.customer?.name || 'Unknown customer'}</p>
-            </Field>
-          ) : (
-          <Field label="Customer" hint="Start typing to search by name, company or email.">
-            <SearchSelect
-              required
-              value={customerId}
-              selected={selectedCustomer}
-              onChange={(customer) => {
-                setCustomerId(customer._id);
-                setSelectedCustomer(customer);
-              }}
-              fetchOptions={(search) => customersApi.options(search)}
-              getOptionLabel={(customer) => customer.name}
-              getOptionMeta={(customer) => customer.company || customer.email}
-              placeholder="Search customers…"
-              emptyMessage="No customers match that search"
-            />
-          </Field>
-          )}
+      {/* `noValidate` — the app shows its own messages, and the native bubble
+          suppresses them. */}
+      <form onSubmit={handleSubmit} noValidate className="space-y-5">
+        <Section
+          title="Who it is for"
+          description={
+            isEdit
+              ? 'Fixed once the order exists — moving it to another customer would be a different order.'
+              : 'The account this order is placed against, and the colleague who will fulfil it.'
+          }
+        >
+          <div className="grid gap-4 sm:grid-cols-2">
+            {/*
+              The customer is fixed after creation. Moving an order to a
+              different customer is not an edit, it is a different order — the
+              original customer's history would silently lose a purchase.
+            */}
+            {isEdit ? (
+              <Field label="Customer" hint="A customer cannot be changed after the order is placed.">
+                <p className="rounded-md border border-hairline bg-sunken px-3.5 py-2.5 text-sm text-ink">
+                  {existing?.customer?.name || 'Unknown customer'}
+                </p>
+              </Field>
+            ) : (
+              <Field label="Customer" hint="Start typing to search by name, company or email.">
+                <SearchSelect
+                  required
+                  value={customerId}
+                  selected={selectedCustomer}
+                  onChange={(customer) => {
+                    setCustomerId(customer._id);
+                    setSelectedCustomer(customer);
+                  }}
+                  fetchOptions={(search) => customersApi.options(search)}
+                  getOptionLabel={(customer) => customer.name}
+                  getOptionMeta={(customer) => customer.company || customer.email}
+                  placeholder="Search customers…"
+                  emptyMessage="No customers match that search"
+                />
+              </Field>
+            )}
 
-          {/*
-            WHO WILL WORK IT.
+            {/*
+              WHO WILL WORK IT.
 
-            Under the customer and above the items, because that is the order the
-            decision is actually made in: who it is for, who is doing it, what
-            they are getting.
+              Beside the customer, because that is the order the decision is
+              actually made in: who it is for, who is doing it, what they are
+              getting.
 
-            Only on creation. Changing it afterwards is reassignment, which lives
-            on the detail page with its own audit entry — see the note on the
-            assign route. Offering it here on an edit would be a second way to do
-            the same thing, with different consequences.
-          */}
-          {!isEdit && (
-            <Field
-              label="Assign to"
-              hint="Who will fulfil this order. Leave blank if you have not decided — nobody sees it until it is assigned."
-            >
-              <SearchSelect
-                value={assignedTo}
-                selected={selectedAssignee}
-                onChange={(user) => {
-                  setAssignedTo(user?._id || '');
-                  setSelectedAssignee(user || null);
-                }}
-                fetchOptions={(search) => usersApi.assignable(search)}
-                getOptionLabel={(user) => user.name}
-                getOptionMeta={(user) => humanize(user.role)}
-                placeholder="Search colleagues…"
-                emptyMessage="No matching colleague"
-              />
-            </Field>
-          )}
+              Only on creation. Changing it afterwards is reassignment, which
+              lives on the detail page with its own audit entry — see the note
+              on the assign route. Offering it here on an edit would be a second
+              way to do the same thing, with different consequences.
+            */}
+            {!isEdit && (
+              <div>
+                <Field
+                  label="Assign to"
+                  hint="Who will fulfil this order. Leave blank if you have not decided — nobody sees it until it is assigned."
+                >
+                  <SearchSelect
+                    value={assignedTo}
+                    selected={selectedAssignee}
+                    onChange={(user) => {
+                      setAssignedTo(user?._id || '');
+                      setSelectedAssignee(user || null);
+                    }}
+                    fetchOptions={(search) => usersApi.assignable(search)}
+                    getOptionLabel={(user) => user.name}
+                    getOptionMeta={(user) => humanize(user.role)}
+                    placeholder="Search colleagues…"
+                    emptyMessage="No matching colleague"
+                  />
+                </Field>
 
-          {/*
-            Outside the Field, not inside it.
+                {/*
+                  Outside the Field, not inside it.
 
-            `Field` clones its single child to give it the label's id, so a
-            second child throws — which took the whole form down rather than
-            just this control. The clearing button is a sibling of the field
-            rather than part of it, which is also what it is conceptually.
-          */}
-          {!isEdit && selectedAssignee && (
-            <button
-              type="button"
-              className={btnSecondary}
-              onClick={() => {
-                setAssignedTo('');
-                setSelectedAssignee(null);
-              }}
-            >
-              Leave unassigned
-            </button>
-          )}
-
-          {/* --- Line items --------------------------------------------- */}
-          <div>
-            <p className="mb-2 text-sm font-medium text-ink-2">Items</p>
-
-            {/* Column headings, so the three narrow inputs are not three
-                unlabelled boxes. Hidden on mobile, where the row stacks and
-                each control is beside its own label instead. */}
-            <div className="mb-1.5 hidden grid-cols-[minmax(0,1fr)_5rem_6rem_auto] gap-2 px-0.5 text-xs font-medium uppercase tracking-wide text-muted sm:grid">
-              <span>Product</span>
-              <span>Qty</span>
-              <span className="text-right">Amount</span>
-              <span className="w-[4.5rem]" />
-            </div>
-
-            <div className="space-y-2">
-              {lines.map((line, index) => {
-                const variants = variantsFor(line);
-                const variant = chosenVariant(line);
-
-                return (
-                  /*
-                    A GRID, not `flex flex-wrap`.
-                    Wrapping collapsed the row into a vertical stack the moment
-                    the product name was long or the sidebar was open — product,
-                    colour, quantity and amount each on their own full-width
-                    line, with no column headings to say what any of them were.
-                    A grid keeps the columns aligned down the list, which is the
-                    whole reason a line-items table is a table.
-                  */
-                  <div
-                    key={index}
-                    className="grid grid-cols-1 items-start gap-2 rounded-lg border border-hairline p-2.5 sm:grid-cols-[minmax(0,1fr)_5rem_6rem_auto] sm:border-0 sm:p-0"
+                  `Field` clones its single child to give it the label's id, so
+                  a second child throws — which took the whole form down rather
+                  than just this control. The clearing button is a sibling of
+                  the field rather than part of it, which is also what it is
+                  conceptually.
+                */}
+                {selectedAssignee && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="mt-2"
+                    onClick={() => {
+                      setAssignedTo('');
+                      setSelectedAssignee(null);
+                    }}
                   >
-                    <div className="min-w-0">
-                      {itemsLocked ? (
-                        <p className="pt-2 text-sm text-ink">
-                          {line.selected?.name || 'Unknown product'}
-                          {variant && (
-                            <span className="block text-xs text-muted">{variantName(variant)}</span>
-                          )}
-                        </p>
-                      ) : (
-                        <>
-                          <SearchSelect
-                            value={line.product}
-                            selected={line.selected}
-                            /*
-                              Choosing a different product CLEARS the variant.
-                              A variant id belongs to one product; carried over,
-                              it matches nothing on the new one, and the line
-                              looks complete while the server rejects it for a
-                              colour nobody picked.
-                            */
-                            onChange={(picked) =>
-                              updateLine(index, {
-                                product: picked._id,
-                                selected: picked,
-                                variantId:
-                                  picked.variants?.length === 1
-                                    ? String(picked.variants[0]._id)
-                                    : '',
-                              })
-                            }
-                            fetchOptions={(search) => productsApi.options(search)}
-                            getOptionLabel={(p) => p.name}
-                            getOptionMeta={(p) =>
-                              `${p.sku} · ${money(p.price)} · ${
-                                p.variants?.length
-                                  ? `${p.variants.length} colours`
-                                  : `${p.stockQty} in stock`
-                              }`
-                            }
-                            placeholder="Search products…"
-                            emptyMessage="No products match that search"
-                          />
-
-                          {/* Only where the product genuinely has colours. */}
-                          {variants.length > 0 && (
-                            <div className="mt-1.5">
-                              <label className="sr-only" htmlFor={`variant-${index}`}>
-                                Colour and size for item {index + 1}
-                              </label>
-                              <select
-                                id={`variant-${index}`}
-                                className={`${input} w-full`}
-                                value={line.variantId}
-                                onChange={(e) => updateLine(index, { variantId: e.target.value })}
-                              >
-                                <option value="">Choose a colour…</option>
-                                {variants.map((v) => (
-                                  <option
-                                    key={v._id}
-                                    value={v._id}
-                                    /* Shown and disabled rather than hidden:
-                                       "out of stock" and "not made" are
-                                       different facts. */
-                                    disabled={v.stockQty === 0}
-                                  >
-                                    {variantName(v)}
-                                    {v.stockQty === 0
-                                      ? ' — out of stock'
-                                      : ` — ${v.stockQty} in stock`}
-                                  </option>
-                                ))}
-                              </select>
-                            </div>
-                          )}
-                        </>
-                      )}
-                    </div>
-
-                    <input
-                      type="number"
-                      min="1"
-                      className={`${input} w-full`}
-                      value={line.quantity}
-                      disabled={itemsLocked}
-                      aria-label={`Quantity for item ${index + 1}`}
-                      onChange={(e) => updateLine(index, { quantity: e.target.value })}
-                    />
-
-                    <div className="pt-2 text-right text-sm tabular text-ink-2">
-                      {line.selected
-                        ? money(unitPrice(line) * (Number(line.quantity) || 0))
-                        : '—'}
-                    </div>
-
-                    <button
-                      type="button"
-                      className="justify-self-start pt-2 text-sm text-muted transition-colors hover:text-critical-ink disabled:opacity-40 sm:justify-self-auto"
-                      onClick={() => removeLine(index)}
-                      disabled={lines.length === 1 || itemsLocked}
-                      aria-label="Remove item"
-                    >
-                      Remove
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-
-            {!itemsLocked && (
-              <button type="button" className={`${btnSecondary} mt-3`} onClick={addLine}>
-                Add item
-              </button>
+                    Leave unassigned
+                  </Button>
+                )}
+              </div>
             )}
           </div>
+        </Section>
+
+        <Section
+          title="What they are getting"
+          description="Stock is checked as you type, and again by the server when the order is placed."
+        >
+          {/* Column headings, so the three narrow inputs are not three
+              unlabelled boxes. Hidden on mobile, where the row stacks and
+              each control is beside its own label instead. */}
+          <div className="mb-2 hidden grid-cols-[minmax(0,1fr)_5rem_7rem_auto] gap-3 px-0.5 sm:grid">
+            <span className="label-mono">Product</span>
+            <span className="label-mono">Qty</span>
+            <span className="label-mono text-right">Amount</span>
+            <span className="w-[4.5rem]" />
+          </div>
+
+          <div className="space-y-2.5">
+            {lines.map((line, index) => {
+              const variants = variantsFor(line);
+              const variant = chosenVariant(line);
+
+              return (
+                /*
+                  A GRID, not `flex flex-wrap`.
+                  Wrapping collapsed the row into a vertical stack the moment
+                  the product name was long or the sidebar was open — product,
+                  colour, quantity and amount each on their own full-width
+                  line, with no column headings to say what any of them were.
+                  A grid keeps the columns aligned down the list, which is the
+                  whole reason a line-items table is a table.
+                */
+                <div
+                  key={index}
+                  className="grid grid-cols-1 items-start gap-3 rounded-xl border border-hairline p-3 sm:grid-cols-[minmax(0,1fr)_5rem_7rem_auto] sm:border-0 sm:p-0"
+                >
+                  <div className="min-w-0">
+                    {itemsLocked ? (
+                      <p className="pt-2 text-sm text-ink">
+                        {line.selected?.name || 'Unknown product'}
+                        {variant && (
+                          <span className="block text-xs text-muted">{variantName(variant)}</span>
+                        )}
+                      </p>
+                    ) : (
+                      <>
+                        <SearchSelect
+                          value={line.product}
+                          selected={line.selected}
+                          /*
+                            Choosing a different product CLEARS the variant.
+                            A variant id belongs to one product; carried over,
+                            it matches nothing on the new one, and the line
+                            looks complete while the server rejects it for a
+                            colour nobody picked.
+                          */
+                          onChange={(picked) =>
+                            updateLine(index, {
+                              product: picked._id,
+                              selected: picked,
+                              variantId:
+                                picked.variants?.length === 1
+                                  ? String(picked.variants[0]._id)
+                                  : '',
+                            })
+                          }
+                          fetchOptions={(search) => productsApi.options(search)}
+                          getOptionLabel={(p) => p.name}
+                          getOptionMeta={(p) =>
+                            `${p.sku} · ${money(p.price)} · ${
+                              p.variants?.length
+                                ? `${p.variants.length} colours`
+                                : `${p.stockQty} in stock`
+                            }`
+                          }
+                          placeholder="Search products…"
+                          emptyMessage="No products match that search"
+                        />
+
+                        {/* Only where the product genuinely has colours. */}
+                        {variants.length > 0 && (
+                          <div className="mt-2">
+                            <label className="sr-only" htmlFor={`variant-${index}`}>
+                              Colour and size for item {index + 1}
+                            </label>
+                            <select
+                              id={`variant-${index}`}
+                              className={`${input} w-full`}
+                              value={line.variantId}
+                              onChange={(e) => updateLine(index, { variantId: e.target.value })}
+                            >
+                              <option value="">Choose a colour…</option>
+                              {variants.map((v) => (
+                                <option
+                                  key={v._id}
+                                  value={v._id}
+                                  /* Shown and disabled rather than hidden:
+                                     "out of stock" and "not made" are
+                                     different facts. */
+                                  disabled={v.stockQty === 0}
+                                >
+                                  {variantName(v)}
+                                  {v.stockQty === 0
+                                    ? ' — out of stock'
+                                    : ` — ${v.stockQty} in stock`}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+
+                  <input
+                    type="number"
+                    min="1"
+                    step="1"
+                    inputMode="numeric"
+                    className={`${input} w-full tabular`}
+                    value={line.quantity}
+                    disabled={itemsLocked}
+                    aria-label={`Quantity for item ${index + 1}`}
+                    onChange={(e) => updateLine(index, { quantity: e.target.value })}
+                  />
+
+                  <div className="tabular pt-2.5 text-right text-sm font-medium text-ink">
+                    {line.selected ? money(unitPrice(line) * (Number(line.quantity) || 0)) : '—'}
+                  </div>
+
+                  <button
+                    type="button"
+                    className="justify-self-start rounded-md px-1.5 py-2 text-sm text-muted transition-colors hover:text-critical-ink disabled:opacity-40 sm:justify-self-auto"
+                    onClick={() => removeLine(index)}
+                    disabled={lines.length === 1 || itemsLocked}
+                    aria-label="Remove item"
+                  >
+                    Remove
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+
+          {!itemsLocked && (
+            <Button variant="secondary" size="sm" className="mt-4" onClick={addLine}>
+              Add item
+            </Button>
+          )}
 
           {/*
             Said out loud rather than left as a disabled button. This is the
@@ -584,33 +621,64 @@ export default function OrderForm() {
             that it arrives before the submit rather than after it, and names
             the product so it is actionable.
           */}
-          {variantError && (
-            <div className="rounded-md border border-warning/25 bg-warning-wash px-4 py-3 text-sm text-warning-ink">
-              {variantError}
+          {(variantError || stockError) && (
+            <div className="mt-4 space-y-2">
+              {variantError && <Warning>{variantError}</Warning>}
+              {stockError && <Warning>{stockError}</Warning>}
             </div>
           )}
 
-          {stockError && (
-            <div className="rounded-md border border-warning/25 bg-warning-wash px-4 py-3 text-sm text-warning-ink">
-              {stockError}
-            </div>
-          )}
-
-          <div className="flex items-center justify-between border-t border-hairline pt-4">
+          <div className="mt-5 flex items-center justify-between border-t border-hairline pt-4">
             <span className="text-sm text-muted">Order total</span>
-            <span className="text-lg font-semibold text-ink">{money(total)}</span>
+            <span className="tabular text-xl font-semibold text-ink">{money(total)}</span>
           </div>
+        </Section>
 
-          <div className="flex gap-3">
-            <button type="submit" className={btnPrimary} disabled={!canSubmit}>
-              {submitting ? <Spinner /> : isEdit ? 'Save changes' : 'Create order'}
-            </button>
-            <button type="button" className={btnSecondary} onClick={() => navigate(-1)}>
+        {/*
+          Sticky, so a long order does not have to be scrolled back through to
+          be placed.
+        */}
+        <div className="sticky bottom-0 -mx-1 border-t border-hairline bg-plane/95 px-1 py-3 backdrop-blur supports-[backdrop-filter]:bg-plane/80">
+          <div className="flex flex-wrap items-center gap-3">
+            <Button
+              type="submit"
+              disabled={!canSubmit}
+              loading={submitting}
+              loadingLabel={isEdit ? 'Saving…' : 'Creating…'}
+            >
+              {isEdit ? 'Save changes' : 'Create order'}
+            </Button>
+            <Button variant="secondary" onClick={() => navigate(-1)}>
               Cancel
-            </button>
+            </Button>
           </div>
-        </form>
-      </Card>
+        </div>
+      </form>
     </div>
+  );
+}
+
+/** One headed group of the form, with the sentence that explains it. */
+function Section({ title, description, children }) {
+  return (
+    <Card className="p-5 sm:p-6">
+      <div className="mb-5 border-b border-hairline pb-4">
+        <h2 className="text-base font-semibold text-ink">{title}</h2>
+        {description && <p className="mt-1 text-sm text-ink-2">{description}</p>}
+      </div>
+      {children}
+    </Card>
+  );
+}
+
+/** A problem the user can fix, said before the submit rather than after it. */
+function Warning({ children }) {
+  return (
+    <p className="flex items-start gap-2 rounded-lg border border-warning/25 bg-warning-wash px-4 py-3 text-sm text-warning-ink">
+      <svg viewBox="0 0 20 20" className="mt-0.5 h-4 w-4 shrink-0 fill-current" aria-hidden="true">
+        <path d="M10 2a8 8 0 100 16 8 8 0 000-16zm0 4a1 1 0 011 1v4a1 1 0 11-2 0V7a1 1 0 011-1zm0 9a1.1 1.1 0 110-2.2 1.1 1.1 0 010 2.2z" />
+      </svg>
+      {children}
+    </p>
   );
 }

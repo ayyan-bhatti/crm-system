@@ -337,14 +337,23 @@ export function StatusDonut({ data, total, totalLabel }) {
  * Revenue by category — a horizontal bar chart.
  *
  * Horizontal because category names are words, and words fit along a vertical
- * axis without rotating. Every bar is the SAME colour: the categories have no
- * natural order, and shading them by value would double-encode length as hue —
- * spending the only free channel on information the bar already shows.
+ * axis without rotating.
+ *
+ * ONE HUE, TWO STRENGTHS — the leader at full accent, the rest muted.
+ *
+ * Every bar used to be full-strength brand, on the reasoning that categories
+ * have no natural order so shading by value would double-encode length as
+ * hue. That argument is right about hue and wrong about weight: eight
+ * saturated orange bars is the loudest object on the page, which spends the
+ * one accent colour on a chart nobody navigates by and leaves the actual
+ * primary actions competing with it. Muting all but the top bar keeps a
+ * single hue (so nothing implies eight categories are eight different kinds
+ * of thing) while returning the accent to meaning "look here".
  */
 export function CategoryBar({ data }) {
-  // See the note in RevenueTrend above — chart fills use the darkened
-  // chart-safe step of the brand hue, not the pale button-fill token.
   const brand = token('--color-series-1');
+  const muted = token('--color-brand-soft');
+  const leader = data.reduce((best, row) => (row.revenue > (best?.revenue ?? -1) ? row : best), null);
 
   return (
     <ResponsiveContainer width="100%" height={Math.max(180, data.length * 46)}>
@@ -359,7 +368,6 @@ export function CategoryBar({ data }) {
         <Bar
           dataKey="revenue"
           name="Revenue"
-          fill={brand}
           // Rounded at the data end, square at the baseline — the bar grows
           // from the axis, and a rounded root would detach it.
           radius={[0, 4, 4, 0]}
@@ -372,7 +380,11 @@ export function CategoryBar({ data }) {
             fontSize: 11,
             fontWeight: 600,
           }}
-        />
+        >
+          {data.map((row) => (
+            <Cell key={row.category} fill={row.category === leader?.category ? brand : muted} />
+          ))}
+        </Bar>
       </BarChart>
     </ResponsiveContainer>
   );

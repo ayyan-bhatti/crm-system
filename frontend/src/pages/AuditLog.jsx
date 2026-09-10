@@ -2,15 +2,18 @@ import { Fragment, useState } from 'react';
 import { auditApi } from '../api/resources';
 import useFetch from '../hooks/useFetch';
 import {
+  Button,
   Card,
   CardSkeleton,
   ErrorBanner,
   ListEmptyState,
   PageHeader,
   Pagination,
+  Select,
+  Table,
   TableSkeleton,
 } from '../components/common';
-import { formatDate, humanize, input, td, th } from '../ui';
+import { formatDate, humanize, td, th } from '../ui';
 
 /**
  * Admin-only view of the audit trail.
@@ -44,11 +47,33 @@ const ACTION_STYLES = {
 function ActionBadge({ action }) {
   return (
     <span
-      className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${
+      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${
         ACTION_STYLES[action] || 'bg-neutral-wash text-neutral-ink'
       }`}
     >
-      {action}
+      {/* A dot plus the word, like every other pill in the app: identity is
+          never carried by colour alone. */}
+      <span className="h-1.5 w-1.5 rounded-full bg-current opacity-70" aria-hidden="true" />
+      {humanize(action)}
+    </span>
+  );
+}
+
+function initialsOf(name) {
+  const words = String(name || '').trim().split(/\s+/).filter(Boolean);
+  if (!words.length) return '?';
+  if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
+  return (words[0][0] + words[words.length - 1][0]).toUpperCase();
+}
+
+/** Initials disc; hidden from screen readers since the name follows it. */
+function Avatar({ name }) {
+  return (
+    <span
+      aria-hidden="true"
+      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand-wash text-[11px] font-semibold tracking-wide text-brand-ink"
+    >
+      {initialsOf(name)}
     </span>
   );
 }
@@ -62,7 +87,7 @@ function ActionBadge({ action }) {
  */
 function Value({ value }) {
   if (value === null || value === undefined || value === '') {
-    return <span className="text-muted italic">empty</span>;
+    return <span className="italic text-muted">empty</span>;
   }
   if (typeof value === 'object') {
     return <code className="text-xs">{JSON.stringify(value)}</code>;
@@ -78,7 +103,7 @@ function ChangeList({ log }) {
     return (
       <div className="text-sm text-ink-2">
         <p className="mb-2">Record deleted. Its final state:</p>
-        <pre className="overflow-x-auto rounded-lg bg-neutral-wash p-3 text-xs">
+        <pre className="overflow-x-auto rounded-md border border-hairline bg-surface p-3 text-xs">
           {JSON.stringify(log.before, null, 2)}
         </pre>
       </div>
@@ -142,6 +167,8 @@ export default function AuditLog() {
     [page, entity, action]
   );
 
+  const isFiltered = Boolean(entity || action);
+
   /** Any filter change invalidates the current page number. */
   function changeFilter(setter) {
     return (event) => {
@@ -151,46 +178,63 @@ export default function AuditLog() {
     };
   }
 
+  function clearFilters() {
+    setEntity('');
+    setAction('');
+    setPage(1);
+    setExpanded(null);
+  }
+
   return (
     <div>
       <PageHeader
+        eyebrow="System"
         title="Audit log"
         subtitle="Every change made to customers, products, orders and users — who made it, and what it was before."
       />
 
       <ErrorBanner message={error} />
 
-      <Card className="mb-4 p-4">
-        <div className="flex flex-wrap gap-3">
-          <label className="flex-1 min-w-[10rem]">
-            <span className="mb-1.5 block text-sm font-medium text-ink-2">Record type</span>
-            <select className={input} value={entity} onChange={changeFilter(setEntity)}>
-              <option value="">All types</option>
-              {ENTITIES.map((value) => (
-                <option key={value} value={value}>
-                  {humanize(value)}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label className="flex-1 min-w-[10rem]">
-            <span className="mb-1.5 block text-sm font-medium text-ink-2">Action</span>
-            <select className={input} value={action} onChange={changeFilter(setAction)}>
-              <option value="">All actions</option>
-              {ACTIONS.map((value) => (
-                <option key={value} value={value}>
-                  {humanize(value)}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-      </Card>
-
       <AuditDigestCard entity={entity} action={action} />
 
       <Card>
+        {/* The filters sit inside the card with the table they narrow, rather
+            than in a panel of their own — a control and the thing it changes
+            belong in the same box. */}
+        <div className="flex flex-col gap-3 border-b border-hairline p-4 sm:flex-row sm:items-center">
+          <div className="flex flex-1 flex-wrap items-center gap-3">
+            <label className="min-w-[9rem] flex-1 sm:flex-none">
+              <span className="label-mono mb-1.5 block">Record type</span>
+              <Select className="sm:w-44" value={entity} onChange={changeFilter(setEntity)}>
+                <option value="">All types</option>
+                {ENTITIES.map((value) => (
+                  <option key={value} value={value}>
+                    {humanize(value)}
+                  </option>
+                ))}
+              </Select>
+            </label>
+
+            <label className="min-w-[9rem] flex-1 sm:flex-none">
+              <span className="label-mono mb-1.5 block">Action</span>
+              <Select className="sm:w-44" value={action} onChange={changeFilter(setAction)}>
+                <option value="">All actions</option>
+                {ACTIONS.map((value) => (
+                  <option key={value} value={value}>
+                    {humanize(value)}
+                  </option>
+                ))}
+              </Select>
+            </label>
+          </div>
+
+          {isFiltered && (
+            <Button variant="ghost" size="sm" className="self-start sm:self-end" onClick={clearFilters}>
+              Clear filters
+            </Button>
+          )}
+        </div>
+
         {loading ? (
           // A skeleton shaped like the table, matching the other three lists —
           // the rows land in place instead of the layout jumping.
@@ -203,62 +247,69 @@ export default function AuditLog() {
            * has been written to yet.
            */
           <ListEmptyState
-            filtered={Boolean(entity || action)}
+            filtered={isFiltered}
             entity="audit entries"
-            onClear={() => {
-              setEntity('');
-              setAction('');
-              setPage(1);
-              setExpanded(null);
-            }}
+            onClear={clearFilters}
           />
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr>
-                  <th className={th}>When</th>
-                  <th className={th}>Who</th>
-                  <th className={th}>Action</th>
-                  <th className={th}>Record</th>
-                  <th className={th} />
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-hairline">
-                {data.data.map((log) => (
+          <Table caption="Audit entries: when, who, what action, and on which record">
+            <thead className="bg-sunken">
+              <tr className="border-b border-hairline">
+                <th className={th}>When</th>
+                <th className={th}>Who</th>
+                <th className={th}>Action</th>
+                <th className={th}>Record</th>
+                <th className={`${th} text-right`}>
+                  <span className="sr-only">Details</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-hairline">
+              {data.data.map((log) => {
+                const open = expanded === log._id;
+
+                return (
                   <Fragment key={log._id}>
-                    <tr>
-                      <td className={`${td} whitespace-nowrap`}>{formatDate(log.createdAt)}</td>
+                    <tr className={`transition-colors ${open ? 'bg-sunken/60' : 'hover:bg-sunken/60'}`}>
+                      <td className={`${td} whitespace-nowrap tabular`}>
+                        {formatDate(log.createdAt)}
+                      </td>
                       <td className={td}>
-                        {/* The snapshotted name, not a lookup — it still reads
-                            correctly after the account is deleted. */}
-                        <span className="font-medium text-ink">{log.actor?.name || 'Unknown'}</span>
-                        <span className="ml-1.5 text-xs text-muted">
-                          {humanize(log.actor?.role || '')}
-                        </span>
+                        <div className="flex items-center gap-3">
+                          {/* The snapshotted name, not a lookup — it still reads
+                              correctly after the account is deleted. */}
+                          <Avatar name={log.actor?.name} />
+                          <div className="min-w-0">
+                            <p className="font-medium text-ink">{log.actor?.name || 'Unknown'}</p>
+                            <p className="truncate text-xs text-muted">
+                              {humanize(log.actor?.role || '')}
+                            </p>
+                          </div>
+                        </div>
                       </td>
                       <td className={td}>
                         <ActionBadge action={log.action} />
                       </td>
                       <td className={td}>
-                        <span className="text-ink">{humanize(log.entity)}</span>
+                        <span className="font-medium text-ink">{humanize(log.entity)}</span>
                         {log.entityLabel && (
                           <span className="ml-1.5 text-ink-2">{log.entityLabel}</span>
                         )}
                       </td>
                       <td className={`${td} text-right`}>
-                        <button
-                          type="button"
-                          className="text-sm font-medium text-brand hover:underline"
-                          onClick={() => setExpanded(expanded === log._id ? null : log._id)}
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          aria-expanded={open}
+                          onClick={() => setExpanded(open ? null : log._id)}
                         >
-                          {expanded === log._id ? 'Hide' : 'Details'}
-                        </button>
+                          {open ? 'Hide' : 'Details'}
+                        </Button>
                       </td>
                     </tr>
-                    {expanded === log._id && (
-                      <tr>
-                        <td colSpan={5} className="bg-plane px-4 py-4">
+                    {open && (
+                      <tr className="bg-plane">
+                        <td colSpan={5} className="px-4 py-4">
                           <ChangeList log={log} />
                           <p className="mt-3 text-xs text-muted">
                             {log.method} {log.path} · from {log.ip || 'unknown address'}
@@ -267,10 +318,10 @@ export default function AuditLog() {
                       </tr>
                     )}
                   </Fragment>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                );
+              })}
+            </tbody>
+          </Table>
         )}
 
         {data?.pages > 1 && (
@@ -298,8 +349,11 @@ function AuditDigestCard({ entity, action }) {
 
   return (
     <Card className="mb-4 p-5">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-sm font-semibold text-ink">What happened in this range</h2>
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <div>
+          <p className="label-mono">Summary</p>
+          <h2 className="mt-1 text-sm font-semibold text-ink">What happened in this range</h2>
+        </div>
         {data && (
           <span
             className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${

@@ -7,8 +7,37 @@ import { shopProductsApi, shopNewsletterApi, shopMessagesApi } from '../api/shop
 import { errorMessage } from '../api/client';
 import CartDrawer from './CartDrawer';
 import MegaMenu from './shop/MegaMenu';
+import { Drawer, DropdownMenu, MenuItem } from './common';
 import { ANNOUNCEMENT, FOOTER_COLUMNS, NEWSLETTER, TRUST_BADGES } from '../shopContent';
 import { input } from '../ui';
+
+/** Header navigation link — quiet, with the underline growing on hover. */
+const shopNavLink =
+  'relative text-sm font-medium text-ink-2 transition-colors hover:text-ink ' +
+  'after:absolute after:-bottom-1 after:left-0 after:h-px after:w-0 after:bg-ink ' +
+  'after:transition-all hover:after:w-full';
+
+/** An icon control in the header's right-hand cluster. */
+const shopIconLink =
+  'relative rounded-md p-2.5 text-ink-2 transition-colors hover:bg-sunken hover:text-ink ' +
+  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand';
+
+const shopDrawerLink = 'block py-2.5 text-[15px] font-medium text-ink transition-colors hover:text-brand-ink';
+
+/**
+ * The count on a header icon.
+ *
+ * Deliberately a small filled dot rather than the number sitting inline: the
+ * inline version changed the width of the control as the cart filled, so the
+ * whole right-hand cluster shifted sideways while you were reaching for it.
+ */
+function CountDot({ value }) {
+  return (
+    <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-brand px-1 text-[10px] font-bold text-on-brand">
+      {value > 9 ? '9+' : value}
+    </span>
+  );
+}
 
 /**
  * The storefront's shell — deliberately its OWN layout rather than a
@@ -74,181 +103,178 @@ export default function ShopLayout() {
         {ANNOUNCEMENT}
       </div>
 
+      {/*
+        LOGO LEFT, NAVIGATION CENTRE, ICONS RIGHT.
+
+        The previous header put seven text links in the right-hand cluster —
+        track order, my orders, a greeting, sign out, wishlist, cart, CRM —
+        which is the arrangement a shop ends up with by adding one feature at a
+        time and never re-reading the row. Everything that is about YOUR
+        ACCOUNT now lives behind one account control, so the row carries three
+        icons and the navigation gets the middle of the header to itself.
+      */}
       <header className="sticky top-0 z-30 border-b border-hairline bg-surface/95 backdrop-blur">
-        <div className="mx-auto flex max-w-7xl items-center gap-4 px-4 py-3 sm:px-6">
+        <div className="mx-auto flex h-16 max-w-7xl items-center gap-4 px-4 sm:h-20 sm:px-6">
           <button
             type="button"
-            onClick={() => setMobileNavOpen((open) => !open)}
-            className="-ml-1 rounded-lg p-2 text-ink-2 hover:bg-neutral-wash lg:hidden"
-            aria-label={mobileNavOpen ? 'Close menu' : 'Open menu'}
-            aria-expanded={mobileNavOpen}
+            onClick={() => setMobileNavOpen(true)}
+            className="-ml-2 rounded-md p-2 text-ink-2 transition-colors hover:bg-sunken hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand lg:hidden"
+            aria-label="Open menu"
           >
             <svg viewBox="0 0 20 20" className="h-5 w-5 fill-current" aria-hidden="true">
-              {mobileNavOpen ? (
-                <path d="M5.3 4.3a1 1 0 011.4 0L10 7.6l3.3-3.3a1 1 0 111.4 1.4L11.4 9l3.3 3.3a1 1 0 01-1.4 1.4L10 10.4l-3.3 3.3a1 1 0 01-1.4-1.4L8.6 9 5.3 5.7a1 1 0 010-1.4z" />
-              ) : (
-                <path d="M3 5.5A1 1 0 014 4.5h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4.5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm1 3.5a1 1 0 100 2h12a1 1 0 100-2H4z" />
-              )}
+              <path d="M3 5h14v2H3V5zm0 4.5h14v2H3v-2zM3 14h14v2H3v-2z" />
             </svg>
           </button>
 
-          <Link
-            to="/"
-            className="font-display shrink-0 text-xl font-semibold tracking-tight text-ink"
-          >
-            SimpleCRM Shop
+          <Link to="/" className="font-display shrink-0 text-[22px] leading-none text-ink sm:text-[26px]">
+            SimpleCRM
           </Link>
 
-          <MegaMenu categories={categories} />
-
-          <nav className="hidden items-center gap-5 lg:flex">
-            <Link to="/rooms" className="text-sm text-ink-2 hover:text-ink">
+          <nav className="hidden flex-1 items-center justify-center gap-7 lg:flex">
+            <MegaMenu categories={categories} />
+            <Link to="/rooms" className={shopNavLink}>
               Rooms
             </Link>
-            <Link to="/designers" className="text-sm text-ink-2 hover:text-ink">
+            <Link to="/designers" className={shopNavLink}>
               Designers
             </Link>
-            <Link to="/products?newArrival=true" className="text-sm text-ink-2 hover:text-ink">
-              New Arrivals
+            <Link to="/products?newArrival=true" className={shopNavLink}>
+              New arrivals
             </Link>
           </nav>
 
-          <nav className="ml-auto flex items-center gap-4 text-sm">
-            {/* No sign-in required — a guest checkout has no account to sign into. */}
-            <Link to="/track" className="hidden text-ink-2 hover:text-ink sm:inline">
-              Track order
+          <div className="ml-auto flex items-center gap-0.5 lg:ml-0">
+            <Link to="/wishlist" className={shopIconLink} aria-label={`Wishlist, ${wishlistCount} saved`}>
+              <svg viewBox="0 0 20 20" className="h-[19px] w-[19px] fill-current" aria-hidden="true">
+                <path d="M10 17.3l-1.1-1C4.9 12.9 2.5 10.8 2.5 7.9 2.5 5.6 4.3 4 6.5 4c1.3 0 2.5.6 3.5 1.7C11 4.6 12.2 4 13.5 4c2.2 0 4 1.6 4 3.9 0 2.9-2.4 5-6.4 8.4l-1.1 1z" />
+              </svg>
+              {wishlistCount > 0 && <CountDot value={wishlistCount} />}
             </Link>
 
             {isSignedIn ? (
-              <>
-                <Link to="/account/orders" className="hidden text-ink-2 hover:text-ink sm:inline">
-                  My orders
-                </Link>
-                {/*
-                  THE NOTIFICATION ENTRY POINT. A greeting doubling as the
-                  link in, rather than a separate bell icon plus a separate
-                  "Hi, Name" text used to be — one thing to notice and click, not two
-                  competing for the same corner of the header.
-                */}
-                <Link
-                  to="/account/notifications"
-                  className="relative hidden items-center text-ink-2 hover:text-ink lg:inline-flex"
-                >
-                  Hey, {buyer.name.split(' ')[0]}
-                  {messageCount > 0 && (
-                    <span
-                      className="ml-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-brand px-1 text-[10px] font-semibold text-ink"
-                      aria-label={`${messageCount} new message${messageCount === 1 ? '' : 's'}`}
+              <DropdownMenu
+                label="Your account"
+                triggerClassName={shopIconLink}
+                trigger={
+                  <>
+                    <svg viewBox="0 0 20 20" className="h-[19px] w-[19px] fill-current" aria-hidden="true">
+                      <path d="M10 10a3.5 3.5 0 100-7 3.5 3.5 0 000 7zm0 1.8c-3.4 0-6.2 1.8-6.2 4v1.4h12.4V15.8c0-2.2-2.8-4-6.2-4z" />
+                    </svg>
+                    {messageCount > 0 && <CountDot value={messageCount} />}
+                  </>
+                }
+              >
+                {(close) => (
+                  <>
+                    <p className="truncate border-b border-hairline px-3 pb-2 pt-1 text-sm font-medium text-ink">
+                      Hey, {buyer.name.split(' ')[0]}
+                    </p>
+                    <MenuItem to="/account/orders" onClick={close}>
+                      My orders
+                    </MenuItem>
+                    <MenuItem to="/account/notifications" onClick={close}>
+                      Notifications{messageCount > 0 ? ` (${messageCount})` : ''}
+                    </MenuItem>
+                    <MenuItem to="/account/addresses" onClick={close}>
+                      Addresses
+                    </MenuItem>
+                    <MenuItem to="/track" onClick={close}>
+                      Track an order
+                    </MenuItem>
+                    <MenuItem
+                      onClick={() => {
+                        close();
+                        logout();
+                      }}
+                      className="border-t border-hairline"
                     >
-                      {messageCount > 9 ? '9+' : messageCount}
-                    </span>
-                  )}
-                </Link>
-                <button type="button" onClick={logout} className="text-ink-2 hover:text-ink">
-                  Sign out
-                </button>
-              </>
+                      Sign out
+                    </MenuItem>
+                  </>
+                )}
+              </DropdownMenu>
             ) : (
-              <Link to="/login" className="text-ink-2 hover:text-ink">
-                Sign in
+              <Link to="/login" className={shopIconLink} aria-label="Sign in">
+                <svg viewBox="0 0 20 20" className="h-[19px] w-[19px] fill-current" aria-hidden="true">
+                  <path d="M10 10a3.5 3.5 0 100-7 3.5 3.5 0 000 7zm0 1.8c-3.4 0-6.2 1.8-6.2 4v1.4h12.4V15.8c0-2.2-2.8-4-6.2-4z" />
+                </svg>
               </Link>
             )}
-
-            <Link
-              to="/wishlist"
-              className="relative hidden items-center gap-1.5 text-ink-2 hover:text-ink sm:inline-flex"
-              aria-label={`Wishlist, ${wishlistCount} saved item${wishlistCount === 1 ? '' : 's'}`}
-            >
-              <svg viewBox="0 0 20 20" className="h-4 w-4 fill-current" aria-hidden="true">
-                <path d="M10 17.3l-1.1-1C4.9 12.9 2.5 10.8 2.5 7.9 2.5 5.6 4.3 4 6.5 4c1.3 0 2.5.6 3.5 1.7C11 4.6 12.2 4 13.5 4c2.2 0 4 1.6 4 3.9 0 2.9-2.4 5-6.4 8.4l-1.1 1z" />
-              </svg>
-              {wishlistCount > 0 && (
-                <span className="rounded-full bg-brand px-1.5 text-xs font-semibold text-ink">
-                  {wishlistCount}
-                </span>
-              )}
-            </Link>
 
             <button
               type="button"
               onClick={() => setCartOpen(true)}
-              className="relative flex items-center gap-1.5 rounded-lg border border-hairline px-3 py-1.5 text-ink hover:bg-neutral-wash"
+              className={shopIconLink}
               aria-label={`Cart, ${count} item${count === 1 ? '' : 's'}`}
             >
-              <svg viewBox="0 0 20 20" className="h-4 w-4 fill-current" aria-hidden="true">
+              <svg viewBox="0 0 20 20" className="h-[19px] w-[19px] fill-current" aria-hidden="true">
                 <path d="M6 6V5a4 4 0 118 0v1h2.2a1 1 0 01.99 1.14l-1.2 8.4A2 2 0 0114 17.3H6a2 2 0 01-1.98-1.72l-1.2-8.4A1 1 0 013.8 6H6zm2 0h4V5a2 2 0 10-4 0v1z" />
               </svg>
-              <span className="hidden sm:inline">Cart</span>
-              {count > 0 && (
-                <span className="rounded-full bg-brand px-1.5 text-xs font-semibold text-ink">
-                  {count}
-                </span>
-              )}
+              {count > 0 && <CountDot value={count} />}
             </button>
-
-            {/*
-              The CRM's one entry point from the storefront — deliberately
-              small and last in the row. Staff are a tiny fraction of this
-              header's audience, and this link is how they reach their own
-              sign-in without the shop's front door ever implying that is
-              what the site is for.
-            */}
-            <Link
-              to="/crm"
-              className="hidden border-l border-hairline pl-4 text-xs font-medium text-muted hover:text-ink-2 sm:inline"
-            >
-              CRM
-            </Link>
-          </nav>
-        </div>
-
-        {mobileNavOpen && (
-          <div className="border-t border-hairline bg-surface px-4 py-3 lg:hidden">
-            <Link to="/products" className="block py-2 text-sm font-medium text-ink">
-              All products
-            </Link>
-            <Link to="/rooms" className="block py-2 text-sm font-medium text-ink">
-              Rooms
-            </Link>
-            <Link to="/designers" className="block py-2 text-sm font-medium text-ink">
-              Designers
-            </Link>
-            <Link to="/products?newArrival=true" className="block py-2 text-sm font-medium text-ink">
-              New Arrivals
-            </Link>
-            {categories.map((category) => (
-              <Link
-                key={category}
-                to={`/products?category=${encodeURIComponent(category)}`}
-                className="block py-2 text-sm text-ink-2"
-              >
-                {category}
-              </Link>
-            ))}
-            <div className="mt-2 border-t border-hairline pt-2">
-              {isSignedIn && (
-                <>
-                  <Link to="/account/orders" className="block py-2 text-sm text-ink-2">
-                    My orders
-                  </Link>
-                  <Link to="/account/notifications" className="block py-2 text-sm text-ink-2">
-                    Notifications{messageCount > 0 ? ` (${messageCount})` : ''}
-                  </Link>
-                </>
-              )}
-              <Link to="/wishlist" className="block py-2 text-sm text-ink-2">
-                Wishlist{wishlistCount > 0 ? ` (${wishlistCount})` : ''}
-              </Link>
-              <Link to="/track" className="block py-2 text-sm text-ink-2">
-                Track order
-              </Link>
-              <Link to="/crm" className="block py-2 text-xs text-muted">
-                Staff CRM
-              </Link>
-            </div>
           </div>
-        )}
+        </div>
       </header>
+
+      {/* The mobile navigation, in the shared drawer rather than a panel that
+          pushes the page down as it opens. */}
+      <Drawer open={mobileNavOpen} onClose={() => setMobileNavOpen(false)} side="left" title="Menu">
+        <div className="px-4 py-3">
+          <Link to="/products" className={shopDrawerLink}>
+            All products
+          </Link>
+          <Link to="/rooms" className={shopDrawerLink}>
+            Rooms
+          </Link>
+          <Link to="/designers" className={shopDrawerLink}>
+            Designers
+          </Link>
+          <Link to="/products?newArrival=true" className={shopDrawerLink}>
+            New arrivals
+          </Link>
+
+          {categories.length > 0 && (
+            <>
+              <p className="label-mono mt-5 pb-1">Shop by category</p>
+              {categories.map((category) => (
+                <Link
+                  key={category}
+                  to={`/products?category=${encodeURIComponent(category)}`}
+                  className="block py-2 text-sm text-ink-2 transition-colors hover:text-ink"
+                >
+                  {category}
+                </Link>
+              ))}
+            </>
+          )}
+
+          <div className="mt-5 border-t border-hairline pt-3">
+            {isSignedIn ? (
+              <>
+                <Link to="/account/orders" className={shopDrawerLink}>
+                  My orders
+                </Link>
+                <Link to="/account/notifications" className={shopDrawerLink}>
+                  Notifications{messageCount > 0 ? ` (${messageCount})` : ''}
+                </Link>
+                <Link to="/account/addresses" className={shopDrawerLink}>
+                  Addresses
+                </Link>
+              </>
+            ) : (
+              <Link to="/login" className={shopDrawerLink}>
+                Sign in
+              </Link>
+            )}
+            <Link to="/wishlist" className={shopDrawerLink}>
+              Wishlist{wishlistCount > 0 ? ` (${wishlistCount})` : ''}
+            </Link>
+            <Link to="/track" className={shopDrawerLink}>
+              Track an order
+            </Link>
+          </div>
+        </div>
+      </Drawer>
 
       <main className="flex-1">
         <Outlet />
@@ -295,22 +321,22 @@ function TrustStrip() {
 function Footer() {
   return (
     <footer className="border-t border-hairline bg-plane">
-      <div className="mx-auto grid max-w-7xl gap-10 px-4 py-12 sm:px-6 md:grid-cols-4">
+      <div className="mx-auto grid max-w-7xl gap-10 px-4 py-16 sm:px-6 md:grid-cols-4">
         <div className="md:col-span-2">
-          <p className="font-display text-lg font-semibold text-ink">SimpleCRM Shop</p>
-          <p className="mt-2 max-w-sm text-sm text-ink-2">
-            A demonstration storefront built on the SimpleCRM platform. Every order here becomes a
-            real record a real person follows up.
+          <p className="font-display text-2xl text-ink">SimpleCRM</p>
+          <p className="mt-3 max-w-sm text-sm leading-relaxed text-ink-2">
+            Furniture and pieces for the home, made to last. Every order here becomes a real record
+            a real person follows up.
           </p>
         </div>
 
         {FOOTER_COLUMNS.map((column) => (
           <div key={column.title}>
-            <p className="text-sm font-semibold text-ink">{column.title}</p>
-            <ul className="mt-3 space-y-2">
+            <p className="label-mono pb-3">{column.title}</p>
+            <ul className="space-y-2.5">
               {column.links.map((linkItem) => (
                 <li key={linkItem.to}>
-                  <Link to={linkItem.to} className="text-sm text-ink-2 hover:text-ink">
+                  <Link to={linkItem.to} className="text-sm text-ink-2 transition-colors hover:text-ink">
                     {linkItem.label}
                   </Link>
                 </li>
@@ -326,8 +352,20 @@ function Footer() {
         </div>
       </div>
 
-      <div className="border-t border-hairline px-4 py-6 text-center text-xs text-muted sm:px-6">
-        SimpleCRM Shop — a demonstration storefront. No real goods are dispatched.
+      <div className="border-t border-hairline">
+        <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-3 px-4 py-6 text-xs text-muted sm:flex-row sm:px-6">
+          <p>SimpleCRM — a demonstration storefront. No real goods are dispatched.</p>
+          {/*
+            The CRM's one entry point from the shop. It moved out of the
+            header and down here on purpose: staff are a rounding error in
+            this page's audience, and a link to an internal tool sitting
+            beside the cart implies the site is for something it is not. Still
+            one click from every page, which is all it needs to be.
+          */}
+          <Link to="/crm" className="font-medium transition-colors hover:text-ink-2">
+            Staff sign in
+          </Link>
+        </div>
       </div>
     </footer>
   );
