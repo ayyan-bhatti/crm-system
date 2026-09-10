@@ -41,21 +41,40 @@ export default defineConfig({
     pool: 'threads',
 
     /*
-     * Capped concurrency, deliberately below the core count.
+     * Capped concurrency, deliberately below the core count on a dev
+     * machine — and forced to a SINGLE worker under CI specifically, which
+     * is the part that actually had to be right.
      *
      * Vitest defaults to roughly one worker per core, and each worker builds
-     * its own jsdom. On a twelve-core machine that is eleven DOM environments
-     * at once, which is fine until memory is tight — and then it is not a
-     * slowdown, it is intermittent FAILURES. Timing-sensitive assertions
-     * started losing races that have nothing to do with the code under test,
-     * roughly one full run in five, always in a different file.
+     * its own jsdom. On a twelve-core dev machine that is eleven DOM
+     * environments at once, which is fine until memory is tight — and then
+     * it is not a slowdown, it is intermittent FAILURES: timing-sensitive
+     * assertions lose races that have nothing to do with the code under
+     * test. `maxWorkers: 4` was the first fix, on the assumption that "CI
+     * runners have two to four cores anyway, so this gives up nothing
+     * there." That assumption was never checked against what GitHub
+     * Actions' `ubuntu-latest` standard runners actually provide: 2 vCPUs.
+     * A worker count is an explicit override, not a hint bounded by real
+     * hardware — Vitest spawns exactly the number configured regardless of
+     * core count — so CI was running two workers' worth of contention on
+     * every single run, not as an occasional unlucky scheduling event.
      *
-     * A flaky suite is worse than a slow one: people learn to re-run it instead
-     * of reading it, and a real regression gets re-run away with the noise. Four
-     * is comfortably stable here and costs a few seconds. CI runners have two to
-     * four cores anyway, so this gives up nothing there.
+     * Lowering the CI-side number and hoping a smaller one would finally be
+     * small enough turned out to be the wrong shape of fix: this was
+     * reproduced locally under heavy background load at both 4 and 2
+     * workers, and once at 2 workers alone was shown not to be reliable
+     * either — the failure is CPU-contention-shaped (a `findByRole` finding
+     * NOTHING for the entire timeout window, not "a bit late"), and CPU
+     * contention does not have a single safe worker count independent of
+     * whatever else is sharing the machine at that moment. The only number
+     * that removes the contention outright is one: `process.env.CI` (set by
+     * every GitHub Actions runner) forces every file through a single
+     * worker there, so two files' jsdom/React work is never scheduled onto
+     * the same 2 vCPUs at once. Local development keeps the faster
+     * multi-worker default, since an occasional flake a developer can
+     * just re-run is a different cost than a red CI check blocking main.
      */
-    maxWorkers: 4,
+    maxWorkers: process.env.CI ? 1 : 4,
     minWorkers: 1,
 
     /*

@@ -22,12 +22,18 @@ vi.mock('../api/resources', () => ({
 /**
  * `openCommandPalette()` dispatches a raw `window` event — outside React's
  * own event system, so the `setOpen(true)` it triggers is not automatically
- * wrapped in `act()` the way a `user-event` click's would be. Wrapping the
- * dispatch here forces that update to flush before the next line runs,
- * which is correct regardless of machine load and costs nothing.
+ * wrapped in `act()` the way a `user-event` interaction's would be. The
+ * ASYNC overload of `act()`, not the sync one, is what actually matters
+ * here: the sync overload only guarantees synchronous updates are flushed,
+ * but React can still defer the effect/paint work behind a microtask, and a
+ * bare `act(() => {...})` returns before that microtask runs. `await
+ * act(async () => {...})` waits out that microtask queue too, so the caller
+ * only gets control back once the dialog has genuinely committed to the
+ * DOM — removing the need to poll for it at all, rather than polling for it
+ * for longer.
  */
-function openPalette() {
-  act(() => {
+async function openPalette() {
+  await act(async () => {
     openCommandPalette();
   });
 }
@@ -99,7 +105,7 @@ describe('CommandPalette', () => {
     renderPalette();
     await screen.findByText('DASHBOARD PAGE');
 
-    openPalette();
+    await openPalette();
 
     expect(
       await screen.findByRole('dialog', { name: /command palette/i }, PALETTE_TIMEOUT)
@@ -112,7 +118,7 @@ describe('CommandPalette', () => {
 
     renderPalette('admin');
     await screen.findByText('DASHBOARD PAGE');
-    openPalette();
+    await openPalette();
 
     const input = await screen.findByRole('combobox', { name: /search pages/i }, PALETTE_TIMEOUT);
     await user.type(input, 'Bilal');
@@ -127,7 +133,7 @@ describe('CommandPalette', () => {
     const user = userEvent.setup();
     renderPalette('sales_rep');
     await screen.findByText('DASHBOARD PAGE');
-    openPalette();
+    await openPalette();
 
     const input = await screen.findByRole('combobox', { name: /search pages/i }, PALETTE_TIMEOUT);
     await user.type(input, 'anything');
@@ -140,7 +146,7 @@ describe('CommandPalette', () => {
     const user = userEvent.setup();
     renderPalette('admin');
     await screen.findByText('DASHBOARD PAGE');
-    openPalette();
+    await openPalette();
 
     const action = await screen.findByRole('option', { name: /create order/i }, PALETTE_TIMEOUT);
     await user.click(action);
