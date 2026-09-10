@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { act, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Routes, Route } from 'react-router-dom';
 import CommandPalette, { openCommandPalette } from './CommandPalette';
@@ -18,6 +18,39 @@ vi.mock('../api/resources', () => ({
   customersApi: { options: vi.fn() },
   productsApi: { options: vi.fn() },
 }));
+
+/**
+ * `openCommandPalette()` dispatches a raw `window` event — outside React's
+ * own event system, so the `setOpen(true)` it triggers is not automatically
+ * wrapped in `act()` the way a `user-event` click's would be. Wrapping the
+ * dispatch here forces that update to flush before the next line runs,
+ * which is correct regardless of machine load and costs nothing.
+ */
+function openPalette() {
+  act(() => {
+    openCommandPalette();
+  });
+}
+
+/*
+ * Even with that flush, the project-wide `asyncUtilTimeout` (5000ms, set in
+ * src/test/setup.js) is still an arbitrary constant, not a real correctness
+ * boundary — and this suite runs its 36 files across parallel workers, so
+ * every file is sharing CPU with the rest of them (worse under CI's shared
+ * runners than on an idle machine). A real component bug shows up as "never
+ * found"; this class of failure is "found, eventually, just past an
+ * arbitrary clock" — distinguishable by the fact the same assertion passes
+ * reliably in isolation, which these four did, repeatedly, before failing
+ * only as part of the full 36-file run in CI (see the "Pivot the
+ * catalogue…" build).
+ *
+ * 10000ms rather than the global 5000ms default, and deliberately still
+ * below this file's `testTimeout: 15000` (see vite.config.js's own comment
+ * on why that gap exists) — the outer test timeout must fire only for an
+ * assertion that was truly never going to pass, not race this one to the
+ * same instant and produce a less diagnosable failure.
+ */
+const PALETTE_TIMEOUT = { timeout: 10000 };
 
 function renderPalette(role = 'admin') {
   authApi.me.mockResolvedValue(fakeUser({ role }));
@@ -66,9 +99,11 @@ describe('CommandPalette', () => {
     renderPalette();
     await screen.findByText('DASHBOARD PAGE');
 
-    openCommandPalette();
+    openPalette();
 
-    expect(await screen.findByRole('dialog', { name: /command palette/i })).toBeInTheDocument();
+    expect(
+      await screen.findByRole('dialog', { name: /command palette/i }, PALETTE_TIMEOUT)
+    ).toBeInTheDocument();
   });
 
   it('navigates to a customer selected from the search results', async () => {
@@ -77,9 +112,9 @@ describe('CommandPalette', () => {
 
     renderPalette('admin');
     await screen.findByText('DASHBOARD PAGE');
-    openCommandPalette();
+    openPalette();
 
-    const input = await screen.findByRole('combobox', { name: /search pages/i });
+    const input = await screen.findByRole('combobox', { name: /search pages/i }, PALETTE_TIMEOUT);
     await user.type(input, 'Bilal');
 
     const option = await screen.findByRole('option', { name: /Bilal Ahmed/i });
@@ -92,9 +127,9 @@ describe('CommandPalette', () => {
     const user = userEvent.setup();
     renderPalette('sales_rep');
     await screen.findByText('DASHBOARD PAGE');
-    openCommandPalette();
+    openPalette();
 
-    const input = await screen.findByRole('combobox', { name: /search pages/i });
+    const input = await screen.findByRole('combobox', { name: /search pages/i }, PALETTE_TIMEOUT);
     await user.type(input, 'anything');
 
     await waitFor(() => expect(productsApi.options).toHaveBeenCalled());
@@ -105,9 +140,9 @@ describe('CommandPalette', () => {
     const user = userEvent.setup();
     renderPalette('admin');
     await screen.findByText('DASHBOARD PAGE');
-    openCommandPalette();
+    openPalette();
 
-    const action = await screen.findByRole('option', { name: /create order/i });
+    const action = await screen.findByRole('option', { name: /create order/i }, PALETTE_TIMEOUT);
     await user.click(action);
 
     expect(await screen.findByText('NEW ORDER PAGE')).toBeInTheDocument();
