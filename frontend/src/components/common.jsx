@@ -652,16 +652,34 @@ export function DropdownMenu({ trigger, label, children, align = 'right', trigge
         type="button"
         onClick={() => setOpen((value) => !value)}
         aria-expanded={open}
-        aria-haspopup="menu"
         aria-label={label}
         className={triggerClassName}
       >
         {trigger}
       </button>
 
+      {/*
+        A DISCLOSURE, NOT AN ARIA MENU — deliberately.
+
+        This carried `role="menu"` and `role="menuitem"` on its rows. Both
+        were removed, for two reasons that point the same way.
+
+        The first is honesty: `role="menu"` is a promise that arrow keys move
+        between items, Home/End jump to the ends and Tab leaves the menu
+        entirely. This component implements none of that, so a screen-reader
+        user was being told to expect a keyboard contract that did not exist —
+        which is worse than no role at all, because they act on it.
+
+        The second is that `role="menuitem"` OVERRIDES the element's own role,
+        so a perfectly ordinary `<button>Sign out</button>` stopped being a
+        button to anything that asks — assistive technology and tests alike.
+
+        A labelled `aria-expanded` trigger revealing real buttons and links is
+        the simpler pattern, it keeps every element's natural semantics, and
+        Tab already walks the items in order.
+      */}
       {open && (
         <div
-          role="menu"
           className={`absolute z-40 mt-2 w-52 overflow-hidden rounded-lg border border-hairline bg-surface py-1 shadow-pop ${
             align === 'left' ? 'left-0' : 'right-0'
           }`}
@@ -679,14 +697,14 @@ export function MenuItem({ to, onClick, children, className = '' }) {
 
   if (to) {
     return (
-      <Link to={to} role="menuitem" className={classes} onClick={onClick}>
+      <Link to={to} className={classes} onClick={onClick}>
         {children}
       </Link>
     );
   }
 
   return (
-    <button type="button" role="menuitem" className={classes} onClick={onClick}>
+    <button type="button" className={classes} onClick={onClick}>
       {children}
     </button>
   );

@@ -230,7 +230,10 @@ describe('editing a user', () => {
   const openEditor = async (user) => {
     const row = (await screen.findByText('Bilal Ahmed')).closest('tr');
     await user.click(within(row).getByRole('button', { name: /actions for bilal ahmed/i }));
-    await user.click(within(row).getByRole('menuitem', { name: /edit details/i }));
+    // A plain button, not a `menuitem`: the row's action dropdown is a
+    // disclosure rather than an ARIA menu, because it does not implement the
+    // arrow-key navigation `role="menu"` promises. See DropdownMenu.
+    await user.click(within(row).getByRole('button', { name: /edit details/i }));
   };
 
   it('prefills the form with the existing details', async () => {

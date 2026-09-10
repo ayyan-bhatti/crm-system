@@ -152,21 +152,39 @@ export default function ShopLayout() {
             </Link>
 
             {isSignedIn ? (
+              /*
+                THE GREETING STAYS ON THE HEADER, not only inside the menu.
+
+                Tidying the account controls behind one icon was right for the
+                six links that were cluttering this row — but the greeting is
+                not a control, it is the shopper's evidence that they are
+                signed in as themselves, on a site where a buyer session and a
+                staff session can be open in the same browser at once. Hiding
+                it behind a click meant the only way to confirm which account
+                you were shopping under was to open a menu. Shown from `lg` up,
+                where there is room; the icon alone carries it below that.
+              */
               <DropdownMenu
                 label="Your account"
-                triggerClassName={shopIconLink}
+                triggerClassName={`${shopIconLink} lg:flex lg:items-center lg:gap-2 lg:px-3`}
                 trigger={
                   <>
-                    <svg viewBox="0 0 20 20" className="h-[19px] w-[19px] fill-current" aria-hidden="true">
+                    <svg viewBox="0 0 20 20" className="h-[19px] w-[19px] shrink-0 fill-current" aria-hidden="true">
                       <path d="M10 10a3.5 3.5 0 100-7 3.5 3.5 0 000 7zm0 1.8c-3.4 0-6.2 1.8-6.2 4v1.4h12.4V15.8c0-2.2-2.8-4-6.2-4z" />
                     </svg>
+                    <span className="hidden max-w-28 truncate text-sm font-medium lg:inline">
+                      Hey, {buyer.name.split(' ')[0]}
+                    </span>
                     {messageCount > 0 && <CountDot value={messageCount} />}
                   </>
                 }
               >
                 {(close) => (
                   <>
-                    <p className="truncate border-b border-hairline px-3 pb-2 pt-1 text-sm font-medium text-ink">
+                    {/* Only below `lg`, where the trigger cannot show it —
+                        two copies on screen at once would be one greeting too
+                        many, and would make any lookup for it ambiguous. */}
+                    <p className="truncate border-b border-hairline px-3 pb-2 pt-1 text-sm font-medium text-ink lg:hidden">
                       Hey, {buyer.name.split(' ')[0]}
                     </p>
                     <MenuItem to="/account/orders" onClick={close}>

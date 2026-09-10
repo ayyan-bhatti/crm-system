@@ -86,6 +86,13 @@ test.describe('Authentication', () => {
   test('signs out and clears the session', async ({ page, context }) => {
     await signIn(page);
 
+    /*
+     * Sign out lives inside the header's account menu now, rather than being
+     * a naked button in the sidebar. The extra click is the real interaction
+     * path a person takes — what this test proves (the session is revoked and
+     * the cookie is gone) is unchanged below.
+     */
+    await page.getByRole('button', { name: /account menu/i }).click();
     await page.getByRole('button', { name: /sign out|log ?out/i }).click();
     await expect(page).toHaveURL(/\/crm\/login/);
 

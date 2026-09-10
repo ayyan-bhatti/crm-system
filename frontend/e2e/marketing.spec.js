@@ -121,7 +121,13 @@ test.describe('Marketing contacts', () => {
     await signIn(page, REP);
 
     await page.goto('/crm/contacts');
-    await expect(page.getByRole('heading', { name: /marketing contacts/i })).toBeVisible();
+    /*
+     * The page title is "Contacts" now, with "Marketing" carried by the
+     * eyebrow above it rather than crammed into the heading — the same
+     * section/title split every other CRM screen uses. What this test is
+     * actually about is the two assertions below it.
+     */
+    await expect(page.getByRole('heading', { name: /^contacts$/i })).toBeVisible();
 
     await expect(page.getByRole('button', { name: /export to excel/i })).toHaveCount(0);
     // ...and no campaigns section at all: a bulk send is not a rep's decision.
@@ -179,7 +185,15 @@ test.describe('Building and sending a campaign', () => {
 
     // Write the copy by hand — the AI path has no key in the e2e environment
     // and would take its documented template, which is not what is under test.
-    await page.getByLabel(/^subject$/i).fill('How are things?');
+    /*
+     * NOT `/^subject$/i`. The subject line is a required field now, and
+     * `Field` deliberately appends an sr-only "(Required)" to a required
+     * label — an asterisk alone announces nothing, which is a decision
+     * common.test.jsx pins on purpose. That text is part of the accessible
+     * name, so an end-anchored match can never find a required field.
+     * Anchored at the start only, which is still unambiguous here.
+     */
+    await page.getByLabel(/^subject/i).fill('How are things?');
     await page.getByLabel(/email body/i).fill('Hi {{name}}, just checking in on you.');
 
     await page.getByRole('button', { name: /save as draft/i }).click();

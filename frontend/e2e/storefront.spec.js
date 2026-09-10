@@ -273,6 +273,9 @@ test.describe('Buyer registration and session', () => {
     await page.reload();
     await expect(page.getByText(new RegExp(`hey, ${BUYER.name.split(' ')[0]}`, 'i'))).toBeVisible();
 
+    // Sign out sits inside the header's account menu now — one more click,
+    // the same guarantee asserted afterwards.
+    await page.getByRole('button', { name: /your account/i }).click();
     await page.getByRole('button', { name: /sign out/i }).click();
     /*
      * Scoped to the HEADER, because the footer has a "Sign in" link too.
