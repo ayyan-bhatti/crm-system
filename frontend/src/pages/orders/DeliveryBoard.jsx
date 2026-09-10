@@ -111,12 +111,19 @@ export default function DeliveryBoard() {
         day say "2 overdue" above three red rows.
       */}
       {summary && (
-        <div className="bento-grid stagger-children mb-5">
-          {/* Overdue gets the wide tile — it is the one number on this board
-              that means something already went wrong, not just "coming up". */}
-          <div className="bento-lg">
-            <Tile label="Overdue" value={summary.overdue} tone="critical" />
-          </div>
+        /*
+          FOUR EVEN TILES, not a bento with a wide one.
+
+          Overdue was given a two-column tile on the argument that it is the
+          one number here meaning something already went wrong. The argument
+          was fine; the arithmetic was not. Five cells across a four-column
+          grid wraps, so the row rendered 3 then 1 — a ragged stack that reads
+          as a broken layout rather than as emphasis, which is the exact same
+          way the dashboard's stat row was failing. Overdue is emphasised by
+          being first and by wearing the critical tone.
+        */
+        <div className="stagger-children mb-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <Tile label="Overdue" value={summary.overdue} tone="critical" />
           <Tile label="Out for delivery" value={summary.outForDelivery} tone="warning" />
           <Tile label="Due today or tomorrow" value={summary.dueSoon} tone="warning" />
           <Tile label="Express" value={summary.express} tone="brand" />
@@ -234,13 +241,21 @@ function DeliveryCard({ order, busy, onAdvance }) {
       </dl>
 
       {/*
-        One button, and it names the next stage rather than saying "Advance".
-        Somebody scanning a queue should not have to remember what comes after
-        "At the warehouse". It is the page's only filled control, because
-        advancing a parcel is the only thing this screen is for.
+        One button, and it names the next stage rather than saying "Advance" —
+        somebody scanning a queue should not have to remember what comes after
+        "At the warehouse".
+
+        FILLED ONLY ON A PARCEL THAT IS ACTUALLY URGENT. Every card carried the
+        orange fill, on the reasoning that advancing a parcel is the only thing
+        this screen is for. That is true of one card and false of the screen: a
+        board of twenty became twenty identical orange bars, which is precisely
+        how an accent stops meaning anything. Filling only the overdue and
+        due-now cards puts the colour back to work — it marks the parcel to
+        deal with first, which is the whole point of a queue that is ranked.
       */}
       {next && (
         <Button
+          variant={urgency.level === 'overdue' || urgency.level === 'tomorrow' ? 'primary' : 'secondary'}
           className="mt-4 w-full"
           loading={busy}
           loadingLabel="Updating…"
