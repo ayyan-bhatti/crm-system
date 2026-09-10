@@ -109,9 +109,22 @@ const env = {
    */
   appUrlConfigured: Boolean(process.env.APP_URL || process.env.CLIENT_ORIGIN),
 
-  /** console (default) | webhook — see services/mailer.js. */
+  /** console (default) | brevo | webhook — see services/mailer.js. */
   mailTransport: process.env.MAIL_TRANSPORT || 'console',
   mailWebhookUrl: process.env.MAIL_WEBHOOK_URL || '',
+
+  /**
+   * Brevo's API key, for `MAIL_TRANSPORT=brevo`.
+   *
+   * A named transport rather than the generic webhook one, for the same reason
+   * Twilio is named in services/smsClient.js: Brevo authenticates with its own
+   * `api-key` header rather than `Authorization`, and wants a nested
+   * `{ sender, to: [...] }` body rather than the flat `{ to, subject, text }`
+   * the webhook transport posts. Pointing MAIL_WEBHOOK_URL at Brevo therefore
+   * cannot work, and a setting that looks like it should is worse than one
+   * that is honestly absent.
+   */
+  brevoApiKey: process.env.BREVO_API_KEY || '',
 
   /**
    * Sent as the `Authorization` header on the webhook POST, verbatim.

@@ -250,10 +250,21 @@ async function recordOutcome({
  */
 function channelStatus() {
   return {
+    /*
+     * Asked of the mailer, not of `process.env`.
+     *
+     * This used to read MAIL_TRANSPORT directly and call anything that was not
+     * `console` live — which reported a live email channel for
+     * `MAIL_TRANSPORT=brevo` with no API key, or `webhook` with no URL. Both
+     * are deployments that send nothing, and both would have shown the
+     * campaign builder a green channel, which is the precise failure the
+     * comment above sets out to prevent. The mailer knows whether its
+     * credentials are present; the environment only knows what was asked for.
+     */
     email: {
       available: true,
-      transport: process.env.MAIL_TRANSPORT || 'console',
-      live: (process.env.MAIL_TRANSPORT || 'console') !== 'console',
+      transport: mailer.activeTransport(),
+      live: mailer.isConfigured(),
     },
     sms: {
       available: true,
